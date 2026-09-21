@@ -95,7 +95,7 @@ def main():
                     v = (sim ** P_POW) * tanimoto(f, g)
                     if v > a_best: a_best = v
             e = espec.get(s, 0.0)
-            scored.append((max(a_best, 0.6 * e), s))
+            scored.append((max(a_best, e), s))
         scored.sort(reverse=True)
         seen, out = set(), []
         for _, s in scored:
