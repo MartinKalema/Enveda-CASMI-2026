@@ -53,3 +53,17 @@
     visibility changes). Review + commit their files before use.
 20. Nothing public without asking. Winners must open-source (MIT) at payout;
     that decision belongs to the human, at that time.
+
+## Validation discipline (v4 post-mortem, LB 0.013)
+21. n=30 single-seed disjoint validation is UNRELIABLE. Same cosine channel
+    scored MRR 0.099 (seed 0, v1 split) vs 0.002 (seed 3, v4 split) - 50x
+    swing from split noise alone. v4's "analog 30x cosine" was relative order
+    on an uncalibrated split and did not transfer (LB 0.013).
+22. Always include a known-behavior anchor (v0-cosine) in every validation run.
+    If the anchor's score differs >2x from its LB (0.088), the split is
+    unrepresentative - distrust all relative orderings from it.
+23. Validate with n>=100 across >=3 seeds before spending a submission.
+    One split, one seed, n=30 is how v4 burned a sub for 0.013.
+24. New channels replace the backbone ONLY after beating the anchor on a
+    calibrated split. Entropy never beat cosine on a calibrated split;
+    it replaced it on an uncalibrated one.
