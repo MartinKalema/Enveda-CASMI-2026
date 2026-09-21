@@ -1,0 +1,17 @@
+[project]
+name = "enveda-casmi26-molecule-id"
+version = "0.1.0"
+description = "Enveda CASMI 2026 - Molecule ID From Mass Spectra"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.26",
+  "pandas>=2.0",
+  "pyarrow>=14",
+]
+
+[dependency-groups]
+dev = []
+
+[tool.uv]
+package = false

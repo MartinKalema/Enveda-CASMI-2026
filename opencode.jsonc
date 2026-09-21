@@ -1,0 +1,34 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "servers": {
+      // Option A: Official Kaggle remote MCP - headless via KGAT token, no OAuth UI
+      // Get token: https://www.kaggle.com/settings/account > Generate New Token > Copy (starts with KGAT)
+      // Set env: export KAGGLE_TOKEN="KGAT_xxx"
+      "kaggle-official": {
+        "type": "remote",
+        "url": "https://www.kaggle.com/mcp",
+        "oauth": false,
+        "headers": {
+          "Authorization": "Bearer {env:KAGGLE_TOKEN}"
+        }
+      },
+      // Option B: Community local MCP - headless via classic Kaggle API key (kaggle.json)
+      // Get creds: https://www.kaggle.com/settings/account > Create New API Token -> kaggle.json
+      // Set env: export KAGGLE_USERNAME="..." ; export KAGGLE_KEY="..."
+      // Covers: competitions list/download/submit, datasets, kernels, models
+      "kaggle-local": {
+        "type": "local",
+        "command": ["uvx", "mcp-server-kaggle"],
+        "environment": {
+          "KAGGLE_USERNAME": "{env:KAGGLE_USERNAME}",
+          "KAGGLE_KEY": "{env:KAGGLE_KEY}"
+        }
+      }
+    }
+  },
+  "permissions": [
+    { "action": "kaggle-official_*", "resource": "*", "effect": "allow" },
+    { "action": "kaggle-local_*", "resource": "*", "effect": "allow" }
+  ]
+}

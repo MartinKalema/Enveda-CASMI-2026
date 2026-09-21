@@ -1,0 +1,20 @@
+# Data (2.8GB train.parquet lives on Kaggle competition dataset + local only)
+data/
+*.parquet
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# macOS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Secrets - never commit
+.kaggle/
+kaggle.json
+access_token
+.env
