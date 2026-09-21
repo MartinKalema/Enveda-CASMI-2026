@@ -67,3 +67,15 @@
 24. New channels replace the backbone ONLY after beating the anchor on a
     calibrated split. Entropy never beat cosine on a calibrated split;
     it replaced it on an uncalibrated one.
+
+## Hybrid discipline (v5 calibration, 3 seeds x 50)
+25. Disjoint protocol measures NOVEL-structure skill only - and hidden test is
+    MIXED knowns + novels (v0/v3 prove knowns score). Local ~0.00 does not
+    contradict LB 0.088; they measure different subpopulations. Never infer
+    "channel X is worthless" from disjoint zeros alone.
+26. Never replace a proven floor channel. v4 swapped v0-cosine top-5 for
+    entropy and fell 0.095 -> 0.013. New channels may only ADD slots below
+    the proven top-5, never take them. (v5 design: cosine 1-5, analog 6-25.)
+27. Seed-0 v1 split (MRR 0.099) vs seeds 3/10/11/12 (~0.000): same protocol,
+    50x swing. n=30-50 single seed cannot rank channels. n>=100 x >=3 seeds,
+    anchor-gated, or it didn't happen.
