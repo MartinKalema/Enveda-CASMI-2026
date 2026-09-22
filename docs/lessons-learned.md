@@ -90,3 +90,11 @@
     an absolute predictor. And a disjoint run that leaves truth spectra in
     the pool scores 1.000 - always exclude held groups from BOTH candidates
     AND scoring spectra (v7 first disjoint run leaked exactly this way).
+
+## Tooling discipline
+30. Never pipe validation output through `tail`: it silently eats seeds.
+    Seed 31's result was lost to `| tail -n 4`; rerun cost 20 minutes.
+31. `python -c "import pkg.mod"` executes the module: `if __name__ ==
+    "__main__"` guards fire and validation runs TWICE (default seed + yours).
+    Import the function only (`from pkg.mod import run`), or guard with
+    `if __name__ == "__main__"` awareness.
