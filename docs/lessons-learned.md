@@ -79,3 +79,14 @@
 27. Seed-0 v1 split (MRR 0.099) vs seeds 3/10/11/12 (~0.000): same protocol,
     50x swing. n=30-50 single seed cannot rank channels. n>=100 x >=3 seeds,
     anchor-gated, or it didn't happen.
+
+## Evidence over authority (v7 floor validation)
+28. Entropy similarity is DEAD on our data, three strikes: retrieval-style
+    0.527 vs cosine 0.970 (truth pooled), disjoint weak, v4 LB 0.013 after
+    replacing cosine with it. The survey's "entropy > cosine" does not
+    transfer (different cleaning/intensity powers). Drop it; stop retrying.
+29. Pooled-truth retrieval saturates (~0.97): near-duplicate spectra always
+    match. Useful ONLY for channel comparison (cosine >> entropy), never as
+    an absolute predictor. And a disjoint run that leaves truth spectra in
+    the pool scores 1.000 - always exclude held groups from BOTH candidates
+    AND scoring spectra (v7 first disjoint run leaked exactly this way).
