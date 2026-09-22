@@ -19,3 +19,5 @@ kaggle.json
 access_token
 .env
 /submission.csv
+datasets/**/*.pkl
+datasets/**/*.parquet
