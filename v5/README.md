@@ -1,4 +1,4 @@
-# v5: calibrated multi-seed validation + hybrid channels (in progress)
+# v5: calibrated multi-seed validation + hybrid channels (submitted, pending)
 
 Plain English: v4 taught us single-seed validation lies. v5 scores every
 channel (cosine, entropy, analog, explained) on the SAME queries across
