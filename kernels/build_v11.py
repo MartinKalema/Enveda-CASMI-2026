@@ -34,7 +34,7 @@ mlp = ("import torch\nimport torch.nn as nn\n"
        + block(tsrc, "def meta_vec", ["class FpMLP"])
        + block(tsrc, "class FpMLP", ["def load_frame"]))
 
-frag = ("import pickle as _pk\n"
+frag = ("import pickle as _pk\nFRAG_TOL = 0.01\n"
         + block(f7, 'AD = {"[M+H]+', ["def neutral_mass"])
         + block(f7, "def frag_match", ["def main("]))
 
