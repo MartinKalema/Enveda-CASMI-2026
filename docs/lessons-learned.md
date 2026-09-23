@@ -98,3 +98,10 @@
     "__main__"` guards fire and validation runs TWICE (default seed + yours).
     Import the function only (`from pkg.mod import run`), or guard with
     `if __name__ == "__main__"` awareness.
+
+## Tempo discipline (wasted 2026-09-22)
+32. Never idle on a PENDING score. Submissions score on Kaggle's clock while
+    builds run on ours - the two proceed in parallel or a day dies. Always
+    have the next version training/building while the last one queues.
+    Fills plateaued 0.093-0.095 across FOUR versions (v3/v5/v6/v7) before
+    anyone admitted the floor must change.
