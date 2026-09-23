@@ -29,7 +29,7 @@ ble = ble.replace(f'PROJECT = "{P}"', 'PROJECT = "."  # unused in kernel')
 
 mlp = ("import torch\nimport torch.nn as nn\n"
        + block(src, "BIN_W, MZ_MAX", ["ADDUCTS"])
-       + block(src, "ADDUCTS = [", ["def bin_spectrum"])
+       + block(src, "ADDUCTS = [", ["def meta_vec"])
        + block(src, "def bin_spectrum", ["def meta_vec"])
        + block(src, "def meta_vec", ["class FpMLP"])
        + block(src, "class FpMLP", ["def load_frame"]))
