@@ -1,0 +1,76 @@
+device mps
+pool 2414953 vdis 124644 structures pool=
+pool_structures 263674
+subfrag library loaded: 28939
+train 150000 q_pooled 800 q_dis 800
+featurizing train...
+featurizing queries...
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+/Users/martin/Desktop/enveda-casmi26-molecule-id/v-fpnet/train_fpnet.py:419: UserWarning: Converting a tensor with requires_grad=True to a scalar may lead to unexpected behavior.
+Consider using tensor.detach() first. (Triggered internally at /Users/runner/work/pytorch/pytorch/torch/csrc/autograd/generated/python_variable_methods.cpp:821.)
+  tot += float(loss)
+ep1 loss=3.6698 pooled@1/5/10=0.172/0.411/0.514 disjoint@1/5/10=0.158/0.394/0.522
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep2 loss=3.2578 pooled@1/5/10=0.211/0.441/0.559 disjoint@1/5/10=0.169/0.450/0.568
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep3 loss=3.0254 pooled@1/5/10=0.230/0.489/0.588 disjoint@1/5/10=0.180/0.463/0.598
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep4 loss=2.8495 pooled@1/5/10=0.245/0.500/0.604 disjoint@1/5/10=0.196/0.487/0.614
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep5 loss=2.6977 pooled@1/5/10=0.242/0.507/0.621 disjoint@1/5/10=0.206/0.484/0.620
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep6 loss=2.5532 pooled@1/5/10=0.256/0.531/0.627 disjoint@1/5/10=0.230/0.522/0.644
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep7 loss=2.4187 pooled@1/5/10=0.263/0.545/0.659 disjoint@1/5/10=0.236/0.525/0.647
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep8 loss=2.2939 pooled@1/5/10=0.273/0.535/0.649 disjoint@1/5/10=0.260/0.546/0.659
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep9 loss=2.1802 pooled@1/5/10=0.274/0.539/0.662 disjoint@1/5/10=0.236/0.545/0.655
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep10 loss=2.0767 pooled@1/5/10=0.289/0.547/0.647 disjoint@1/5/10=0.247/0.537/0.659
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep11 loss=1.9839 pooled@1/5/10=0.281/0.556/0.657 disjoint@1/5/10=0.260/0.542/0.652
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep12 loss=1.9080 pooled@1/5/10=0.289/0.556/0.672 disjoint@1/5/10=0.255/0.557/0.659
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep13 loss=1.8460 pooled@1/5/10=0.284/0.554/0.674 disjoint@1/5/10=0.251/0.556/0.664
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep14 loss=1.8025 pooled@1/5/10=0.289/0.559/0.680 disjoint@1/5/10=0.258/0.549/0.661
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep15 loss=1.7741 pooled@1/5/10=0.290/0.554/0.677 disjoint@1/5/10=0.261/0.546/0.659
+  decoy 0/150000
+  decoy 50000/150000
+  decoy 100000/150000
+ep16 loss=1.7544 pooled@1/5/10=0.292/0.559/0.682 disjoint@1/5/10=0.266/0.549/0.659
+BEST pooled@5=0.559 ep14 disjoint@1/5/10=0.258/0.549/0.661
+EXIT:0
