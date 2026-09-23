@@ -42,7 +42,7 @@ class FpMLP(nn.Module):
 
 
 def load_frame(n_cap=None, seed=0):
-    cols = ["normalized_smiles", "inchikey14", "adduct", "precursor_mz",
+    cols = ["normalized_smiles", "inchikey14", "molecular_formula", "adduct", "precursor_mz",
             "ms2_mzs", "ms2_normalized_intensities", "collision_energy_ev"]
     tr = pd.read_parquet(f"{PROJECT}/data/train.parquet", columns=cols)
     fp = pd.read_parquet(f"{PROJECT}/data/fingerprints.parquet")
