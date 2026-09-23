@@ -92,5 +92,15 @@ def main():
             print(f"held={held} {name}={np.mean(rr):.3f}", flush=True)
 
 
+    feats = ["cos", "ent", "ana", "mass_err", "log_prior", "t_top1"]
+    final = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+                                           max_leaf_nodes=15, l2_regularization=10.0)
+    fall = feat.copy()
+    final.fit(fall[feats], fall["y"])
+    with open(f"{PROJECT}/v8/gbm25.pkl", "wb") as fh:
+        pickle.dump({"model": final, "feats": feats}, fh)
+    print("saved v8/gbm25.pkl", flush=True)
+
+
 if __name__ == "__main__":
     main()
