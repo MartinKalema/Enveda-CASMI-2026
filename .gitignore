@@ -1,5 +1,6 @@
 # Data (2.8GB train.parquet lives on Kaggle competition dataset + local only)
 data/
+data-clean/
 *.parquet
 
 # Python
