@@ -50,14 +50,18 @@ new_paths = ('import glob as _glob\n'
 assert old_paths in run, "paths block not found"
 run = run.replace(old_paths, new_paths)
 
-for _name in ("ble", "run"):
-    s = {"ble": ble, "run": run}[_name]
+for _name in ("ble", "mlp", "run"):
+    s = {"ble": ble, "mlp": mlp, "run": run}[_name]
     s = re.sub(r'\nif __name__ == "__main__":\n(?:    .*\n?)+', '\n', s)
     assert "__main__" not in s, _name
     if _name == "ble":
         ble = s
+    elif _name == "mlp":
+        mlp = s
     else:
         run = s + "\nmain()\n"
+assert "def main(" not in mlp, "training main leaked into mlp cell"
+assert "def load_frame" not in mlp, "load_frame leaked into mlp cell"
 
 for _name, _s in [("sub", sub), ("ble", ble), ("mlp", mlp), ("run", run)]:
     compile(_s, _name, "exec")
