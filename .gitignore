@@ -22,3 +22,7 @@ access_token
 /submission.csv
 datasets/**/*.pkl
 datasets/**/*.parquet
+*.pt
+v-eng/cache/
+*.npy
+data-clean/
