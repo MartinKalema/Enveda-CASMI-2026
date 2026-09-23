@@ -26,6 +26,7 @@ ble = ble.replace("from v1.subformula import ADDUCT_DELTA\n", "")
 ble = ble.replace(f'PROJECT = "{P}"', 'PROJECT = "."  # unused in kernel')
 # submit_v9 inlines channels via local aliases; drop versioned imports
 run = re.sub(r"^from v\d+\.\w+ import .*\n", "", run, flags=re.M)
+run = run.replace("from v4.channels import entropy_similarity, tanimoto\n", "")
 run = run.replace("from v4.channels import entropy_similarity as _es\n", "")
 run = run.replace("from v4.channels import entropy_similarity as _es2\n", "")
 run = run.replace("from v4.channels import tanimoto as _tn\n", "")

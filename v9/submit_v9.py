@@ -5,6 +5,7 @@ import numpy as np, pandas as pd, os, pickle
 from bisect import bisect_left, bisect_right
 from v1.subformula import ADDUCT_DELTA
 from v2.blend import cosine
+from v4.channels import entropy_similarity, tanimoto
 
 PROJECT = "/Users/martin/Desktop/enveda-casmi26-molecule-id"
 IN = os.environ.get("CASMI_IN", f"{PROJECT}/data")
@@ -101,13 +102,11 @@ def main():
         espec = {}
         for _, r in spectra.iterrows():
             for _, t in twin.iterrows():
-                from v4.channels import entropy_similarity as _es
-                e = _es(r["ms2_mzs"], r["ms2_normalized_intensities"],
+                e = entropy_similarity(r["ms2_mzs"], r["ms2_normalized_intensities"],
                         t["ms2_mzs"], t["ms2_normalized_intensities"])
                 k = t["normalized_smiles"]
                 if e > espec.get(k, 0):
                     espec[k] = e
-        from v4.channels import tanimoto as _tn
         tneu = tsamp["neutral"].values
         dm = np.abs(tneu - qmass)
         _pool = tsamp[dm <= 200.0]
@@ -117,8 +116,7 @@ def main():
         for _, t in _pool.iterrows():
             _b = 0.0
             for qmz, qit in qspecs:
-                from v4.channels import entropy_similarity as _es2
-                _e = _es2(qmz, qit, t["ms2_mzs"], t["ms2_normalized_intensities"])
+                _e = entropy_similarity(qmz, qit, t["ms2_mzs"], t["ms2_normalized_intensities"])
                 if _e > _b:
                     _b = _e
             if _b > 0.05 and t["normalized_smiles"] in tfp:
@@ -134,14 +132,14 @@ def main():
             _ab = 0.0
             if f is not None:
                 for _sim, _g in _top:
-                    _v = (_sim ** 3.0) * _tn(f > 0.5, _g > 0.5)
+                    _v = (_sim ** 3.0) * tanimoto(f > 0.5, _g > 0.5)
                     if _v > _ab:
                         _ab = _v
             _cm = _smas.get(s, np.nan)
             _rows.append([_cspec.get(s, 0.0), espec.get(s, 0.0), _ab,
                           abs(_cm - qmass) / qmass if _cm == _cm else 1.0,
                           float(np.log1p(_fprior.get(_sform.get(s, ""), 0))),
-                          max([_tn(f > 0.5, _g > 0.5) for _, _g in _top] or [0.0])
+                          max([tanimoto(f > 0.5, _g > 0.5) for _, _g in _top] or [0.0])
                           if f is not None else 0.0])
             _order.append(s)
         _proba = ranker.predict_proba(np.array(_rows, dtype=np.float32))[:, 1]
