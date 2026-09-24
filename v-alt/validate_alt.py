@@ -121,7 +121,7 @@ def run_seed(train, seed, n_query=40):
                     if c > best:
                         best = c
             csco[s] = best
-        crank = 1 + sum(1 for s in cands if csco[s] > csco[qs])
+        crank = 1 + sum(1 for s in cands if csco.get(s, 0.0) > csco.get(qs, -1.0))
         res["cos"].append(1 / crank if crank <= 25 else 0.0)
         if (qi + 1) % 10 == 0:
             print(f"seed {seed} {qi+1}/{n_query} "
