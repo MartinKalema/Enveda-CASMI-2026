@@ -1,0 +1,1281 @@
+Breaking the Modality Barrier: Generative Modeling for Accurate
+Molecule Retrieval from Mass Spectra
+Yiwen Zhang1,2†, Keyan Ding2†*, Yihang Wu1, Xiang Zhuang 3, Yi Yang 2, Qiang Zhang4, Huajun
+Chen2,3*
+1The Polytechnic Institute, Zhejiang University
+2ZJU-Hangzhou Global Scientific and Technological Innovation Center, Zhejiang University
+3College of Computer Science and Technology, Zhejiang University
+4ZJU-UIUC Institute, Zhejiang University
+{22460360, dingkeyan, wuyihang, zhuangxiang, y yi, qiang.zhang.cs, huajunsir}@zju.edu.cn
+Abstract
+Retrieving molecular structures from tandem mass spectra
+is a crucial step in rapid compound identification. Exist-
+ing retrieval methods, such as traditional mass spectral li-
+brary matching, suffer from limited spectral library cover-
+age, while recent cross-modal representation learning frame-
+works often encounter modality misalignment, resulting in
+suboptimal retrieval accuracy and generalization. To address
+these limitations, we propose GLMR, a Generative Lan-
+guage Model-based Retrieval framework that mitigates the
+cross-modal misalignment through a two-stage process. In
+the pre-retrieval stage, a contrastive learning-based model
+identifies top candidate molecules as contextual priors for
+the input mass spectrum. In the generative retrieval stage,
+these candidate molecules are integrated with the input mass
+spectrum to guide a generative model in producing refined
+molecular structures, which are then used to re-rank the
+candidates based on molecular similarity. Experiments on
+both MassSpecGym and the proposed MassRET-20k dataset
+demonstrate that GLMR significantly outperforms existing
+methods, achieving over 40% improvement in top-1 accuracy
+and exhibiting strong generalizability.
+1 Introduction
+Tandem mass spectrometry (MS/MS) is one of the most im-
+portant analytical tools for molecular structure identifica-
+tion (Qiu et al. 2023). In this technique, target molecules are
+ionized and undergo a multi-stage fragmentation process,
+generating a set of fragment-ion signals with specific mass-
+to-charge ratios (m/z). These signals from the fragment mass
+spectrum reflect the internal chemical bond cleavage pat-
+terns and the functional group distribution characteristics of
+the molecule. In fields such as metabolomics, natural prod-
+ucts discovery, and drug development, the accurate retrieval
+of molecular structures from MS/MS spectra is a fundamen-
+tal step toward rapid compound identification (Escher, Sta-
+pleton, and Schymanski 2020). Herein, theMS-to-Molecule
+*Corresponding author
+†These authors contributed equally to this work.
+Copyright © 2026, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+Retrievalrefers to the process of identifying the most match-
+ing molecular structure in a large molecule database based
+on the input mass spectrum. This retrieval helps researchers
+quickly locate target compounds (Prudent et al. 2021), elimi-
+nating the need for expensive and time-consuming structural
+analysis experiments (Kind et al. 2018).
+However, inferring molecular structures from MS/MS
+spectra remains a highly challenging problem (Keifer and
+Jarrold 2017). Firstly, different molecules can generate
+highly similar spectra, while the same molecule may yield
+substantially different spectral profiles under varying exper-
+imental conditions (El-Aneed, Cohen, and Banoub 2009).
+Secondly, real-world spectral data often contain noise, miss-
+ing peaks, or interfering signals (Wang, Li, and Stoica 2005).
+Conventional approaches primarily employ spectral library
+matching (Stein and Scott 1994; Kwok, Venkataraghavan,
+and McLafferty 1973; Wang et al. 2020; Qin et al. 2021),
+as shown in Figure 1(a), where the experimental spectrum
+is compared against the reference spectrum of characterized
+compounds in the databases such as GNPS (Wang et al.
+2016), HMDB (Wishart et al. 2022), MoNA (Vaniya et al.
+2019) and MassBank (Horai et al. 2010). Although demon-
+strating reasonable performance for well-documented com-
+pounds, these methods exhibit significant limitations due to
+the restricted coverage of the spectral library (Griss 2016).
+Recent advances (Young et al. 2024; Ji et al. 2024; Li et al.
+2024) have demonstrated the effectiveness of deep learning
+approaches in directly learning the intricate relationships be-
+tween spectral patterns and molecular structures. The most
+prominent approaches (Goldman et al. 2023b; Kalia et al.
+2025) leverage cross-modal representation learning frame-
+works, as shown in Figure 1(b), where both mass spec-
+tra and molecular structures (typically represented as either
+SMILES strings or molecular graphs) are encoded into a
+potentially aligned latent space. This paradigm enables effi-
+cient MS-to-molecule prediction and retrieval. Despite these
+advancements, a key challenge persists:modality misalign-
+ment. Mass spectra and molecular structures belong to fun-
+damentally different modalities: the former describes physi-
+cal fragmentation behavior, while the latter represents chem-
+ical structure information. The gap between them makes
+arXiv:2511.06259v1  [cs.LG]  9 Nov 2025
+···
+···
+(a) Retrieval by Spectral Library Matching
+Spec
+Input
+Spec Mol
+Embedding Mol(b) Retrieval by Cross-modal 
+      Representation Alignment
+(c) Retrieval by Context-aware Generation (Ours)
+Spec-Spec
+Similarity
+Molecular
+Database
+Spectral
+Library 
+Spec-Mol
+Similarity
+Spec
+Output
+Embedding
+Input Output
+Spec
+Mol
+Generator
+···
+1. Pre-Retrieval
+Mol-Mol
+Similarity
+Spec-Mol
+Similarity
+2. Generative Retrieval
+Input
+Output
+Contexts
+EmbeddingEmbedding
+Molecular
+Database
+Figure 1: Illustration of the methods for MS-to-Molecule re-
+trieval. (a)Spectral library matching method, where the
+input mass spectrum is compared against the reference MS
+of characterized compounds in a database. (b)Cross-modal
+representation alignment method, where both mass spec-
+tra and molecular structures are encoded into a potentially
+aligned latent space. (c)Our method, which builds upon
+cross-modal representation alignment, further incorporates
+a context-aware molecule generator for generative retrieval.
+it difficult to establish a well-aligned representation space.
+As a result, the current state-of-the-art model JESTR (Kalia
+et al. 2025) demonstrates limited retrieval performance, with
+top-1 accuracy below 20% in the MassSpecGym bench-
+mark (Bushuiev et al. 2024).
+To address this, we propose a generative framework for
+MS-to-molecule retrieval, termedGLMR, as illustrated in
+Figure 1(c). The core of our approach lies in leveraging
+acontext-aware generative language modelto bridge the
+modality gap by generating a molecular structure that is
+aligned with the input mass spectrum, thereby transform-
+ing the cross-modal retrieval into a more tractable unimodal
+retrieval. Specifically, our method proceeds in two stages:
+(1)Pre-Retrieval: A molecule encoder and a spectral en-
+coder are first trained using contrastive learning to retrieve a
+set of top-ranked candidate molecules, which serve as con-
+textual priors for the input mass spectrum. (2)Generative
+Retrieval: These candidates, together with spectral features,
+guide a generative language model to generate a molecular
+structure aligned with the input mass spectrum. The gener-
+ated molecule is then compared with the candidate set via
+molecular similarity, yielding the final retrieval results.
+To validate the effectiveness of GLMR, we conduct eval-
+uations not only on MassSpecGym (Bushuiev et al. 2024)
+but also introduce an enhanced MS-to-molecule retrieval
+dataset, namedMassRET-20k, which includes richer spec-
+tral variations, providing more challenging and realistic
+cases. Experimental results on both datasets demonstrate
+that our method significantly outperforms existing methods.
+In summary, the main contributions of this study are as fol-
+lows:
+• We propose a novel MS-to-molecule retrieval framework
+based on generative language models. Our two-stage ap-
+proach (pre-retrieval and generative retrieval) effectively
+alleviates the cross-modal misalignment, improving re-
+trieval accuracy and robustness.
+• We construct an enhanced molecule retrieval evaluation
+dataset, enabling comprehensive evaluation of retrieval
+accuracy, robustness, and generalization.
+• Our method achieves over 40% improvement in top-1 ac-
+curacy over baseline methods, advancing this field by
+bridging the gap between mass spectra and molecular
+structures through generative modeling, enabling more
+accurate and spectral library-free compound identifica-
+tion.
+2 Related Works
+2.1 MS-to-Molecule Retrieval Methods
+Conventional MS-to-molecule retrieval methods primarily
+employ spectral library matching, where the input mass
+spectrum is compared against the reference mass spec-
+trum of known compounds. MASST (Wang et al. 2020)
+comprises a web-based system for searching the public
+data repository within the GNPS/MassIVE knowledge base
+and an analysis infrastructure for a single mass spec-
+trum. DLEAMSE (Qin et al. 2021) introduces a bioinfor-
+matics tool enabling rapid spectral retrieval across pub-
+lic repositories and spectral libraries. However, current
+approaches are fundamentally constrained by the limited
+availability of spectrum-molecule pairs, with retrieval per-
+formance bounded by spectral library coverage. Model-
+ing direct mappings between mass spectra and molecular
+structures through cross-modal representation learning has
+emerged as a promising alternative. Contrastive learning
+has become a prevalent strategy for achieving cross-modal
+alignment (Khosla et al. 2020). For example, MIST (Gold-
+man et al. 2023a) generates molecular fingerprints based
+on inferred chemical formulas and performs retrieval via
+vector similarity, while CMSSP (Chen et al. 2024) inte-
+grates molecular graph and fingerprint representations, map-
+ping both spectral and structural modalities into a shared la-
+tent space. JESTR (Kalia et al. 2025) further enhances con-
+trastive learning with a candidate molecule regularization
+strategy, and CSU-MS2 (Xie et al. 2025) improves spec-
+tral encoding through sinusoidal m/z embeddings and an en-
+hanced attention module, increasing model expressiveness.
+However, these methods often suffer from modality mis-
+alignment, resulting in suboptimal retrieval accuracy.
+2.2 MS-to-Molecule Retrieval Datasets
+Spectral libraries such as GNPS (Wang et al. 2016),
+MoNA (Vaniya et al. 2019), MassBank (Horai et al. 2010),
+and NIST (Lemmon et al. 2010) serve as foundational re-
+sources for MS-to-Molecule retrieval by providing exper-
+imentally acquired spectra paired with known molecular
+structures. However, these datasets often suffer from spec-
+tral noise, incomplete metadata, or licensing restrictions,
+which limit their utility for training and evaluating ma-
+chine learning models. Several standardized benchmarks
+such as MIST CANOPUS (Goldman et al. 2023b) and
+CASMI (Schymanski and Neumann 2013) have been pro-
+posed, but they are constrained by small size, potential
+data leakage, or high preprocessing complexity. Recently,
+MassSpecGym (Bushuiev et al. 2024) introduced a large-
+scale, cleaned, and normalized dataset comprising approx-
+imately 230k mass spectra, with structurally diverse train-
+validation-test splits based on MCES (Curchoe 2020) simi-
+larity, enabling more robust and reproducible evaluation of
+retrieval methods.
+3 Methodology
+The MS-to-molecule retrieval task aims to rank candidate
+molecules (from a chemical molecule database) based on
+a given mass spectrum. Formally, given an MS/MS spec-
+trum, the goal is to order a set of candidate molecules such
+that the correct molecule is positioned at the top (Bushuiev
+et al. 2024). We address this task through a two-stage re-
+trieval framework (Pre-retrieval and Generative retrieval), as
+illustrated in Figure 2.
+3.1 Pre-retrieval via Cross-modal Representation
+Alignment
+The first stage performs pre-retrieval by aligning molec-
+ular and spectral representations to pick a set of candi-
+date molecules. Specifically, we train a cross-modal align-
+ment model via contrastive learning. Following the prior
+work (Liu et al. 2023), we adopt ChemFormer (Irwin et al.
+2022) as the molecular encoderf m(Mol;γ), which is a
+BART (Lewis et al. 2019) variant pre-trained on the large-
+scale ZINC database containing billions of compounds (Ir-
+win and Shoichet 2005). Each input molecule is represented
+as an SMILES sequence, from which the encoder produces
+a sequence of token embeddings:
+Hm =f m(Mol;γ)∈R d.(1)
+A [CLS] token is prepended to the input sequence, and its
+final hidden state serves as the global molecular embedding
+Em =H m
+[CLS].
+For the spectral encoderf s(spectrum;η), we em-
+ploy a Transformer architecture with multi-head atten-
+tion (Vaswani et al. 2017), which allows the model to cap-
+ture complex relationships across different m/z and inten-
+sity dimensions. In contrast to the binning strategies used
+in previous studies (Kalia et al. 2025; Chen et al. 2024),
+we represent each mass spectrum as a sequence of tuples
+(m/z,intensity), where intensity values are normalized to the
+range(0,1]. This sequence is then encoded into a set of hid-
+den representations:
+Hs =f s(Spec;η)∈R d.(2)
+We apply average pooling over the dimension of sequence
+length to obtain a fixed-size representation of the mass spec-
+trum, i.e.,Es = 1
+T Hs, withTdenoting the number of spec-
+tral peaks.
+The training objective is to align molecular and spectral
+representations in a latent space. Following the CLIP frame-
+work (Radford et al. 2021), we optimize a dual-path Info-
+NCE loss that encourages mutual alignment between the
+two modalities. Given a batch of spectrum-molecule pairs
+B, for the molecule-to-MS alignment, we consider the pairs
+as the positive sampleEs
+i and constructNnegative samples
+Es
+j by applying random intensity perturbations to spectral
+peaks. This yields the molecule-to-MS lossL mol2ms. For
+the MS-to-molecule alignment, we use the pairs as the posi-
+tive sampleEm
+i and sampleMnegative examplesE m
+j from
+other molecules in the same batch, resulting in the MS-to-
+molecule lossL ms2mol. The final training lossL pre is com-
+puted as the average of these two components, defined as:
+Lmol2ms =− 1
+|B|
+|B|X
+i=1
+log exp( Em
+i·Es
+i
+τ )
+PN
+j=1 exp(
+Em
+i·Es
+j
+τ )
+,(3)
+Lms2mol =− 1
+|B|
+|B|X
+i=1
+log exp( Em
+i·Es
+i
+τ )
+PM
+j=1 exp(
+Es
+i·Em
+j
+τ )
+,(4)
+Lpre = 1
+2 (Lms2mol +Lmol2ms),(5)
+whereτis the temperature coefficient that controls the
+sharpness of the similarity distribution.
+After training, we use the learned encoders to retrieve can-
+didate molecules in a database based on the cosine similarity
+between the spectral embedding and each molecular embed-
+ding:
+R(Es,Em
+i ) = cos(Es,Em
+i ) = Es·Em
+i
+|Es|·|E m
+i|.(6)
+The top-Kmolecules with the highest similarity scores
+are selected as the output of the pre-retrieval stage, serv-
+ing as contextual priors to guide the generation of refined
+molecules in the next stage.
+3.2 Generative Retrieval via Context-aware
+Molecule Generation
+The second stage leverages a generative language model
+conditioned on both the input mass spectrum and the prior
+candidate molecules to produce refined molecular struc-
+tures. These generated structures are then used to re-rank the
+candidate molecules based on molecular similarity, yielding
+the top-ranked molecules as final retrieval results.
+To maintain architectural consistency with the molecular
+encoder, we employ the ChemFormer Decoder (Irwin et al.
+2022) for molecular generation. The input spectrum is en-
+coded asH s using the spectral encoderf s, while the top-
+Kcandidate molecules from the pre-retrieval stage are en-
+coded asHm
+K ={H m
+i}K
+i=1 using the molecular encoderfm,
+CLS
+Mol
+Encoder
+Spec
+Encoder
+···
+Molecules
+···
+MS/MS spectra
+···
+···
+···
+···
+Mean
+···
+Pre-retrieved Molecules
+Mol
+Encoder
+Mol
+Decoder
+Spec to Mol 
+Cross-Fusion
+Target 
+Molecule
+Generated
+ Molecule
+ℒgen
+Spec
+Encoder
+Final-retrieved Molecule
+ℒpre
+Spec-Mol
+Similarity
+Mol
+Encoder
+Mol-Mol
+Similarity
+Contrastive Loss
+Autoregressive Loss
+: Tuned Parameters : Frozen Parameters
+(a) (b) (c)
+(d)
+Mol
+Encoder
+Mol
+Database
+MS/MS spectrum
+···
+CLS
+Mean
+CLS
+CLS
+Figure 2: Overview of the proposed GLMR method. (a)Training process of modality alignment. We optimize a contrastive
+loss that encourages mutual alignment between the molecular and spectral modalities. (b)Inference process of pre-retrieval.
+We use the learned encoders to rank candidate molecules in the retrieval database. The top-Kmolecules with the highest
+similarity scores are selected as the output of the pre-retrieval stage. (c)Training process of generative language models.
+We leverage a generative language model conditioned on both the input mass spectrum and the prior candidate molecules to
+produce refined molecular structures. (d)Inference process of generative retrieval. We use the generated molecule to re-rank
+the pre-retrieved molecules based on molecular similarity.
+whereKdenotes the number of pre-retrieved molecules. To
+effectively integrate the spectral and molecular representa-
+tions, we introduce aCross-Fusionmodule, which employs
+cross-attention mechanisms to fuseHs andHm
+K. The result-
+ing fused embeddingHis defined as:
+Hca =f ca (Hs,Hm
+K;θ)(7)
+=Attn(Query(H s),Key(H m
+K))·Value(H m
+K),
+wheref ca denotes the cross-attention function parameterized
+byθ. The Attn function computes cross-attention weights
+using Query, Key, and Value matrices, which are linear
+transformations of the input embeddings. This module en-
+ables the model to selectively attend to informative molecu-
+lar candidates while conditioning on the input spectrum.
+During training, both the spectral encoder and molecular
+encoder are kept frozen to preserve the pre-trained cross-
+modal alignment learned in the pre-retrieval stage. Training
+focuses solely on the fusion module and the decoder. The
+generative modelf g(Hca;ϕ)autoregressively produces the
+target molecular structure in the form of a SMILES string
+y= (y 1,y 2,...,y Q)by maximizing the conditional likeli-
+hood of the ground-truth molecule given the fused represen-
+tation. The training objective is defined as:
+Lgen =− 1
+|B|·Q
+|B|X
+i=1
+QX
+q=1
+logP
+ 
+yi(q)|y i(<q),H ca
+i
+
+,(8)
+whereP
+ 
+yi(q)|y i(<q),H ca
+i
+
+is the conditional probability
+of tokenyi(q) at positionq, given the preceding tokensyi(<q)
+and the fused embeddingH ca
+i .Qis the target sequence
+length.
+After training, the model is employed to generate a refined
+molecule, which is then used to re-rank the pre-retrieved
+molecules based on molecular similarity. Specifically, the
+generated molecule is encoded asE m
++ , while the candidate
+molecules are encoded asE m
+i fori∈[1,K]. We calculate
+cosine similarity between the embeddings of the generated
+molecule and each candidate:
+R
+ 
+Em
++,Em
+i
+
+= cos
+ 
+Em
++,Em
+i
+
+= Em
++·Em
+i
+|Em
++|·|E m
+i|.(9)
+The candidate molecules are then re-ranked according to
+their similarity scores, producing the final output of the gen-
+erative retrieval stage.
+4 Experiments
+This section presents a comprehensive evaluation of the re-
+trieval performance of GLMR. We first detail the experimen-
+tal settings, including datasets, baselines, training configu-
+ration, and evaluation criteria. We then report performance
+on the MassSpecGym and MassRET-20k benchmarks, fol-
+lowed by analyses of modality alignment and generation
+ability. Lastly, we conduct an ablation study to quantify the
+contribution of each stage and assess the sensitivity to the
+number of pre-retrieved candidates.
+4.1 Experimental Settings
+DatasetsWe evaluate GLMR on two benchmark datasets:
+MassSpecGym (Bushuiev et al. 2024) and MassRET-20k.
+(1)MassSpecGymprovides two retrieval libraries for each
+MS/MS spectrum. The first is based on molecularweight
+inferred from the precursor m/z, and the second leverages
+chemicalformulamatching. (2) To better evaluate model
+performance under diverse experimental conditions, we con-
+struct a new benchmark dataset,MassRET-20k. To avoid
+data leakage, we exclude molecules that appear in the
+MassSpecGym training set, resulting in a clean evaluation
+Library Type Method Recall↑(%) MRR↑(%) MCES@1↓
+Recall@1 Recall@5 Recall@20
+Weight-based
+Retrieval Library
+Random 0.296 1.874 7.684 1.319 31.01
+DeepSets 1.117 4.049 13.459 3.923 25.47
+Fingerprint FFN 3.076 9.211 22.699 7.477 23.85
+DeepSets + Fourier features 9.028 21.081 38.898 15.679 20.87
+MIST 18.455 40.009 64.388 29.302 15.37
+JESTR 17.617 40.355 64.764 29.121 15.82
+GLMR (Ours)64.172 72.961 78.782 67.817 11.14
+Formula-based
+Retrieval Library
+Random 2.470 10.584 21.251 5.411 13.51
+DeepSets 4.699 12.355 29.289 9.901 13.12
+Fingerprint FFN 4.978 15.505 33.168 11.193 13.09
+DeepSets + Fourier features 10.104 22.015 40.681 16.967 13.01
+MIST 10.942 23.815 44.634 18.257 12.75
+JESTR 11.772 33.258 61.006 22.825 11.73
+GLMR (Ours)68.478 78.087 84.216 72.472 5.05
+Table 1: Retrieval Performance onMassSpecGym. The best results are in bold, and the results ranked second are underlined.
+set of approximately 20k spectrum-molecule pairs. Com-
+pared to the metadata of MassSpecGym, which includes
+only two ionization adducts, and where only 53% of the
+data provides normalized collision energy, resulting in in-
+complete data, our constructed dataset includes 12 ioniza-
+tion adducts, where all entries include normalized colli-
+sion energy. As a result, our dataset provides more compre-
+hensive information and more accurately reflects real-world
+scenarios. Furthermore, the same molecule exhibits differ-
+ent mass spectra under different ionization adducts, making
+MassRET-20k more challenging than MassSpecGym. More
+details of MassRET-20k are described in Appendix A.
+Training SetupOur model is trained in two stages using
+spectrum-molecule pairs from the MassSpecGym training
+set. In the pre-retrieval stage, we initialize the molecular en-
+coder with pre-trained ChemFormer weights and randomly
+initialize the spectral encoder. The model is trained for 300
+epochs using contrastive loss, with only the spectral encoder
+updated while the molecular encoder is frozen. In the gener-
+ative retrieval stage, we further initialize the decoder with
+pre-trained weights from ChemFormer and randomly ini-
+tialize the cross-fusion module. Training runs for 30 epochs
+with the encoders frozen, updating only the fusion module
+and decoder to generate molecules conditioned on spectral
+and contextual information. More training details are pro-
+vided in Appendix B.
+BaselinesWe compare GLMR against a range of base-
+lines spanning traditional and deep learning approaches
+for MS-to-molecule retrieval. These include Fingerprint
+FFN (Rumelhart et al. 1986), DeepSets (Zaheer et al.
+2017), DeepSets with Fourier features (Zaheer et al.
+2017), MIST (Goldman et al. 2023b), and JESTR (Kalia
+et al. 2025), the current state-of-the-art method for mass
+spectrum-based cross-modal molecular retrieval. Their
+methodological details are provided in the Appendix C.
+Evaluation MetricsWe employ three standard metrics
+to evaluate MS-to-molecule retrieval performance: (i)Re-
+call@Kmeasures the proportion of test samples for which
+the ground-truth molecule appears within the top-Kranked
+candidates. We report Recall@1, Recall@5, and Recall@20
+as percentages. (ii)MRR(Mean Reciprocal Rank) captures
+the average inverse rank of the first correct match, giving
+higher weight to models that rank the true molecule more
+highly. (iii)MCES@1(Maximum Common Edge Subgraph
+similarity at rank 1) evaluates structural similarity between
+the top-1 predicted molecule and the ground truth. More
+evaluation metric details are provided in Appendix D.
+4.2 Main Results
+Performance on MassSpecGymTable 1 presents the
+retrieval performance on the MassSpecGym benchmark.
+GLMR consistently outperforms all baseline methods across
+all metrics. On the weight-based and formula-based re-
+trieval tasks, GLMR achieves a remarkable improvement
+in Recall@1, 46% and 56% respectively, over the previous
+state-of-the-art method JESTR. The significant reduction in
+MCES@1 further demonstrates that the top-1 predictions
+from GLMR are structurally closer to the ground truth, even
+when the exact match is not retrieved. This performance
+leap stems from GLMR’s two-stage design, which decou-
+ples retrieval into pre-retrieval (cross-modal alignment) and
+generative retrieval (context-aware generation). While prior
+methods encode molecules and mass spectra into a po-
+tentially aligned latent space (similar to the pre-retrieval
+in GLMR), their cross-modal alignment capability remains
+limited. GLMR addresses this by generating a molecule con-
+ditioned on the input mass spectrum and pre-retrieved can-
+didates, thereby reframing the task as a unimodal retrieval
+process that effectively bridges the modality gap.
+Performance on MassRET-20kTable 2 shows the gener-
+alization ability of all models on the proposed MassRET-20k
+Library Type Method Recall↑(%) MRR↑(%) MCES@1↓
+Recall@1 Recall@5 Recall@20
+Weight-based
+Retrieval Library
+Random 0.330 1.864 7.605 1.329 30.61
+DeepSets 0.986 3.707 12.540 3.902 26.40
+Fingerprint FFN 3.733 12.379 25.705 8.898 22.48
+DeepSets + Fourier features 8.002 20.467 38.140 14.962 21.69
+MIST 14.388 36.417 63.526 25.499 18.71
+JESTR 16.490 38.450 60.636 27.454 18.03
+GLMR (Ours)54.042 64.347 72.984 58.835 12.08
+Formula-based
+Retrieval Library
+Random 2.012 9.094 26.139 5.956 13.51
+DeepSets 2.729 9.116 27.564 6.737 13.39
+Fingerprint FFN 2.912 10.573 28.322 8.201 13.15
+DeepSets + Fourier features 4.621 14.063 34.497 10.927 13.11
+MIST 6.779 16.882 34.290 12.780 13.04
+JESTR 7.440 23.314 47.356 16.282 11.86
+GLMR (Ours)51.141 60.062 70.671 55.565 6.94
+Table 2: Retrieval Performance on MassRET-20k. The best results are in bold, and the results ranked second are underlined.
+benchmark, a more challenging and realistic dataset with di-
+verse ionization adducts and complete experimental meta-
+data. All models are trained solely on the MassSpecGym
+training set and evaluated in a zero-shot (Pourpanah et al.
+2022) transfer setting, making this a rigorous test ofgen-
+eralization. As shown in Table 2, GLMR remains the top-
+performing method, significantly outperforming all base-
+lines. Compared to baselines, GLMR shows superior gen-
+eralization on both retrieval libraries, with notably higher
+Recall@K and MRR, as well as lower MCES@1 scores.
+These gains underscore GLMR’s ability to generalize to un-
+seen mass spectra and varying ionization conditions.
+0.0 0.2 0.4 0.8 1.00.6
+Modality Gap (MG)
+0
+15
+30Density
+Before Pre-retrieval
+After Pre-retrieval
+After Generative retrieval
+Figure 3: The modality gap distributions on MassSpecGym.
+A smaller MG indicates better alignment between MS/MS
+spectra and molecules.
+Analysis of Modality AlignmentTo evaluate whether
+our method successfully improves modality alignment be-
+tween MS/MS spectra and molecules, we define a modal-
+ity gap metric for each instanceias MG(E i) = 1−
+cos (Et
+i,Em
+i ), whereEm
+i is the representation of the ground-
+truth molecule, andE t
+i is the representation of the input
+mass spectrum (before or after pre-retrieval) or the gener-
+ated molecule (after generative retrieval). Figure 3 shows the
+kernel density estimation (Parzen 1962) of the modality gap
+distribution on MassSpecGym. After the pre-retrieval stage,
+the distribution shifts leftward compared to the initial distri-
+bution, indicating improved alignment through contrastive
+learning. More notably, in the generative retrieval stage, the
+modality gap is further and significantly reduced, as the gen-
+erated molecule is structurally and semantically refined to
+align closely with the generated molecule. This progressive
+narrowing of the modality gap demonstrates that GLMR ef-
+fectively bridges the gap between mass spectra and molecu-
+lar structures, validating the core advantage of our two-stage
+framework.
+Method MCES↓ Morgan
+Tanimoto↑ RDK
+Tanimoto↑
+SMILES-Trans 79.39 0.07 0.03
+SELFIES-Trans 33.28 0.10 0.08
+SPEC2MOL 37.76 0.12 0.19
+MADGENPred 74.19 0.08 0.13
+DiffMS18.45 0.28 0.49
+Ours 21.83 0.21 0.42
+Table 3: Molecular generation performance on the test set of
+MassSpecGym.
+Analysis of Molecular GenerationWhile the primary
+goal of GLMR is accurate MS-to-molecule retrieval, the
+quality of generated molecules, is critical to the final re-
+trieval performance. To evaluate the generation capabil-
+ity of our generative model, we employ the MassSpec-
+Gym test set and calculate the structural similarity between
+generated and ground-truth molecules using three metrics:
+MCES (Curchoe 2020), Morgan Tanimoto (V ogt and Bajo-
+Library Type Method Recall↑(%) MRR↑(%) MCES@1↓
+Recall@1 Recall@5 Recall@20
+Weight-based
+Retrieval Library
+w/o Generative retrieval 20.341 52.789 74.630 32.190 22.45
+w/o Pre-retrieval 41.501 59.313 73.279 49.714 18.92
+GLMR (Ours)64.172 72.961 78.782 67.817 11.14
+Formula-based
+Retrieval Library
+w/o Generative retrieval 46.030 67.925 83.202 55.900 7.83
+w/o Pre-retrieval 52.968 70.460 83.214 60.805 7.27
+GLMR (Ours)68.478 78.087 84.216 72.472 5.05
+Table 4: Ablation study on the two-stage retrieval strategy of GLMR on MassSpecGym. The best results are in bold.
+rath 2020), and RDK Tanimoto (Scalfani, Patel, and Fernan-
+dez 2022). We compare our generative model against sev-
+eral methods for de-novo molecule generation from MS/MS
+spectra, including SMILES Transformer (Sennrich, Had-
+dow, and Birch 2015), SELFIES Transformer (Krenn et al.
+2020), Spec2Mol (Litsa et al. 2021), MADGEN Pred (Wang
+et al. 2025), and DiffMS (Bohde et al. 2025). Their re-
+sults are taken directly from the original reports of DiffMS
+and MADGEN, and summarized in Table 3. Our generative
+model achieves competitive performance, ranking second
+only to DiffMS (SOTA). We attribute this strong generation
+quality to two key design choices: (1) a pre-trained spectral
+encoder derived from the cross-modal contrastive learning,
+and (2) a context-aware generation framework that condi-
+tions the decoder on top-ranked candidate molecules from
+the pre-retrieval stage. As a result, the generated molecules
+are both spectrally consistent and chemically plausible,
+which in turn enhances the accuracy of the final ranking.
+4.3 Ablation Study
+In this section, we conduct ablation studies to analyze the
+contribution of key components in GLMR and to evaluate
+the sensitivity of performance to the number of retrieved
+candidatesKin the pre-retrieval stage. Specifically, we first
+investigate how the pre-retrieval and generative retrieval
+stages individually contribute to overall retrieval effective-
+ness. The results are reported in Table 4. One can observe
+that both the pre-retrieval and generative retrieval stages
+contribute significantly to the performance of GLMR. When
+used independently, generative retrieval outperforms pre-
+retrieval alone, indicating that generating a refined molecule
+is more effective than direct cross-modal matching. How-
+ever, the best performance is achieved when both stages are
+combined, demonstrating their complementary nature: the
+pre-retrieval provides high-quality molecule priors, while
+the generative retrieval refines these candidates through ex-
+plicit molecule generation, leading to significantly improved
+ranking accuracy.
+We further investigate the impact of the number of pre-
+retrieved molecules (K) on retrieval performance. The re-
+sults (Figure 4) reveal that most metrics reach a plateau
+whenK >40. While increasingKbeyond this threshold
+yields marginal improvements in retrieval accuracy, it also
+introduces higher computational costs. Based on this analy-
+sis, we selectK= 40as the optimal number of pre-retrieved
+20 25 30 35 40 45 50
+60
+70
+80
+K
+Recall / MRR
+MCES@1
+ Recall@ 1↑     Recall@5↑   Recall@20↑ 
+ MRR↑  
+10
+15
+20
+ MCES@1↓
+Figure 4: Performance trends with varyingK. Experi-
+ments are conducted on the weight-based retrieval library
+of MassSpecGym.
+molecules for the pre-retrieval stage, striking a balance be-
+tween performance gains and computational efficiency.
+5 Conclusion
+In this work, we present GLMR, a generative language
+model-based framework for MS-to-molecule retrieval that
+addresses the fundamental challenge of cross-modal mis-
+alignment between MS/MS spectra and molecular struc-
+tures. Our two-stage approach, pre-retrieval and generative
+retrieval, effectively bridges the modality gap by transform-
+ing the inherently challenging cross-modal retrieval into a
+more tractable unimodal molecule retrieval process. Exten-
+sive experiments have demonstrated that our method signifi-
+cantly outperforms existing baselines and shows strong gen-
+eralization. Looking forward, we envision several directions
+for improvement: designing lightweight fusion and genera-
+tion modules for faster inference; and incorporating explicit
+chemical constraints or syntactic rules during generation to
+enhance molecular structure validity. By combining gen-
+erative modeling with retrieval, GLMR opens a promising
+pathway toward accurate, robust, and library-free compound
+identification in real-world mass spectrometry applications.
+References
+Bohde, M.; Manjrekar, M.; Wang, R.; Ji, S.; and Coley, C. W.
+2025. DiffMS: Diffusion Generation of Molecules Condi-
+tioned on Mass Spectra.arXiv preprint arXiv:2502.09571.
+Bushuiev, R.; Bushuiev, A.; de Jonge, N.; Young, A.;
+Kretschmer, F.; Samusevich, R.; Heirman, J.; Wang, F.;
+Zhang, L.; D ¨uhrkop, K.; et al. 2024. MassSpecGym: A
+benchmark for the discovery and identification of molecules.
+Advances in Neural Information Processing Systems, 37:
+110010–110027.
+Chen, L.; Xia, B.; Wang, Y .; Huang, X.; Gu, Y .; Wu, W.;
+and Zhou, Y . 2024. CMSSP: A Contrastive Mass Spectra-
+Structure Pretraining Model for Metabolite Identification.
+Analytical Chemistry, 96(42): 16871–16881.
+Curchoe, C. L. 2020. All models are wrong, but some are
+useful.Journal of Assisted Reproduction and Genetics, 37:
+2389–2391.
+Dantzig, G. B. 2002. Linear programming.Operations re-
+search, 50(1): 42–47.
+El-Aneed, A.; Cohen, A.; and Banoub, J. 2009. Mass spec-
+trometry, review of the basics: electrospray, MALDI, and
+commonly used mass analyzers.Applied spectroscopy re-
+views, 44(3): 210–230.
+Escher, B. I.; Stapleton, H. M.; and Schymanski, E. L. 2020.
+Tracking complex mixtures of chemicals in our changing en-
+vironment.Science, 367(6476): 388–392.
+Goldman, S.; Wohlwend, J.; Stra ˇzar, M.; Haroush, G.;
+Xavier, R. J.; and Coley, C. W. 2023a. Annotating metabolite
+mass spectra with domain-inspired chemical formula trans-
+formers.Nature Machine Intelligence, 5(9): 965–979.
+Goldman, S.; Xin, J.; Provenzano, J.; and Coley, C. W.
+2023b. Mist-cf: Chemical formula inference from tandem
+mass spectra.Journal of Chemical Information and Model-
+ing, 64(7): 2421–2431.
+Griss, J. 2016. Spectral library searching in proteomics.Pro-
+teomics, 16(5): 729–740.
+Hochba, D. S. 1997. Approximation algorithms for NP-hard
+problems.ACM Sigact News, 28(2): 40–52.
+Horai, H.; Arita, M.; Kanaya, S.; Nihei, Y .; Ikeda, T.; Suwa,
+K.; Ojima, Y .; Tanaka, K.; Tanaka, S.; Aoshima, K.; et al.
+2010. MassBank: a public repository for sharing mass spec-
+tral data for life sciences.Journal of mass spectrometry,
+45(7): 703–714.
+Irwin, J. J.; and Shoichet, B. K. 2005. ZINC- a free database
+of commercially available compounds for virtual screening.
+Journal of chemical information and modeling, 45(1): 177–
+182.
+Irwin, R.; Dimitriadis, S.; He, J.; and Bjerrum, E. J. 2022.
+Chemformer: a pre-trained transformer for computational
+chemistry.Machine Learning: Science and Technology,
+3(1): 015022.
+Ji, H.; Du, R.; Dai, Q.; Su, M.; Lyu, Y .; Peng, Y .; and Yan, J.
+2024. DeepMASS: Unknown Compound Annotation using
+Semantic Similarity of Mass Spectral Language and Chem-
+ical Space Localization.bioRxiv, 2024–05.
+Kalia, A.; Zhou Chen, Y .; Krishnan, D.; and Hassoun, S.
+2025. JESTR: J oint E mbedding S pace T echnique for R
+anking Candidate Molecules for the Annotation of Untar-
+geted Metabolomics Data.Bioinformatics, btaf354.
+Keifer, D. Z.; and Jarrold, M. F. 2017. Single-molecule mass
+spectrometry.Mass spectrometry reviews, 36(6): 715–733.
+Khosla, P.; Teterwak, P.; Wang, C.; Sarna, A.; Tian, Y .; Isola,
+P.; Maschinot, A.; Liu, C.; and Krishnan, D. 2020. Super-
+vised contrastive learning.Advances in neural information
+processing systems, 33: 18661–18673.
+Kind, T.; Tsugawa, H.; Cajka, T.; Ma, Y .; Lai, Z.; Mehta,
+S. S.; Wohlgemuth, G.; Barupal, D. K.; Showalter, M. R.;
+Arita, M.; et al. 2018. Identification of small molecules us-
+ing accurate mass MS/MS search.Mass spectrometry re-
+views, 37(4): 513–532.
+Krenn, M.; H¨ase, F.; Nigam, A.; Friederich, P.; and Aspuru-
+Guzik, A. 2020. Self-referencing embedded strings (SELF-
+IES): A 100% robust molecular string representation.Ma-
+chine Learning: Science and Technology, 1(4): 045024.
+Kwok, K.-S.; Venkataraghavan, R.; and McLafferty, F. 1973.
+Computer-aided interpretation of mass spectra. III. Self-
+training interpretive and retrieval system.Journal of the
+American Chemical Society, 95(13): 4185–4194.
+Lemmon, E. W.; Huber, M. L.; McLinden, M. O.; et al. 2010.
+NIST standard reference database 23.Reference fluid ther-
+modynamic and transport properties (REFPROP), version,
+9.
+Lewis, M.; Liu, Y .; Goyal, N.; Ghazvininejad, M.; Mo-
+hamed, A.; Levy, O.; Stoyanov, V .; and Zettlemoyer, L.
+2019. Bart: Denoising sequence-to-sequence pre-training
+for natural language generation, translation, and comprehen-
+sion.arXiv preprint arXiv:1910.13461.
+Li, X.; Zhou Chen, Y .; Kalia, A.; Zhu, H.; Liu, L.-p.; and
+Hassoun, S. 2024. An Ensemble Spectral Prediction (ESP)
+model for metabolite annotation.Bioinformatics, 40(8):
+btae490.
+Litsa, E.; Chenthamarakshan, V .; Das, P.; and Kavraki, L.
+2021. Spec2Mol: An end-to-end deep learning framework
+for translating MS/MS Spectra to de-novo molecules.
+Liu, S.; Nie, W.; Wang, C.; Lu, J.; Qiao, Z.; Liu, L.; Tang, J.;
+Xiao, C.; and Anandkumar, A. 2023. Multi-modal molecule
+structure–text model for text-based retrieval and editing.Na-
+ture Machine Intelligence, 5(12): 1447–1457.
+Parzen, E. 1962. On estimation of a probability density func-
+tion and mode.The annals of mathematical statistics, 33(3):
+1065–1076.
+Pourpanah, F.; Abdar, M.; Luo, Y .; Zhou, X.; Wang, R.; Lim,
+C. P.; Wang, X.-Z.; and Wu, Q. J. 2022. A review of general-
+ized zero-shot learning methods.IEEE transactions on pat-
+tern analysis and machine intelligence, 45(4): 4051–4070.
+Prudent, R.; Annis, D. A.; Dandliker, P. J.; Ortholand, J.-Y .;
+and Roche, D. 2021. Exploring new targets and chemical
+space with affinity selection-mass spectrometry.Nature Re-
+views Chemistry, 5(1): 62–71.
+Qin, C.; Luo, X.; Deng, C.; Shu, K.; Zhu, W.; Griss, J.; Her-
+mjakob, H.; Bai, M.; and Perez-Riverol, Y . 2021. Deep
+learning embedder method and tool for mass spectra simi-
+larity search.Journal of proteomics, 232: 104070.
+Qiu, S.; Cai, Y .; Yao, H.; Lin, C.; Xie, Y .; Tang, S.; and
+Zhang, A. 2023. Small molecule metabolites: discovery of
+biomarkers and therapeutic targets.Signal Transduction and
+Targeted Therapy, 8(1): 132.
+Radford, A.; Kim, J. W.; Hallacy, C.; Ramesh, A.; Goh, G.;
+Agarwal, S.; Sastry, G.; Askell, A.; Mishkin, P.; Clark, J.;
+et al. 2021. Learning transferable visual models from nat-
+ural language supervision. InInternational conference on
+machine learning, 8748–8763.
+Rumelhart, D. E.; McClelland, J. L.; Group, P. R.; et al.
+1986.Parallel distributed processing, volume 1: Explo-
+rations in the microstructure of cognition: Foundations. The
+MIT press.
+Scalfani, V . F.; Patel, V . D.; and Fernandez, A. M. 2022.
+Visualizing chemical space networks with RDKit and Net-
+workX.Journal of Cheminformatics, 14(1): 87.
+Schymanski, E. L.; and Neumann, S. 2013. CASMI: and the
+winner is. . . .Metabolites, 3(2): 412–439.
+Sennrich, R.; Haddow, B.; and Birch, A. 2015. Neural ma-
+chine translation of rare words with subword units.arXiv
+preprint arXiv:1508.07909.
+Stein, S. E.; and Scott, D. R. 1994. Optimization and test-
+ing of mass spectral library search algorithms for compound
+identification.Journal of the American Society for Mass
+Spectrometry, 5(9): 859–866.
+Vaniya, A.; Mehta, S.; Wohlgemuth, G.; and Fiehn, O.
+2019. MassBank of North America: using untargeted
+metabolomics and multistage fragmentation mass spectral
+libraries to annotate natural products in plants.Berichte aus
+dem Julius K¨uhn-Institut, (204).
+Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones,
+L.; Gomez, A. N.; Kaiser, Ł.; and Polosukhin, I. 2017. At-
+tention is all you need.Advances in neural information pro-
+cessing systems, 30.
+V ogt, M.; and Bajorath, J. 2020. ccbmlib–a Python pack-
+age for modeling Tanimoto similarity value distributions.
+F1000Research, 9: Chem–Inf.
+Wang, M.; Carver, J. J.; Phelan, V . V .; Sanchez, L. M.; Garg,
+N.; Peng, Y .; Nguyen, D. D.; Watrous, J.; Kapono, C. A.;
+Luzzatto-Knaan, T.; et al. 2016. Sharing and community cu-
+ration of mass spectrometry data with Global Natural Prod-
+ucts Social Molecular Networking.Nature biotechnology,
+34(8): 828–837.
+Wang, M.; Jarmusch, A. K.; Vargas, F.; Aksenov, A. A.;
+Gauglitz, J. M.; Weldon, K.; Petras, D.; da Silva, R.; Quinn,
+R.; Melnik, A. V .; et al. 2020. Mass spectrometry searches
+using MASST.Nature biotechnology, 38(1): 23–26.
+Wang, Y .; Chen, X.; Liu, L.; and Hassoun, S. 2025.
+MADGEN–Mass-Spec attends to De Novo Molecular gen-
+eration.arXiv preprint arXiv:2501.01950.
+Wang, Y .; Li, J.; and Stoica, P. 2005.Spectral analysis of
+signals: The missing data case. Morgan & Claypool Pub-
+lishers.
+Wiher, G.; Meister, C.; and Cotterell, R. 2022. On decod-
+ing strategies for neural text generators.Transactions of the
+Association for Computational Linguistics, 10: 997–1012.
+Wishart, D. S.; Guo, A.; Oler, E.; Wang, F.; Anjum, A.; Pe-
+ters, H.; Dizon, R.; Sayeeda, Z.; Tian, S.; Lee, B. L.; et al.
+2022. HMDB 5.0: the human metabolome database for
+2022.Nucleic acids research, 50(D1): D622–D631.
+Xie, T.; Zhang, H.; Yang, Q.; Sun, J.; Wang, Y .; Long, J.;
+Zhang, Z.; and Lu, H. 2025. CSU-MS2: A Contrastive
+Learning Framework for Cross-Modal Compound Identifi-
+cation from MS/MS Spectra to Molecular Structures.Ana-
+lytical Chemistry.
+Young, A.; Wang, F.; Wishart, D.; Wang, B.; R ¨ost, H.;
+and Greiner, R. 2024. FraGNNet: A deep probabilis-
+tic model for mass spectrum prediction.arXiv preprint
+arXiv:2404.02360.
+Zaheer, M.; Kottur, S.; Ravanbakhsh, S.; Poczos, B.;
+Salakhutdinov, R. R.; and Smola, A. J. 2017. Deep sets.
+Advances in neural information processing systems, 30.
+Appendix
+A Construction of MassRET-20k
+Since MassSpecGym (Bushuiev et al. 2024) already con-
+tains data from open-source databases, such as GNPS (Wang
+et al. 2016), MoNA (Vaniya et al. 2019), and MassBank (Ho-
+rai et al. 2010), we construct MassRET-20k using the
+NIST2020 (Lemmon et al. 2010) database, which is a non-
+open-source database with license restrictions, to verify our
+model’s generalization.
+We first standardized the SMILES sequences in these files
+to ensure a unified and unique representation of compound
+structures, with those failing the standardization check being
+removed. Additionally, to avoid data leakage, we removed
+SMILES that appeared in the MassSpecGym training set.
+Next, we further processed the cleaned data by standardiz-
+ing all mass spectra to relative intensity values. Specifically,
+for each mass spectrum, each intensity value was divided by
+the maximum intensity within that spectrum. This normal-
+ization process ensures the comparability of mass spectra ir-
+respective of their absolute intensity values, which may vary
+with different experimental conditions.
+The MassRET-20k dataset contains approximately 20k
+data entries, with a data structure as shown in Table A1.
+Each entry provides spectral information (mzs and intensi-
+ties), along with the corresponding molecule’s SMILES se-
+quence, InChIKey sequence, chemical formula, and molec-
+ular weight (parent mass). Additionally, each entry includes
+metadata related to the mass spectrum, such as the chemical
+formula and mass-to-charge ratio (m/z) of the precursor ion,
+adduct type, instrument type used for spectrum generation,
+and collision energy.
+Variable Description
+identifier Unique entry identifier
+mzsArray of spectrum m/z values
+intensitiesArray of spectrum intensities
+SMILESSMILES string of molecule
+inchikey 2D InChI key
+formula Chemical formula of molecule
+precursor formula Chemical formula of precursor ion
+parent mass Mass of molecule
+precursor mz M/z of precursor ion
+adduct Ionization adduct
+instrument type Type of spectral instrument
+collision energy Energy of CID fragmentation
+Table A1: Descriptions of all variables present in the
+MassRET-20k dataset. The key variables are bold.
+In contrast to MassSpecGym, whose metadata only in-
+cludes two types of ionized adducts and where only 53%
+of data entries provide normalized collision energy (lead-
+ing to data loss), MassRET-20k contains 12 types of ionized
+adducts and all entries include normalized collision energy,
+making the included information more complete and better
+reflective of real-world scenarios. The details are shown in
+Figure A1.
+2% 2%1.9%
+3.1%
+2.3%
+9.6%
+3.7%
+12.8%
+21.7%
+38.8%
+ [M+H]+  [M-H]-  [M+Na]+
+ [M-H2O+H]+  [M+Cl]-  [M+NH4]+
+ [M+HCOO]-  [2M-H]-  [M+H+2i]+
+ [2M+H]+  [M-H2O-H]-  [M-H+2i]-
+(a)
+84.5%
+15.5%
+ [M+H]+  [M+Na]+
+(b)
+Figure A1: The types and proportions of ionized adducts in
+(a) MassRET-20k and (b) MassSpecGym.
+B Implementation Details of GLMR
+Model architectureThe model is composed of a molec-
+ular encoder, a spectral encoder, a Spec-Mol Cross-Fusion
+module, and a molecular decoder. The molecular encoder,
+derived from the Chemformer (Irwin et al. 2022) encoder
+architecture, consists of a tokenizer and four bidirectional
+encoder layers with a feature dimension of 256. It processes
+SMILES sequences with a maximum length of 512 as in-
+put. The spectral encoder, mirroring the molecular encoder’s
+256-dimensional feature space, is structured with a fully
+connected layer followed by six multi-head attention en-
+coder layers. It accepts up to 61 tuples, each representing a
+fragment ion with the first dimension denoting the mass-to-
+charge ratio (m/z) and the second dimension indicating rel-
+ative abundance. The cross fusion module employs a cross-
+attention mechanism (Vaswani et al. 2017), using the spec-
+tral encoder output as queries and the molecular encoder out-
+put as keys and values. The fused representation serves as in-
+put to the molecular decoder. The molecular decoder, lever-
+aging the Chemformer decoder architecture, consists of four
+autoregressive decoder layers and uses beam search (Wiher,
+Meister, and Cotterell 2022) decoding to incrementally gen-
+erate SMILES sequences.
+Training detailThe model is trained in two stages includ-
+ing the pre-retrieval stage and the generative retrieval stage,
+utilizing spectrum-molecule pairs from the MassSpecGym
+training dataset. In the pre-retrieval stage, we load the pa-
+rameters of the molecular encoder and randomly initialize
+those of the spectral encoder. Contrastive learning is em-
+ployed for training over 300 epochs, during which the pa-
+rameters of the molecular encoder are frozen, and only those
+of the spectral encoder are updated, thus achieving align-
+ment between the molecular and spectral modalities. During
+contrastive learning, the temperatureτis set to 0.1 and the
+number of negative spectral samplesNand negative molec-
+ular samplesMis set to 1. In the generative retrieval stage,
+we load the pre-trained parameters of the molecular encoder,
+spectral encoder, and molecular decoder, while randomly
+initializing the parameters of the cross-fusion module. Here,
+training proceeds for 30 epochs with the molecular encoder
+and spectral encoder parameters frozen; only the parameters
+of the cross fusion module and molecular decoder are up-
+dated to enable the decoder to generate the target molecule
+best matching the current mass spectrum. Both stages utilize
+the AdamW optimizer and a weight decay of 0.1, setting the
+learning rate of1e−4.
+Inference detailThe inference process is divided into two
+stages, with the primary goal of identifying molecules from
+MassSpecGym’s retrieval library that match the input mass
+spectrum. In the pre-retrieval stage, the inference involves:
+each molecule in the retrieval library is encoded by the
+molecular encoder to generate a molecular representation,
+while the target mass spectrum is encoded by the spectral
+encoder to produce a spectral representation. The similarity
+between the mass spectrum representation and each molecu-
+lar representation is computed, and theK= 40most similar
+molecules are selected as the pre-retrieval results. In the gen-
+erative retrieval stage, inference includes two steps: molecu-
+lar generation and re-ranking using the generated molecule.
+For the former, the size of the beam is set to 5, and the max-
+imum length of the generated sequences is 512. The first
+molecule is then selected from the generated sequences, en-
+coded by the molecular encoder, and its similarity to the pre-
+retrieval candidate molecules is calculated. These candidate
+molecules are then re-ranked based on similarity scores, and
+top-ranked molecules are selected according to practical re-
+quirements.
+C Introduction of Baselines
+Fingerprint FFNFingerprint FFN (Rumelhart et al.
+1986) employs a feedforward neural network to predict the
+target molecule’s Morgan fingerprint, followed by sorting
+candidates based on cosine similarity to the predicted fin-
+gerprint.
+DeepSetsDeepSets (Zaheer et al. 2017) is evaluated-this
+model processes mass spectra as sets of raw 2D peak repre-
+sentations.
+DeepSets + Fourier featuresDeepSets + Fourier fea-
+tures (Zaheer et al. 2017) improves upon DeepSets by en-
+hancing m/z value modeling accuracy through Fourier fea-
+tures.
+MISTMIST (Goldman et al. 2023b) first assigns chemi-
+cal subformulae to spectral peaks via energy-based model-
+ing, then predicts molecular fingerprints using a chemical
+formula-based Transformer, and ultimately ranks candidates
+by cosine similarity between fingerprints.
+JESTRJESTR (Kalia et al. 2025) generates molecular
+representations by integrating molecular graph and molec-
+ular fingerprint information, employs spectral binning for
+spectral representation, and maps both molecular and spec-
+tral representations into a shared embedding space. During
+training, it combines contrastive learning with a candidate
+molecule regularization strategy. It is the current state-of-
+the-art method for molecule retrieval from mass spectra.
+D Introduction of Evaluation Metrics
+Recall@kRecall is a metric that measures the proportion
+of ground truth molecules retrieved by the model. For a
+given cut-off pointk, the Recall@k is defined as:
+Recall@k= 1
+|M|
+|M|X
+s=1
+retm,k
+relm
+(10)
+where|M|is the number of queries in the set, ret m,k is
+the number of ground truth molecules retrieved for them-
+th mass spectrum within the top-kresults. When the ground
+truth molecule exists, its value is 1; otherwise, its value is 0.
+relm is the total number of molecules to be retrieved for the
+m-th mass spectrum.
+Mean Reciprocal Rank(MRR)MRR reflects the average
+rank position of the ground truth molecule returned in the
+retrieved molecules. It is computed as follows:
+MRR= 1
+|M|
+|M|X
+m=1
+1
+rankm
+(11)
+where rankm is the rank of the ground truth molecule re-
+turned for them-th mass spectrum.
+MCES@1MCES@1 employs the Maximum Common
+Edge Subgraph (MCES) (Curchoe 2020) metric to quantify
+the similarity between the retrieved top moleculeG1 and the
+ground truth moleculeGt:
+MCES@1=MCES(G 1,Gt)(12)
+WhereMCESis the edit distance in the molecular graph.
+This is an NP-hard (Hochba 1997) problem, which we solve
+via linear programming (Dantzig 2002).
+E Visualization of Retrieval Process
+To further understand GLMR, we visualize its workflow,
+which involves using the input mass spectrum to perform
+initial ranking in the pre-retrieval stage, and generating a re-
+fined molecule in the generative retrieval stage to conduct
+re-ranking. For better illustration, in the pre-retrieval stage,
+we select the top-10 retrieved molecules as contextual priors
+to guide the generation of refined molecules in the genera-
+tive retrieval stage.
+We takeID0206445from the MassSpecGym dataset as
+an example (i.e., the input mass spectrum). Figure A2 shows
+the retrieval results on the weight-based retrieval library and
+the formula-based retrieval library. This case highlights how
+the generative refinement process effectively corrects align-
+ment errors and enhances retrieval accuracy.
+F Additional Ablation Experiments
+Besides MassSpecGym, we perform ablation studies on
+MassRET-20k to further verify the contributions of the pre-
+retrieval and generative retrieval stages. The results are
+shown in Table A2. Our findings align with those from
+MassSpecGym: both the pre-retrieval and generative re-
+trieval stages contribute significantly to the performance of
+GLMR.
+Initial Rank
+Generate
+Final Rank
+Generative 
+RetrievalPre-Retrieval
+①
+⑩
+②
+③
+④
+⑤
+⑥
+⑦
+⑧
+⑨
+(a)
+Initial Rank
+Generate
+Final Rank
+Generative 
+RetrievalPre-Retrieval
+①
+⑩
+②
+③
+④
+⑤
+⑥
+⑦
+⑧
+⑨
+(b)
+Figure A2: Visualization of top-10 retrieval results of GLMR including the pre-retrieval stage and the generative retrieval stage.
+The target molecule (a) moves from the 4th to the 1st after re-ranking on the weight-based retrieval library and (b) climbs from
+5th to 1st rank after re-ranking on the formula-based retrieval library.
+G Efficiency Comparison
+Table A3 presents the average retrieval time per instance
+on MassSpecGym and the number of model parameters.
+The pre-retrieval stage of GLMR requires 0.41s, which is
+longer than that of DeepSets and Fingerprint FFN but shorter
+than that of DeepSets + Fourier, MIST, and JESTR. The re-
+trieval approach in the pre-retrieval stage is consistent with
+that of other models, which performs retrieval by comput-
+Library Type Method Recall↑ MRR↑MCES @ 1↓
+Recall@1 Recall@5 Recall@20
+Weight-based
+Retrieval Library
+w/o Generative retrieval 15.234 43.438 69.871 27.921 26.90
+w/o Pre-retrieval 34.563 51.652 69.293 42.788 19.21
+GLMR (Ours)54.042 64.347 72.984 58.835 12.08
+Formula-based
+Retrieval Library
+w/o Generative retrieval 36.448 55.199 71.275 44.896 9.24
+w/o Pre-retrieval 42.065 55.891 70.501 48.711 8.48
+GLMR (Ours)51.141 60.062 70.671 55.565 6.94
+Table A2: Ablation study on the two-stage retrieval strategy of GLMR onMassRET-20k. The best results are in bold.
+Method Time (s) Param. (M)
+DeepSets 0.33 2.6
+Fingerprint FFN 0.36 2.6
+DeepSets + Fourier 0.40 7.8
+MIST 0.64 98.6
+JESTR 0.57 19.9
+GLMR (Ours) 0.41+0.69=1.10 13.6
+Table A3: Comparison of the average retrieval time per in-
+stance on MassSpecGym.
+ing the similarity between molecular embeddings and spec-
+tral embeddings. In this scenario, the retrieval time is posi-
+tively correlated with the model’s parameter count. Owing to
+their extremely small parameter counts, DeepSets and Fin-
+gerprint FFN exhibit very short retrieval times but poor re-
+trieval performance. The pre-retrieval stage has fewer pa-
+rameters than MIST and JESTR (resulting in less retrieval
+time than they do); however, its retrieval performance is
+on par with theirs. The generative retrieval stage of GLMR
+takes 0.69s, which involves generating a refined molecule
+from the MS/MS spectrum and subsequently calculating the
+similarity between the two molecular embeddings for re-
+trieval. Compared with the pre-retrieval stage, this stage in-
+cludes an additional step of molecule generation, rendering
+it more time-consuming.

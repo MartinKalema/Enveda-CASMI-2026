@@ -1,0 +1,610 @@
+                                                                            Stochastic Top-k ListNet
+                                                             Tianyi Luo1 , Dong Wang1,2, Rong Liu1,3 , Yiqiao Pan1,4
+                                                                     1
+                                                                       CSLT, RIIT, Tsinghua University, China
+                                                        2
+                                                          Tsinghua National Lab for Information Science and Technology
+                                                                         3
+                                                                           Huilan Limited, Beijing, China
+                                                           4
+                                                             Beijing University of Posts and Telecommunications, China
+                                                            {lty, lr, pyq}@cslt.riit.tsinghua.edu.cn
+                                                                  wangdong99@mails.tsinghua.edu.cn
+
+                                                            Abstract                           in online labor markets (Kokkodis et al., 2015),
+                                                                                               ranking sentences in document summariza-
+                                            ListNet is a well-known listwise learning          tion (Jin et al., 2010), improving detection of
+                                            to rank model and has gained much atten-           musical concepts (Yang et al., 2009) and ranking
+
+
+
+
+arXiv:1511.00271v1 [cs.IR] 1 Nov 2015
+                                            tion in recent years. A particular problem         the results in video search (Yang and Hsu, 2008).
+                                            of ListNet, however, is the high computa-          Basically, ListNet implements the rank function
+                                            tion complexity in model training, mainly          as a neural network (NN), with the objective
+                                            due to the large number of object per-             function set to be the cross entropy between two
+                                            mutations involved in computing the gra-           probability distributions over the object permuta-
+                                            dients. This paper proposes a stochastic           tions, one derived from the human-labelled scores
+                                            ListNet approach which computes the gra-           and the other derived from the model prediction
+                                            dient within a bounded permutation sub-            (network output). In order to deal with the high
+                                            set. It significantly reduces the compu-           computation complexity associated with the
+                                            tation complexity of model training and            large number of permutations, Cao et al. (2007)
+                                            allows extension to Top-k models, which            proposed a Top-k approach, which clusters the
+                                            is impossible with the conventional im-            permutations by the first k objects, so the number
+                                            plementation based on full-set permuta-            of distinct probabilities that need to evaluate in
+                                            tions. Meanwhile, the new approach uti-                                                  n!
+                                                                                               model training reduces from n! to (n−k)!   , where n
+                                            lizes partial ranking information of human         is the number of objects in the list.
+                                            labels, which helps improve model qual-               To ensure efficiency, k = 1 was selected in the
+                                            ity. Our experiments demonstrated that the         seminal paper (Cao et al., 2007) and in the open
+                                            stochastic ListNet method indeed leads to          source implementation of RankLib (Dang, 2013).
+                                            better ranking performance and speeds up           This Top-1 approach is a harsh approximation to
+                                            the model training remarkably.                     the full listwise learning and may constrain the
+                                                                                               power of the ListNet method. We therefore seek
+                                        1 Introduction                                         to extend the Top-1 approximation to Top-k ( k >
+                                        Learning to rank aims to learn a model to re-rank      1) models.
+                                        a list of objects, e.g., candidate documents in doc-      The major obstacle for the Top-k extension is
+                                        ument retrieval. Recent studies show that list-        the large number of permutations, or more pre-
+                                        wise learning delivers better performance in gen-      cisely, permutation classes in the Top-k setting. A
+                                        eral than traditional pairwise learning (Liu, 2009),   key idea of this paper is that the rank information
+                                        partly attributed to its capability of learning        involved in the permutation classes is highly re-
+                                        human-labelled scores as a full rank list. A po-       dundant and so a small number such permutation
+                                        tential disadvantage of listwise learning, however,    classes are sufficient to convey the rank informa-
+                                        is the high computation complexity in model train-     tion required to train the model. Meanwhile, the
+                                        ing, which is mainly caused by the large number        partial rank information associated with the sub-
+                                        of permutations of the objects to rank.                set of permutation classes may represent more de-
+                                           A typical listwise learning method is the List-     tailed knowledge for model training, leading to
+                                        Net model proposed by Cao et al. (2007). This          better ListNet models.
+                                        model has been utilized to tackle many ranking            Based on these two conjectures, we propose a
+                                        problems, e.g. modeling the hiring behavior            stochastic ListNet method, which samples a subset
+of the permutation classes (object lists) in model      and a set of object lists rather than a single pair
+training and based on this subset to train the List-    forms a training sample.
+Net model. Three methods are proposed to con-
+duct the sampling. In the uniform distribution          3 Methods
+method, the candidate objects are selected follow-      3.1 Review of ListNet
+ing a uniform distribution; in the fixed distribution
+                                                        The        ListNet           approach        proposed
+method, the candidate objects are selected follow-
+                                                        by Cao et al. (2007) trains a neural network
+ing a distribution derived from the human-labeled
+                                                        which predicts the scores z (i) of a list of candidate
+scores; in the adaptive distribution method, the
+                                                        objects x(i) given a query q (i) , formulated by
+candidates are selected following a distribution de-
+                                                        z (i) = fw (x(i) ), where fw stands for the scor-
+fined by the rank function, i.e., the neural network
+                                                        ing function defined by the NN. The objective
+output. Experimental results demonstrated that the
+                                                        function is given by:
+stochastic ListNet method can significantly reduce
+the computation cost in model training. In fact,                      X
+                                                              L =          L(y (i) , z (i) )
+if the size of the permutation subset is fixed, the                      i
+computation complexity is bounded, which allows                        X X
+                                                                  =                  Py(i) (g)log(Pz (i) (g)) (1)
+training Top-k models where k is large. Mean-
+                                                                         i   ∀g∈Gk
+while, better performance was obtained with the
+stochastic ListNet approach, probably due to the        where y (i) denotes the human-labelled scores, and
+learning of partial rank information.                   Gk is the set of permutation classes defined by:
+   The contributions of the paper are three-fold:
+(1) proposes a stochastic ListNet method that sig-         Gk = {Gk (j1 , j2 , ..., jk )|jt = 1, 2, ..., n,
+nificantly reduces the training complexity and de-                     s.t. ju 6= jv f or ∀u 6= v}             (2)
+livers better ranking performance; (2) investigates
+Top-k models based on the stochastic ListNet, and       where n is the number of candidate ob-
+studies the impact of a large k; (3) provides an        jects, jt is the object ranked at the t-th
+open source implementation based on RankLib.            position, and Gk (j1 , j2 , ..., jk ) is a permuta-
+   The rest of the paper is organized as follows.       tion class which involves all the permutations
+Section 2 introduces some related works, and Sec-       whose first k objects are exactly (j1 , j2 , ..., jk ).
+tion 3 presents the stochastic ListNet method. Sec-     Following Cao et al. (2007), the probability of
+tion 4 presents the experiments, and the paper is       Gk (j1 , j2 , ..., jk ) can be computed by:
+concluded by Section 6.
+                                                                                              Y
+                                                                                              k
+                                                                                                      esjt
+                                                              Ps (G (j1 , j2 , ..., jk )) =         Pn s j .   (3)
+2 Related Work                                                                                       l=t e
+                                                                                                           l
+                                                                                              t=1
+
+This work is an extension of the Top-k List-            where sjt is the score of object at position jt (t =
+Net method proposed by Cao et al. (2007). The           1, 2, , , k) at a certain permutation. By this defi-
+novelty is that we propose a stochastic learing         nition of permutation probability, Eq. (1) defines
+method which not only speeds up the model train-        a cross entropy between the distributions over
+ing but also produces stronger models. The code         permutations (precisely, permutation classes) de-
+is based on the Top-1 ListNet implementation of         rived from the human-labelled scores and the NN-
+RankLib (Dang, 2013).                                   predicted scores. Therefore, optimizing the objec-
+   Another related work is the SVM-based pair-          tive function Eq. (1) with respect to the NN model
+wise learning to rank model based on stochastic         fw leads to a scoring function that approximates
+gradient descent (SGD) (Sculley, 2009). In this         the human-labelled ranking.
+approach, training instances (queries) are selected
+randomly and for each query, a number of object         3.2 Stochastic Top-k ListNet
+pairs are sampled from the object list. These pairs     A particular difficulty of the Top-k ListNet method
+are used to train the SVM model. In the stochas-        is that it requires very demanding computation in
+tic ListNet method proposed in this paper, the ran-     model training. Refer to Eq. (2), the permu-
+                                                                                     n!
+domly selected training samples are permutation         tation set Gk involves (n−k)!     members, and for
+classes (object lists) rather than pairs of objects,    each member, computing its probability involves
+(2n−k+1)k
+    2     summations plus k multiplications and         set of the object lists are selected in model train-
+divisions. To let the algorithm practical, k=1 was      ing, and so the rank information involved in the
+selected in (Cao et al., 2007), as well as the pub-     subset of the permutation classes can be learned.
+lic toolkit RankLib (Dang, 2013). Although this is      With the Top-1 model, partial ranks reduces to par-
+a good solution and reduces computation dramat-         tial sequences since each object list involves only
+ically, we argue that this approach largely buries      one object. As we have discussed, learning partial
+the power of ListNet. In fact, setting k=1 effec-       sequences is an advantage of Top-k models with
+tively marginalizes all the probabilities over the      k > 1. This means that stochastic Top-1 List-
+candidate objects of a permutation class except the     Net possesses some advantages of Top-k ListNet,
+top one. By this approximation, Eq. (3) reduces to      while the computation cost is much lower.
+a softmax over the candidate objects, which means
+that it actually focuses on how the probabilities       3.3 Sampling methods for stochastic ListNet
+are distributed over individual objects, rather than
+                                                        The training process of stochastic ListNet starts
+how the probabilities are distributed over object
+                                                        from sampling l permutation classes, or object
+lists. This potentially loses much rank information
+                                                        lists. For each object list, k objects are sampled
+involved in the human labels.
+                                                        following a particular distribution. As mentioned
+   Another disadvantage of the Top-1 model is that      in Section 1, three distributions are studied in this
+it learns the rank information of the full list, but    paper: uniform distribution, fixed distribution and
+ignores the rank information of partial sequences,      adaptive distribution. They are presented as fol-
+which may lead to ineffective learning. As an ex-       lows.
+ample, considering an object list where the score          Uniform distribution sampling: In this
+of the most relevant object is much higher than the     method, all the k objects of a particular object list
+scores of others, then the learning is dominated        are sampled with an equal probability. This sam-
+by the highest score, and largely throws away the       pling method is simple but biased towards irrele-
+rank information conveyed by the scores of other        vant candidates, since there are much more irrele-
+objects. It would be quite helpful if the rank infor-   vant objects than relevant ones in the training data.
+mation involved in partial sequences of the candi-      A re-sampling approach is proposed to remedy the
+date objects can be learned. Top-k models place         bias, as will be discussed in Section 4.
+distributions over object lists (in length k), and so
+                                                           Fixed distribution sampling: In this method,
+can learn partial sequences of objects.
+                                                        the objects are sampled following a distribution
+   We are interested in how to learn Top-k (k > 1)      proportional to the human-labelled scores. For
+models while keeping the computation tractable.         instance, in the LETOR dataset that is used in
+To achieve the goal, we propose a stochastic List-      this study, each candidate object (document) is la-
+Net approach, which samples a small set of the          belled as 2 (very relevant), 1 (relevant) or 0 (irrel-
+Top-k permutation classes (object lists), and train     evant). These scores are normalized by softmax
+the Top-k model based on this small set instead of      and are used as the probability distribution when
+the full set of permutation classes. As a compari-      sampling objects. Because the probabilities of rel-
+son, the full set of permutation classes of the Top-    evant objects are larger than those of irrelevant ob-
+               n!
+k model is (n−k)!   , which is computationally pro-     jects, more relevant objects would be selected by
+hibitive if k > 1. With stochastic ListNet, a sub-      this sampling approach in model training.
+set of the permutation classes that involves only          Adaptive distribution sampling: The fixed
+l members are randomly selected. Training the           distribution sampling mentioned above relies on
+Top-k model based on this subset greatly reduces        human-labelled scores, which may be impacted by
+the computation cost, even with a large k. In fact,     label errors. Moreover, the absolute values of hu-
+the subset approach imposes a bound of the com-         man labels are not good measures of object rel-
+putation cost that is largely determined by the the     evance. To solve these problems, we choose the
+size of the subset (l), while independent of the to-    outputs of the ‘current’ neural network as the rel-
+tal number of objects n and the model order k.          evance scores, and sample the objects according
+  Interestingly, the stochastic approach offers not     to these scores. Note that the network outputs are
+only quick learning, but also a chance of learning      natural measures of object relevance based on the
+partial ranks. This is obvious because only a sub-      present ranking model. As the model (the neural
+network) keeps updated during model training, the             from 1 to n, instead a partial sequence from f to
+relevance scores are accordingly changed. In each             n.), given by:
+iteration, the relevance scores are re-calculated,                                                     (i)
+                                                                                                   s
+and the sampling is based on the new scores in the                                (i)             e jf
+next iteration.                                                              σ̂(s , f ) = P                  (i)
+                                                                                                                   .
+                                                                                                 n(i) sjt
+                                                                                                 t=f e
+3.4    Gradients with linear networks
+                                                              3.5 Stochastic Top-k ListNet algorithm
+Cao et al. (2007) optimized the ListNet model by              We present the stochastic Top-k ListNet algorithm,
+gradient descent. For each query, the learn rule is           by employing the techniques described above. The
+formuated by:                                                 gradient descent (GD) approach is adopted. All
+                                                              the training samples are processed sequentially in
+                    w = w − η∆w
+                                                              an iteration. The training runs several iterations
+                                                              until the convergence criterion is reach. Another
+where η is the learning rate, and w denotes the pa-
+                                                              detail is that the learning rate is multiplied by 0.1
+rameters of the model fw . ∆w denotes the gradi-
+                                                              whenever the objective function is worse than the
+ent and it can be computed as follows:
+                                                              previous iteration. The procedure is illustrated in
+                X ∂Pz (i) (fw ) (g) Py(i) (g)                 Algorithm 1, where L(t) denotes value of the ob-
+      ∆w =                                          .         jective function after the t-th iteration.
+                       ∂w          Pz (i) (fw ) (g)
+               ∀g∈Gk
+                                                              Algorithm 1 Stochastic Top-k ListNet
+For simplicity, a linear NN model was used                    Require:
+by Cao et al. (2007). This has been adopted in                    Input:
+                                           (i)
+our study as well, written by z (i) = fw (xj ) =                  D = {(q (1) , x(1) , y (1) ), ..., (q (m) , x(m) , y (m) )}:
+      (i)           (i)                                           training data
+wT xj , where xj denotes the feature vector of
+the j-th object of the i-th query. In the case of the             T: number of iterations
+Top-1 model, it shows that:                                       η: learning rate
+                                                              Procedure:
+              X                              (i)
+      ∆w =     [σ(z (i) , j) − σ(y (i) , j)]xj                 1: Randomly initialize w
+               j                                               2: for t = 1 to T do
+                                                               3:    for i = 1 to m do
+where σ(s, j) is the j-th value of the softmax func-           4:       select the i-th training instance
+tion of the score vector s, given by:                                   (q (i) , x(i) , y (i) ) ∈ D
+                                                               5:       Sample the permutation classes Gk
+                                    (i)
+
+                   (i)            esj                          6:       Compute ∆w according to Eq. (4)
+               σ(s , j) = P (i)        (i)
+                                             .                 7:       Update fw : w = w − η∆w
+                                 n    st
+                                 t=1 e                         8:    end for
+In the case of the Top-k model, the gradi-                     9:    if L(t) < L(t − 1) then
+ent(Derivative of cross entropy between Pz (i) and            10:       η = 0.1η
+Py(i) when k >= 2) is a bit complex, but still man-           11:    end if
+ageable:                                                      12: end for
+
+
+                    X Yk
+            ∆w =     [( σ̂(y (i) , t))·                       4 Experiments
+                   g∈Gk t=1
+                                                        (4)   4.1 Data
+                           (i)
+             X
+             k
+                (i)
+                     X
+                     n
+                                     (i)                      The proposed stochastic Top-k ListNet method is
+            ( {xjf −   σ̂(z (i) , v)xjv })]
+                                                              tested on the document retrieval task based on the
+            f =1          v=f
+                                                              MQ2008 dataset of LETOR 4.0 (Liu et al., 2007).
+where σ̂(·) defines a ‘partial’ softmax(The partial           This database was released in early 2007 and
+softmax means that the σ(s, f ) has a similar form            has been widely used in learning to rank stud-
+as softmax, however when computing the value                  ies. It contains queries and corresponding candi-
+for each f, the denominator is not the summation              date documents. The human-labelled scores are
+among three values {0, 1, 2}, representing little,       4.3 Experimental results
+medium, and strong relevance between queries
+and candidate documents, respectively. The train-                             0.4135
+                                                                                               ADS ListNet (k = 1)
+ing set, validation set and test data all contain                                     0.413
+                                                                                               FDS ListNet (k = 1)
+                                                                                               UDS ListNet (k = 1)
+
+784 queries. The document features used in this                                                Conventional ListNet (k = 1)
+
+
+
+
+                                                           P@1 performance
+                                                                              0.4125
+
+study include term frequency, inverse document                                        0.412
+frequency, BM25, and language model scores for
+                                                                              0.4115
+IR. Some new features proposed recently are also
+                                                                                      0.411
+included, such as HostRank, feature propagation,
+and topical PageRank.                                                         0.4105
+                                                                                   50                60              70              80
+                                                                                                                              Number of samples
+                                                                                                                                                  90            100                500
+
+
+
+
+4.2   Experiment Setup
+                                                         Figure 1: The P@1 performance on the test data
+In our experiments, we consider Top-k models             with the Top-1 ListNet utilizing the three sampling
+where k = 1, 2, 3, and 4. Although any k is              approaches. The size of the permutation subset
+possible with the proposed stochastic ListNet, we        varies from 50 to 500.
+will show that simply increasing the model order
+k does not improve performance. The P@1 and                                            0.42
+
+P@10 performance is used as the evaluation met-                                       0.418
+
+ric.                                                                                  0.416
+
+
+
+
+                                                                    P@1 performance
+                                                                                      0.414
+   Specially, for all the three distribution sam-                                     0.412
+
+pling methods, the sampling process involves two                                       0.41
+                                                                                                                                                   ADS ListNet ( k = 2)
+                                                                                      0.408
+steps: pre-selection and re-sampling. The pre-                                        0.406
+                                                                                                                                                   FDS ListNet ( k = 2)
+                                                                                                                                                   UDS ListNet ( k = 2)
+                                                                                                                                                   Conventional ListNet ( k = 2)
+selection step samples a list of documents fol-                                       0.404
+
+                                                                                      0.402
+lowing three distributions mentioned above, and                                            5         10              15              20
+                                                                                                                              Number of samples
+                                                                                                                                                  25             30                500
+
+
+in the re-sampling step, document lists includ-
+ing more relevant documents are retained with a          Figure 2: The P@1 performance on the test data
+higher probability. For example, denoting the pre-       with the Top-2 ListNet utilizing the three sampling
+selected document list by (v1 ,v2 ,...,vk ) where k is   approaches. The size of the permutation subset
+the length of the list, and denoting the correspond-     varies from 5 to 500.
+ing human-labelled scores by (s1 , s2 ,...,sk ), the
+probability that the list is retained is given by
+                                                                                      0.419
+
+                      Pk                                                              0.418
+
+                         i=1 si                                                       0.417
+                         kS                                                           0.416
+
+
+
+
+                                                                    P@1 performance
+where S is the maximum value of the human-                                            0.415
+
+
+labelled scores, which is 2 in our case. The re-                                      0.414
+
+
+sampling approach is designed to encourage doc-                                       0.413
+
+
+ument lists containing more relevant documents,                                       0.412
+                                                                                                                                                             ADS ListNet (k = 3)
+                                                                                                                                                             FDS ListNet (k = 3)
+which is the most important for the uniform distri-                                   0.411
+                                                                                                                                                             UDS ListNet (k = 3)
+
+                                                                                       0.41
+bution sampling.                                                                           5         10              15              20
+                                                                                                                              Number of samples
+                                                                                                                                                  25             30                500
+
+
+   In stochastic Top-k ListNet, the learning rate is
+set as 10−3 for k = 1, and 10−5 for k > 1. These         Figure 3: The P@1 performance on the test data
+values are set to achieve the best performance on        with the Top-3 ListNet utilizing the three sampling
+the validation set. Another important parameter of       approaches. The size of the permutation subset
+the stochastic Top-k ListNet approach is the num-        varies from 5 to 500.
+ber of samples of the document lists (or the size
+of subset of permutation classes selected), denoted        The P@1 results on the test dataset with differ-
+by l. Various settings of l are experimented with in     ent orders of Top-k ListNet are reported in Fig-
+this study. To eliminate randomness in the results,      ure 1 to Figure 4. In each figure, the number of
+all the experiments are repeated 20 times and the        document lists varies from 5 to 500. For com-
+averaged performance is reported.                        parison, the results with the conventional ListNet
+                     0.42                                                                   formance is reduced. In the case that the number
+                    0.418
+                                                                                            of samples is very large (500 for example for Top-
+                    0.416
+                                                                                            1), the stochastic ListNet falls back to the con-
+
+  P@1 performance
+                    0.414
+
+                    0.412                                                                   ventional ListNet, and their performance becomes
+                     0.41                                                                   similar.
+                    0.408
+
+                    0.406
+                                                                ADS ListNet (k = 4)
+                                                                FDS ListNet (k = 4)            Comparing the results with different k, it can
+                                                                UDS ListNet (k = 4)
+
+                    0.404
+                         5   10   15          20           25        30               500
+                                                                                            be seen that a larger k leads to a better perfor-
+                                       Number of samples
+                                                                                            mance with stochastic ListNet. This confirms that
+                                                                                            high-order Top-k models can learn more ranking
+Figure 4: The P@1 performance on the test data                                              information. However, this is not necessarily the
+with the Top-4 ListNet utilizing the three sampling                                         case with the conventional ListNet. For example,
+approaches. The size of the permutation subset                                              the Top-2 model does not offer better performance
+varies from 5 to 500.                                                                       than the Top-1 model. This is perhaps because
+                                                                                            high-order Top-k models consider a large num-
+are also presented. Note that the re-sampling ap-                                           ber of document lists and most of them are not
+proach was not applied to the Top-1 model as                                                informative, which leads to ineffective learning.
+we found it caused performance reduction. This                                              Remind that the conventional ListNet is a special
+is perhaps because the sampling space is small                                              case of the stochastic ListNet with a very large
+with the Top-1 model, and so re-sampling tends                                              sample set, and we have discussed that an over
+to cause over-emphasis on relevant documents.                                               large sample set actually reduces performance.
+   From these results, we first observe that                                                   The averaged training time and the performance
+stochastic ListNet with either fixed or adaptive dis-                                       in precession are presented in Table 1. For pre-
+tribution sampling tends to outperform the conven-                                          cession, both P@1 and P@10 results are reported,
+tional ListNet approach, particularly with a large                                          though we focus on P@1 since it is more con-
+k. This confirms our argument that rank informa-                                            cerned for applications such as QA. Note that for
+tion can be learned from a subset of the permu-                                             stochastic ListNet, the optimal number of samples
+tation classes that are randomly selected, and the                                          (document lists) has been selected according to the
+partial rank learning can lead to even better per-                                          P@1 performance on the validate set.
+formance than the full rank learning, the case of                                              From these results, it can be seen that the con-
+conventional ListNet. This is an interesting result                                         ventional Top-1 ListNet is rather fast, however the
+and demonstrates the stochastic ListNet is both                                             Top-2 model is thousands of times slower. With
+faster and better than the conventional ListNet. It                                         k > 2, the training time becomes prohibitive and
+is also seen that the adaptive distribution sampling                                        so they are not listed in the Table. This is expected
+performs slightly better than the fixed distribution                                        since the conventional ListNet considers the full
+sampling. This is not surprising as the adaptive                                            set of permutations which is a huge number with
+distribution sampling uses a more reasonable rel-                                           a large k. With the stochastic ListNet, the training
+evance score (neural network output) to balance                                             time is dramatically reduced. Even with a large k,
+relevant and irrelevant documents. The uniform                                              the computation cost is still manageable, because
+distribution sampling performs a little worse than                                          the computation is mostly determined by the num-
+the other two sampling methods, probably caused                                             ber of object lists, rather than the value of k. When
+by the less informative uniform distribution.                                               comparing the three sampling methods, it can be
+   Another observation is that in all the four fig-                                         found the convergence speed of the uniform distri-
+ures, the performance of the stochastic ListNet                                             bution approach is the slowest, probably due to the
+methods increases with more samples of the ob-                                              ineffective selection for relevant documents. The
+ject lists. However if there are too many samples,                                          adaptive distribution sampling is the fastest, prob-
+the performance starts to decrease. This can be                                             ably attributed to the collaborative update of the
+explained by the fact that the sampling prefers rel-                                        model and the distribution.
+evant documents which are more informative. A                                                  As for the P@1 performance, the stochastic
+larger sample set often includes more informative                                           ListNet method generally outperforms its non-
+documents; however if the set is too large, many                                            stochastic counterpart, particularly with the adap-
+irrelevant documents will be selected and the per-                                          tive distribution sampling. For example, the best
+P@1 results obtained on the test data with the                                   0.42
+
+
+stochastic Top-1 ListNet is 0.4127, which outper-                                0.41
+
+forms the conventional Top-1 ListNet (0.4119).
+
+                                                               P@1 performance
+                                                                                  0.4
+This advantage of stochastic ListNet, as we ar-
+gued, is largely attributed to its capability of learn-                          0.39
+
+
+ing partial rank information with samples of par-                                0.38    ADS ListNet
+                                                                                         FDS ListNet
+
+tial sequences of the rank list.                                                         UDS ListNet
+
+                                                                                 0.37
+                                                                                     1      2          3       4     10      50       100
+   Comparing the results with different k values,                                                              k
+
+
+it can be seen that a larger k tends to offer better
+P@1 performance on the training set, with either            Figure 5: The P@1 performance on the test data
+the conventional ListNet or the stochastic ListNet.         with the stochastic Top-k ListNet approach, where
+For example, with the conventional ListNet, the             k varies from 1 to 100.
+results are 0.4101 vs. 0.4119 with the Top-1 and
+Top-2 models respectively. However, the perfor-                Nevertheless, the P@1 performance improve-
+mance gap is rather marginal, and the advantage             ment with a large k is rather marginal, and an
+with the large k does not propagate to the results          over large k simply reduces the performance. To
+on the test data (as has been seen in Figure 1 and          make it clear, we vary the value of k from 1 to
+Figure 2). This indicates that for the conventional         100 and plot the P@1 results in Figure 5). It can
+ListNet, the Top-1 model is not the only choice in          be seen that larger k (> 4) does not offer any
+the sense of computation complexity, but also the           merit but causes performance instability, particu-
+best choice in the sense of P@1 performance.                larly with the adaptive sampling approach. As we
+   For stochastic ListNet, the performance im-              have discussed, with the stochastic ListNet, par-
+proves with k increases. In contrast to the con-            tial rank information can be learned with simple
+ventional ListNet, this improvement propagates to           Top-k models, even the Top-1 model. This capa-
+the results on the test data. For example, with the         bility of partial rank learning with simple models
+adaptive distribution sampling, the P@1 results on          reduces the necessity of employing complex Top-k
+the training set are 0.4102 vs. 0.4184 with the             models. This is a highly valuable conclusion, and
+Top-1 and Top-3 models respectively, and the re-            it suggests that a simple Top-1 or Top-2 model is
+sults on the test data are 0.4121 vs. 0.4177 respec-        sufficient for the ListNet method, if the stochas-
+tively.                                                     tic method is applied. Considering the trade-off
+
+                                                               P@1                                                  P@10
+   Model        Top-k    Sampling      Time (s)     Train      Val.                        Test             Train    Val.          Test
+  C-ListNet      k=1        -            2.509     0.4101     0.4107                      0.4119           0.2684   0.2684        0.2676
+  S-ListNet      k=1       UDS           0.753     0.4097     0.4106                      0.4120           0.2680   0.2683        0.2676
+  S-ListNet      k=1       FDS           0.391     0.4094     0.4090                      0.4127           0.2679   0.2681        0.2676
+  S-ListNet      k=1       ADS           0.375     0.4102     0.4097                      0.4121           0.2680   0.2682        0.2677
+  C-ListNet      k=2        -           2275.5     0.4119     0.4043                      0.4043           0.2678   0.2674        0.2674
+  S-ListNet      k=2       UDS           2.898     0.4140     0.4143                      0.4130           0.2682   0.2686        0.2681
+  S-ListNet      k=2       FDS           2.410     0.4145     0.4144                      0.4164           0.2684   0.2688        0.2684
+  S-ListNet      k=2       ADS           2.013     0.4162     0.4168                      0.4145           0.2686   0.2689        0.2687
+  S-ListNet      k=3       UDS           4.358     0.4167     0.4204                      0.4152           0.2686   0.2681        0.2680
+  S-ListNet      k=3       FDS           3.997     0.4137     0.4205                      0.4131           0.2687   0.2695        0.2685
+  S-ListNet      k=3       ADS           3.483     0.4184     0.4196                      0.4177           0.2692   0.2697        0.2689
+  S-ListNet      k=4       UDS           6.161     0.4145     0.4226                      0.4104           0.2686   0.2694        0.2687
+  S-ListNet      k=4       FDS           5.773     0.4145     0.4232                      0.4150           0.2690   0.2695        0.2686
+  S-ListNet      k=4       ADS           4.358     0.4149     0.4247                      0.4164           0.2692   0.2700        0.2689
+
+Table 1: Averaged training time (in seconds), P@1 and P@10 on training, validation (Val.) and test
+data with different Top-k methods. ‘C-ListNet’ stands for conventional ListNet, ‘S-ListNet’ stands for
+stochastic ListNet.
+between computation cost and model strength, we        by uniform distribution sampling, there is a large
+recommend stochastic Top-2 ListNet which deliv-        probability that the sampled object lists involve
+ers better P@1 performance than the Top-1 model        documents that are all labelled by 0. This leads
+consistently, with sufficiently fast computing. If     to an inefficient learning. Another consequence
+more computation is affordable, stochastic Top-3       of the harsh labeling is that the power of compli-
+ListNet can be used to obtain better performance.      cated ranking models is largely constrained. For
+   Finally, we highlight that the conclusions ob-      example, with the Top-k (k > 1) ListNet model,
+tained from the P@1 results and the P@10 re-           many of the k documents in a candidate list are la-
+sults perfectly match. In fact, the P@10 results       belled as the same score, resulting in limited rank
+look more consistent between training and test         information for the Top-k model to learn. This is
+data, and the advantage of the stochastic approach     why Top-k models did not exhibit much superi-
+seems more clear, particularly with the adaptive       ority to the Top-1 model in our experiments. We
+sampling. This is not surprising as the optimiza-      argue that top-k models would provide more con-
+tion goal of ListNet is essentially to form a good     tributions with more thorough labels (e.g., scores
+rank that involves multiple candidates, and so         in real values). This is an ongoing research of our
+P@10 is apt to measure the superiority of a bet-       group.
+ter rank approach.                                        Finally, we highlight that the stochastic ap-
+                                                       proach is not limited to the ListNet model, but
+5 Discussion                                           any model for listwise learning.            It is well
+                                                       known that listwise learning outperforms pairwise
+An interesting observation with the stochastic         learning, due to it is capability of learning full
+ListNet approach is that sampling more relevant        ranks (Liu, 2009). However learning full ranks
+documents improves performance. This can be            requires unaffordable computation and so is in-
+explained by the data imbalance between rele-          feasible in practice, even with the Top-k approx-
+vant and irrelevant documents, i.e., there are much    imation. Our work demonstrated that learning
+more irrelevant documents than relevant docu-          full ranks can be approximated by learning partial
+ments in the training data. This imbalance leads to    ranks, and a limited number samples of such par-
+biased models that tend to classify all documents      tial ranks is sufficient to convey the rank informa-
+as irrelevant. The re-sampling approach can be re-     tion. This stochastic learning is very fast, and even
+garded as a way of balancing the two classes, and      delivers better performance. It can be regarded as
+the fixed and adaptive distribution sampling can be    a general framework that treats both the pair-wise
+regarded as another way to achieve the goal. Note      learning and the full rank learning as two special
+that in the fixed distribution sampling, the distri-   cases. In fact, if the set of partial ranks involves
+bution is solely dependent on the human-labeled        all the permutation classes, it reduces to the con-
+scores. These scores are good measures of the          ventional listwise learning, and if the set of par-
+rank of relevance but not good measures of the rel-    tial ranks involves all object pairs, it resembles the
+evance itself. A possible way to solve this problem    pairwise learning. A wide range of listwise learn-
+is to learn a scoring function that maps human-        ing methods can benefit from the idea of stochastic
+labelled scores to more reasonable measures of         learning provided in this paper.
+document relevance, though we took a different
+way that employs the network outputs as the rel-       6 Conclusion
+evance measures, which is what the adaptive dis-
+tribution sampling method does. Note that the net-     This paper proposed a stochastic ListNet method
+work output is a natural measure of document rele-     to speed up the training of ListNet models and im-
+vance, so the adaptive distribution sampling works     prove the ranking performance. The basic idea is
+the best in our experiments.                           to approximate the full rank learning by learning a
+   Another related issue is the harsh labelling of     small number of partial ranks. Three sampling ap-
+the AM2008 dataset. In this dataset, documents         proaches were proposed to select the partial ranks,
+are labelled by only three values {0, 1, 2}, which     and Top-k ListNet models with various complex-
+is rather imprecise and the rank information is very   ity (k values) were investigated.
+limited. This harsh labeling is another reason why        Our preliminary results on the MQ2008 dataset
+the uniform distribution sampling does not work:       confirmed that the stochastic ListNet approach can
+dramatically speeds up the model training, and         References
+more interestingly, it can produce better ranking     [Cao et al.2007] Zhe Cao, Tao Qin, Tie-Yan Liu, Ming-
+performance than the conventional ListNet. Espe-         Feng Tsai, and Hang Li. 2007. Learning to rank:
+cially, the adaptive distribution sampling method        from pairwise approach to listwise approach. In
+delivered the best P@1 performance. An appeal-           Proceedings of the 24th international conference on
+                                                         Machine learning, pages 129–136. ACM.
+ing observation is that the simple Top-2 model is
+very effective and more complex Top-k models          [Dang2013] Van B. Dang.           2013.       Ranklib.
+seem not very necessary, considering the trade-off       http://people.cs.umass.edu/vdang/ranklib.html/.
+between training complexity and model strength.       [Jin et al.2010] Feng Jin, Minlie Huang, and Xiaoyan
+This observation, however, is purely based on the         Zhu. 2010. A comparative study on ranking
+MQ2008 dataset. As have been discussed, more              and selection strategies for multi-document summa-
+detailed human labels may require more complex            rization. In Proceedings of the 23rd International
+                                                          Conference on Computational Linguistics: Posters,
+models, for which the stochastic method proposed          pages 525–533. Association for Computational Lin-
+in this paper is essential to conduct the model           guistics.
+training. For the future work, we plan to study
+                                                      [Kokkodis et al.2015] Marios Kokkodis, Panagiotis Pa-
+Top-k ListNet models with other databases and ap-
+                                                         padimitriou, and Panagiotis G Ipeirotis. 2015. Hir-
+ply the stochastic learning approach to other list-      ing behavior models for online labor markets. In
+wise learning to rank methods.                           Proceedings of the Eighth ACM International Con-
+                                                         ference on Web Search and Data Mining, pages 223–
+Acknowledgments                                          232. ACM.
+
+This research was supported by the National           [Liu et al.2007] Tie-Yan Liu, Jun Xu, Tao Qin, Weny-
+Science Foundation of China (NSFC) under the              ing Xiong, and Hang Li. 2007. Letor: Benchmark
+                                                          dataset for research on learning to rank for informa-
+project No. 61371136, and the MESTDC PhD                  tion retrieval. In Proceedings of SIGIR 2007 work-
+Foundation Project No. 20130002120011. It was             shop on learning to rank for information retrieval,
+also supported by Sinovoice and Pachira.                  pages 3–10.
+                                                      [Liu2009] Tie-Yan Liu. 2009. Learning to rank for in-
+                                                          formation retrieval. Foundations and Trends in In-
+                                                          formation Retrieval, 3(3):225–331.
+                                                      [Sculley2009] D Sculley. 2009. Large scale learning to
+                                                          rank. In NIPS Workshop on Advances in Ranking,
+                                                          pages 1–6.
+
+                                                      [Yang and Hsu2008] Yi-Hsuan Yang and Winston H
+                                                         Hsu. 2008. Video search reranking via online ordi-
+                                                         nal reranking. In Multimedia and Expo, 2008 IEEE
+                                                         International Conference on, pages 285–288. IEEE.
+
+                                                      [Yang et al.2009] Yi-Hsuan Yang, Yu-Ching Lin, Ann
+                                                         Lee, and Homer H Chen. 2009. Improving musical
+                                                         concept detection by ordinal regression and context
+                                                         fusion. In ISMIR, pages 147–152. Citeseer.
+

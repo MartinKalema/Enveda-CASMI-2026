@@ -1,0 +1,1293 @@
+                                             SpecTUS: Spectral Translator for Unknown Structures
+                                                       annotation from EI-MS spectra
+                                           Adam Hájek1 , Michal Starý2 , Elliott Price3 , Filip Jozefov4,5 , Helge Hecht3 ,
+                                                                         Aleš Křenek1*
+
+
+
+
+arXiv:2502.05114v2 [cs.LG] 20 Feb 2026
+                                               1 Institute of Computer Science, Masaryk University, Šumavská 525/33,
+
+                                                                            Brno, 602 00, Czech Republic.
+                                           2 School of Computation, Information and Technology, Technical University Munich,
+
+                                                         Boltzmannstraße 3, Garching bei München, 85748, Germany.
+                                            3 RECETOX, Masaryk University, Kamenice 753/5, Brno, 625 00, Czech Republic.
+                                                4 Faculty of Informatics, Masaryk University, Botanická 554/68a,
+
+                                                                            Brno, 602 00, Czech Republic.
+                                             5 Institute of Organic Chemistry and Biochemistry of the CAS, Flemingovo nám.
+
+                                                                542/2, Praha 6-Dejvice, 160 00, Czech Republic.
+
+
+                                                         *Corresponding author(s). E-mail(s): ljocha@ics.muni.cz;
+                                                     Contributing authors: ahajek@mail.muni.cz; michal.stary@tum.de;
+                                                          elliott.price@recetox.muni.cz; filip.jozefov@uochb.cas.cz;
+                                                                        helge.hecht@recetox.muni.cz;
+
+
+                                                                                         Abstract
+                                              Compound identification and structure annotation from mass spectra are essential in drug
+                                              detection, forensics, and small molecule discovery. All the current approaches to compound
+                                              identification from electron ionization mass spectra (EI-MS) are dependent on different forms
+                                              of searching databases that are orders of magnitude smaller than the space of potential
+                                              molecular structures they attempt to cover.
+                                              We introduce SpecTUS: Spectral Translator for Unknown Structures, a deep learning model
+                                              for de novo structural annotation, translating gas chromatography EI-MS spectra directly into
+                                              molecular structures without requiring reference databases. This enables the identification of
+                                              novel compounds absent from spectral libraries.
+                                              In a rigorous evaluation, SpecTUS significantly outperformed standard database search tech-
+                                              niques. On a held-out test set of 28 267 spectra from NIST 20, the model’s single suggestion
+                                              perfectly reconstructed 43% of the subset’s compounds, strictly outperforming hybrid database
+                                              search (common method among practitioners) in 76% of cases. With ten suggestions, it
+                                              achieved 65% perfect reconstructions, surpassing hybrid search in 84% of cases.
+
+                                              Keywords: GC-EI-MS, GC-MS, mass spectrometry, gas chromatography, transformer, electron
+                                              ionization, NMT, deep learning, machine learning, spectra reconstruction, compound annotation
+
+
+
+
+                                         Gas chromatography-mass spectrometry (GC-MS) is a widely used method for identifying com-
+                                         pounds, particularly those that are volatile and thermally stable. In the first stage, compounds
+
+
+
+                                                                                              1
+are separated via gas chromatography. Next, neutral molecules are ionized, generating charged
+ions for analysis. The MS then measures the mass-to-charge ratio (m/z) of each fragment, along
+with the abundance of fragments at each m/z value. After processing, this analysis produces a
+mass spectrum for each compound, represented as a series of peaks. Each peak corresponds to a
+unique fragment mass and is encoded as a pair of m/z value and its relative intensity, reflecting
+the fragment’s abundance in the sample.
+    Different mass spectrometry methods produce spectra with distinct characteristics based on,
+amongst other factors, the ionization technique and the number of spectrometry iterations. One of
+the most widely used, established methods is GC-EI-MS, where EI stands for electron ionization.
+A standard electron energy of 70 eV has been used for decades, ensuring relative consistency across
+spectra and compatibility of different spectral libraries. However, the variation in spectra still
+persists [1]. As this approach is central to our research, GC-EI-MS will be the focus of this study.
+    Compound identification from GC-EI-MS spectra has been approached in three main ways:
+database search, extended database search, and de novo generation.
+    In a standard database search, we compare the spectrum against a library of experimentally
+measured reference spectra using either simple similarity search (SSS) or hybrid similarity search
+(HSS) [2, 3]. SSS, which matches only peaks with the same (similar) m/z value, is effective when the
+compound being analyzed is present in the spectral library, a scenario known as the spectral match
+task. When the compound is absent from the library – the closest structure identification task –
+HSS typically performs better. HSS incorporates structural information by matching neutral losses
+in addition to fragment ions. It calculates these neutral losses by shifting one of the spectra based on
+the molecular weight difference (DeltaMass) between the query and library compounds. However,
+for HSS to work accurately, a precise DeltaMass is required, which depends on the molecular
+weight of the query compound — a value that is not always reliably estimated from GC-EI-MS
+spectra. A widely used GCMS-ID webserver [4] implements similar search approach combined with
+scoring on retention index; together with an impressive collection of curated references spectra it
+represents the state-of-the-art in standard database search.
+    Extended search approaches aim to address the limited size of spectral databases by expand-
+ing the scope of references available for comparison. One extreme from among these methods is
+an ab-initio generation of synthetic EI-MS spectra, as implemented in QCEIMS [5], by simulat-
+ing the fragmentation with quantum-chemical calculation. However, achieving sufficient accuracy
+requires high-level methods (e.g., DFT), making this approach impractical for large-scale database
+generation [6].
+    Another approach to EI spectra generation is rule-based prediction [7]. In this family of
+approaches commercial software such as MS-Fragmenter [8] exists, but those lack open source code
+and algorithm transparency.
+    Machine learning-based methods offer a faster alternative for generating synthetic spectra,
+though often at the cost of losing some accuracy. NEIMS [9] algorithmically computes the extended
+connectivity fingerprints (ECFP) [10] of a molecular structure and feeds it into a smartly designed
+multilayer perceptron to generate a low-resolution synthetic EI-MS spectrum. The model, trained
+on 240 000 experimental spectra from the NIST 17 dataset, is known for its simplicity and reason-
+able reliability, making it the foundation of several other methods [11, 12]. A more sophisticated
+alternative, RASSP [13], processes the structural formula augmented by atomic features with
+a graph neural network (GNN). The GNN output is passed to an attention-equipped neural
+network to predict fragments and their relative abundances. These fragments are then trans-
+formed into an EI-MS spectrum using exact atomic masses and isotopic patterns, producing
+high-resolution outputs. Compared to NEIMS, RASSP generates more accurate spectra but is
+limited to a small set of atom types (8 in the published version) and by the number of possible
+fragment formulae (4096).
+    To improve accuracy and search speed in extended spectral databases, recent methods lever-
+age machine learning to map EI-MS spectra into alternative vector spaces. DeepEI [11] is a
+model trained to translate spectra into molecular fingerprints which can be rapidly computed
+for vast structural libraries such as ZINC or PubChem, moving the similarity search into the
+
+
+
+                                                   2
+space of fingerprints. FastEI [12] combines NEIMS with a spectral embedding method inspired
+by Word2Vec [14], producing vector representations (embeddings) of spectra that later serve for
+rapid library searching.
+    To address the challenges of coverage and information loss from intermediate translations,
+recent de novo methods directly translate spectra into molecular structures. Inspired by neu-
+ral machine translation architectures, these methods typically generate SMILES [15] strings
+autoregressively based on encoded spectral information.
+    So far, all the de novo models have been exclusively trained on tandem mass spectrometry
+spectra (LC-MS/MS) resulting from a two-staged fragmentation process. In the first stage, the
+method uses soft ionization process (ESI) that enables extracting the precursor ion mass (approxi-
+mately the molecular mass of the analyzed compound). The precursor ion is further fragmented by
+hard ionization process in the second stage yielding a mass spectrum similar, yet not comparable,
+to EI-MS.
+    For instance, MassGenie [16], a ∼400 million parameter encoder-decoder transformer, maps
+MS/MS spectra, represented as embeddings of m/z values combined with positional encoding into
+SMILES strings. It was pretrained on 4.7 million synthetic spectra and finetuned on approximately
+200 000 experimental spectra from the GNPS dataset. Another method, Spec2Mol [17], separately
+trains a GRU autoencoder on 138 million SMILES strings, creating a latent space of molecular
+structures. Further, the trained GRU decoder is combined with a CNN encoder that learns to
+map experimental MS/MS spectra to the GRU’s molecular latent space using 28 000 examples
+from the NIST library. MSNovelist [18] employs an RNN encoder-decoder architecture relying
+on SIRIUS [19] to predict a molecular formula and structural fingerprint from MS/MS spectra.
+The encoder maps these inputs onto a latent space vector used further by an LSTM decoder
+to generate a SMILES string character-by-character, aided by a continuously updated molecular
+subformula representing remaining atoms. The model was trained on a dataset combining HMDB,
+COCONUT, and DSSTox databases comprising 1.2 million molecular structures. Another method,
+MS2Mol [20], employs an encoder-decoder transformer enhanced with precursor mass information
+trained on around 1 million MS/MS spectra. The model emphasizes output ordering optimization
+with a dedicated re-ranking model. Finally, Mass2SMILES [21] utilizes a smaller transformer
+encoder paired with a TCN decoder and explores variational autoencoders with continuous latent
+space generation trained on 83 000 experimental MS/MS spectra from the GNPS dataset.
+    While tandem MS enables richer analysis and can yield precursor ion weights or even formulas
+of compounds, the method’s increased complexity introduces more adjustable parameters. Due to
+the lack of consensus on standard settings, its variability can reduce consistency across spectral
+libraries.
+    We argue that despite missing precursor ion weight, the character and consistency of EI-MS
+spectra make them a well-suited representation for machine learning models focused on molecular
+structure annotation. In this paper, we introduce SpecTUS: a Spectral Translator for Unknown
+Structure reconstruction from low-resolution EI-MS spectra. At its core, SpecTUS is a 354 million
+parameter encoder-decoder transformer model that takes encoded mass spectrum as input and
+directly generates molecular structure as a SMILES string. The model can produce an arbitrary
+number of candidate structures, each accompanied by an inherent certainty score.
+    Our training process began with pretraining on a synthetic dataset of 2 × 8.6 million spectra
+generated by NEIMS and RASSP models, believed to capture sufficient foundation knowledge on
+the structure-spectra relationships. We then finetuned SpecTUS on 232 025 clean, experimentally
+measured spectra from NIST 20 (NIST/EPA/NIH Mass Spectral Library of electron ionization
+spectra, 2020 version) to adjust to true experimental data. Additionally, we conducted experiments
+to assess the impact of various pretraining strategies, tokenization schemes, and input encoding
+methods, adapting the model to suit the spectra-to-molecules translation task as closely as possible.
+Our evaluation demonstrates that SpecTUS effectively identifies unseen compounds, showcasing
+its potential for accurate, rapid structure annotation from EI-MS spectra.
+
+
+
+
+                                                 3
+   Alongside the paper, we release two datasets together containing 17.2 million synthetic spectra
+generated by NEIMS and RASSP models, the pretrained SpecTUS model, and all necessary train-
+ing and evaluation scripts, accompanied by a detailed tutorial. While the final finetuned model
+cannot be distributed freely due to NIST’s commercial licensing, we provide preprocessing scripts
+and our data splits to support full reproducibility. We also provide a hosted demo application with
+limited access to the final model for anyone to test the model’s capabilities.
+
+Results
+SpecTUS evaluation was driven by the motivation to demonstrate that the method is capable of
+generalization, i.e. it captures knowledge contained in the training data and is able to apply it to
+unseen spectra of unseen compounds.
+   Moreover, we show that SpecTUS outperformed traditional database search methods when
+identifying compounds not present in the reference database. This highlights its capability to
+address the limitations of existing approaches in the compound identification task.
+
+Baselines
+We compared SpecTUS against database search methods using the NIST 20 dataset, where the
+SpecTUS training set (232 035 spectra, see Sect. Finetuning dataset for details) served as the
+reference library for database search and disjoint testing sets were used as queries. The reference
+library did not overlap with any test or validation data, and it remained representative for practical
+applications in terms of size.
+    Our evaluation included the following baselines:
+• Simple Similarity Search (SSS): This method is universally applicable for database searches
+  as it does not rely on any additional measurements or precise molecular weight (MW) esti-
+  mates. It matches query spectra to the library based purely on spectral similarity, computed as
+  augmented cosine similarity on a set of matching peak pairs [3].
+• Hybrid Similarity Search (HSS): The most commonly used method for closest structure
+  identification from a database. HSS combines fragment ion matching with neutral loss analysis
+  and incorporates the molecular weight of the query compound into the computation [3]. While
+  effective, HSS depends on knowing the molecular weight information, which is not always reliably
+  determined from EI-MS spectra. However, for our evaluation purposes, we provide the weight
+  available in the testing sets, which biases the results towards better HSS performance compared
+  to the real-world scenario.
+• Best Database Candidate (BDC): For this baseline, the best candidate is selected from
+  the reference library based on structural similarity between the query compound and reference
+  compounds, measured by Tanimoto similarity over Morgan fingerprints [10]. This approach is
+  artificial, and we don’t have access to it in real-world scenarios because the analyte’s structure
+  is precisely what we aim to determine. We use BDC to determine the upper bound for database
+  search methods.
+These baselines reflect both standard practices and theoretical limits of conventional methods for
+spectra identification.
+
+Metrics
+Evaluation of SpecTUS performance, its comparison with the baseline, as well as with other
+solutions is based on several metrics we describe briefly in this section. Detailed formal definitions
+of those can be found in Sect. Methods. All the metrics assume they are applied on a given test
+set of spectra for which the structures (ground truth) are known.
+    For a given set of test spectra, top-k accuracy (Acck ) lets the model predict k structures for
+each spectrum, and measures the proportion of spectra for which the correct structure appears
+among the model’s k predictions.
+
+
+                                                  4
+    Average top-k similarity (Simk ) quantifies how structurally similar, on average, the most
+accurate candidate is to the ground truth molecule. For each query, the similarity is calculated
+as the highest Tanimoto similarity between the Morgan fingerprints of the ground truth molecule
+and each of the first k retrieved candidates. The similarities are then averaged over all queries in
+the testing set.
+    To compare two methods, we define the win rate of the first method as the proportion of
+test spectra for which its best prediction among the top k is strictly better than that of the
+other method. To overcome the imperfection of Morgan fingerprints, an exact structural match is
+considered the best outcome; if neither method achieves an exact match, the one with the higher
+Tanimoto similarity on Morgan fingerprints is deemed superior. Similarly, the at-least-as-good
+rate complements the win rate. That is, draws are counted in favor of the first method too.
+
+
+
+Scenarios
+We evaluated the model’s performance in three scenarios, varying the number of returned can-
+didates: 1, 10, and 50. As the number of candidates increased, the overall top-k performance
+improved, demonstrating the model’s ability to provide more comprehensive predictions. However,
+while the model assigns sequence probabilities to rank its generated candidates, this ranking is
+not sufficiently reliable to replace expert evaluation. For instance, the model’s top-ranked candi-
+date from a set of 10 is, on average, slightly less accurate than the one candidate generated in the
+single-candidate scenario. This suggests that manual expert validation remains crucial for multi-
+candidate scenarios. Consequently, we did not use the model-based ranking during evaluation. The
+three evaluated scenarios are as follows:
+• Single-candidate scenario (SpecTUS1 ): Requires no manual intervention but has lower
+  accuracy, making it suitable for high-throughput workflows where speed is prioritized over
+  precision.
+• Ten-candidate scenario (SpecTUS10 ): Offers a balanced trade-off, providing sufficient diver-
+  sity in predictions while keeping manual evaluation manageable. This makes it particularly
+  well-suited for practical use in analysis workflows.
+• Fifty-candidate scenario (SpecTUS50 ): Demonstrates the model’s potential for providing
+  highly accurate predictions but at the cost of substantial manual effort to evaluate all candidates.
+By tailoring the number of generated candidates to the specific application, users can leverage the
+model’s strengths while balancing accuracy and effort.
+
+
+
+Datasets
+To evaluate SpecTUS, we used a held-out NIST 20 test split (see Section 5) along with sev-
+eral publicly available libraries, including SWGDRUG, Cayman, and MONA. The NIST 20 and
+SWGDRUG databases provide highly curated spectra, making them ideal for training and vali-
+dation. In contrast, testing on the Cayman and MONA libraries allowed us to assess the model’s
+performance on spectra collected and processed with less standardized methods, highlighting the
+challenges posed by varying spectral acquisition techniques.
+    To demonstrate the generalization capabilities of SpecTUS, we carefully filtered all test sets to
+exclude any compounds present in the synthetic or experimental training datasets. Additionally,
+compounds containing deuterium, which was not included in the training datasets, were removed,
+and model-specific filters were applied – a maximum m/z value of 500, a maximum of 300 peaks
+per spectrum, and a maximum SMILES length of 100 characters. The vast majority of spectra
+removed from SWGDRUG, Cayman library, and MONA were excluded due to overlap with the
+NIST 20 training set.
+    Table 1 provides a detailed overview of the final dataset sizes before and after filtering.
+
+
+                                                  5
+                      Table 1 The number of spectra in each test library before and after
+                      filtering. The filtering included removing overlaps with the NIST
+                      training set, removing compounds containing deuterium, and filtering
+                      out datapoints with m/z exceeding 500, more than 300 peaks, or
+                      SMILES string exceeding 100 characters.
+
+                                           NIST test    SWGDRUG        Cayman      MONA
+                           original size      29218         3589          2262      18914
+                        used for testing      28267         1640           469       5015
+
+
+
+
+Fig. 1 Percentage of cases where database search methods (SSS and HSS) successfully retrieved the closest struc-
+ture from the reference database among the top-1, top-10, and top-50 suggested candidates. Performance is evaluated
+across all test sets: NIST test split, SWGDRUG, Cayman, and MONA.
+
+
+Baseline results
+Initially, we compared SSS and HSS, to the upper-bound based on structural similarity (BDC)
+to quantify the limitations of current database search methods (Figure 1 and Table A1). The
+analysis focuses on the percentage of cases where the standard database search methods (SSS,
+HSS) successfully retrieved the most structurally similar compound from the database among their
+top-k candidates. Importantly, this metric does not evaluate the quality of the retrieved candidates
+relative to the ground truth; rather, it highlights how standard database search methods perform
+within the inherent constraints of database searching. Across all test sets (NIST test, SWGDRUG,
+Cayman, and MONA), several patterns emerged.
+    The performance of database search methods was relatively consistent across datasets, except
+for MONA, possibly due to higher occurrence of TOF spectra or generally less thorough curation.
+Surprisingly, results for the NIST test set were lower than those of Cayman, despite better curation
+of the NIST library.
+    HSS consistently outperformed SSS, demonstrating its superiority across all datasets. However,
+even HSS struggled as the top-50 candidate list did not surpass the 60% success rate, and the
+performance of HSS10 hovered around 50% at maximum. SSS failed to exceed the 30% success
+rate, even with 50 retrieved candidates, and SSS1 retrieved the optimal candidate in only around
+10% cases.
+    Finally, the number of retrieved candidates significantly impacts performance. Extending the
+list from 1 to 10 candidates yields a substantial improvement, but further extending it to 50
+candidates offers only marginal additional gains, especially considering the increased workload for
+experts required to manually evaluate these candidates. For practical purposes, retrieving a single
+candidate is insufficient, delivering the correct structure in only about 20% cases (HSS), depending
+on spectrum quality.
+    These findings confirmed that current standard database search methods, while commonly
+used in practice, have limits in identifying unknown compounds.
+
+
+                                                        6
+Fig. 2 Comparison of average similarity and accuracy metrics across all tested methods, testing datasets, and
+three retrieval scenarios (1, 10, and 50 candidates). ST represents SpecTUS, while the abbreviations of the baseline
+database search methods (SSS, HSS ) are explained in the text – Section Baselines. Simk is displayed by the color
+bars, similarity of the theoretical upper bound for database search methods (BDC ) is expressed as a pink dashed
+line. Acck values for SpecTUS are shown in black lines; they are inherently zero for all the other methods. The
+three Acck values in each column correspond to 1, 10, and 50 candidates, displayed from bottom to top.
+
+
+
+SpecTUS results
+The essential results of SpecTUS comparison with traditional database search methods are shown
+in Fig. 2 and Fig. 3. The tables with exact values supporting the figures are included in Sect. A.2.
+    SpecTUS’ capability to generate candidates it has not encountered during training allows it
+to accurately reconstruct compounds that database search cannot identify precisely. As shown in
+Figure 2, with just one candidate, the SpecTUS accuracy (finding the correct compound) Acc1 is
+43% on the NIST test set. With 10 candidates, it reached the accuracy of 65%. For the less curated
+datasets, the Acck lowered, but even for the MONA dataset, SpecTUS reached Acc1 of 21% and
+Acc10 of 34%. The Acck for any database search method in this scenario is inherently 0%.
+    On the NIST test and SWGDRUG datasets, which contain thoroughly curated spectra, Spec-
+TUS achieved an average top-1 similarity of 0.67 and 0.69, respectively, outperforming HSS even
+with 50 candidates (62 for NIST and 0.61 for SWGDRUG), and it approached the theoretical best
+database performance that reached 0.72 for NIST and 0.69 for SWGDRUG.
+    In the ten-candidate scenario, SpecTUS improved further, achieving average similarities of
+0.81 on NIST and 0.82 on SWGDRUG, surpassing even the theoretical limit of database search
+(BDC); this is an evidence of SpecTUS’ capability to generalize beyond the search among known
+structures.
+    For less curated datasets, such as Cayman Library and MONA, the performance gap between
+SpecTUS and database search methods has narrowed. However, even on these datasets, a single
+SpecTUS prediction matched the performance of 10 candidates retrieved by HSS.
+    The win and at least as good rates of SpecTUS compared to HSS and BDC across datasets
+(Figure 3 and Table A6) further illustrate the model’s strengths. When compared to HSS
+(Figure 3A), SpecTUS consistently performed better on more rigorously curated spectra (NIST
+test, SWGDRUG) and benefited more from generating additional candidates, except on the MONA
+dataset. Specifically, SpecTUS achieved win rates of 76–86% on NIST, 72–85% on SWGDRUG,
+63–74% on Cayman, and 62–65% on MONA. When draws were included, the at least as good
+rate increased further, reaching 80–90% on the NIST test and SWGDRUG datasets. These find-
+ings demonstrate that SpecTUS is a far more reliable candidate generator for identifying novel
+molecules than standard HSS.
+    Figure 3B shows SpecTUS’ comparison with BDC, highlighting its ability to outperform even
+the best candidates in the database. On the NIST test and SWGDRUG datasets, a single SpecTUS
+
+
+                                                         7
+Fig. 3 Comparison of win rate and at-least-as-good rate of SpecTUS over database search method HSS (A) and
+a theoretical database search upper bound BDC (B) across all testing datasets, and three retrieval scenarios (1,
+10, and 50 candidates). The diagram evaluates corresponding retrieval scenarios, such as SpecTUS10 versus HSS10
+(Win(SpecTUS10 , HSS10 ), providing a direct comparison of performance under identical conditions.
+
+
+candidate was strictly better than BDC in 47% and 45% cases, respectively. However, with 10 can-
+didates, SpecTUS outperformed BDC in 70% of the cases for both the NIST test and SWGDRUG
+and in 56% cases for the Cayman library. The at least as good rate of SpecTUS10 again raised the
+bar a bit higher, ranging between 72–74% on the NIST test and SWGDRUG datasets. The win
+rate on the MONA dataset ranged from 21-40% which mirrors SpecTUS’ decreased performance
+on less curated spectra. Again, these results show SpecTUS’ ability to effectively generalize over
+training data and to help mitigate the database coverage issue.
+    For the complete results comparing SpecTUS with database search methods, refer to the
+supplementary tables in A6.
+
+Examples
+To better understand the predictive performance of SpecTUS and HSS, we analyzed their Sim10
+scores on 200 randomly sampled queries from the NIST test set. As shown in Figure 4, the scat-
+terplot compares the Sim10 scores of both models, with the dashed diagonal indicating equal
+performance. Notably, SpecTUS achieved a perfect Tanimoto similarity score of 1 in 65% of the
+queries, highlighting its ability to make accurate predictions more consistently than HSS. Addi-
+tionally, five examples, highlighted in red on the scatterplot and detailed in the accompanying
+table, were handpicked to illustrate common error types that occur during predictions.
+    One frequent error involves extending or shortening repetitive chains, as seen in example 2
+for HSS and example 5 for SpecTUS. Another typical issue is the addition of a correct functional
+group but on an incorrect atom in an aromatic ring, such as in example 1 (SpecTUS) and example
+2 (SpecTUS). A third type of error involves accurately decoding large molecular substructures
+but incorrectly connecting them, as illustrated in example 3 (SpecTUS). These examples serve to
+visually highlight typical challenges in molecular prediction tasks and provide a sense of how such
+errors look in practice.
+    Example 5 also highlights a limitation of the Tanimoto similarity metric when applied to
+molecular fingerprints. HSS prediction, in this case, achieves a perfect similarity score despite
+representing a different molecule from the ground truth. This issue arises particularly in long,
+repetitive chains, where structural differences may not impact the fingerprint representation. Tan-
+imoto similarity is a useful and widely used measure, but its limitations should be considered,
+especially in cases where structural nuances are critical.
+
+Inference speed
+The size of SpecTUS (354 million parameters) allows the model to be powerful enough to handle
+the task at hand yet lightweight enough to be meaningfully used in practical applications. To
+
+
+                                                       8
+Fig. 4 The scatterplot on the left illustrates the Sim10 scores for 200 randomly sampled queries from the NIST test
+set, comparing SpecTUS and HSS predictions. Each point represents a single query, with its position determined
+by the Sim10 scores of SpecTUS (x-axis) and HSS (y-axis). The dashed line indicates where both models achieved
+identical Sim10 values. Notably, 65% of the SpecTUS predictions reached a perfect Tanimoto similarity of 1.
+Highlighted in red are five specific examples, further detailed in the table on the right. For each example, the
+ground truth molecule (Label) and the predictions from HSS and SpecTUS are shown, along with their Tanimoto
+similarity (T) to the label, computed using Morgan fingerprints. For faster comparison, correctly predicted regions
+are marked with green ellipses, while errors are enclosed in red ellipses. These examples were hand-picked to
+illustrate typical errors and highlight specific regions of the scatterplot.
+
+
+                          Table 2 The time required to generate 1, 10, or 50
+                          candidates for a single query was evaluated across three
+                          hardware settings. In the H100 setting, we used the top tier
+                          NVIDIA H100 80 GB graphics card, the RTX5000 setting
+                          used one mid-range NVIDIA Quadro RTX 5000 16GB GPU,
+                          and the CPU setting uses one Xeon Gold 6130 CPU along
+                          with 8 GB of RAM.
+
+                                         1 candidate    10 candidates    50 candidates
+                            H100         0.2 s          0.4 s            1.9 s
+                            RTX5000      0.5 s          1.1 s            7.6 s
+                            CPU          8s             36 s             450 s
+
+
+demonstrate its potential usage scenarios, we benchmarked SpecTUS inference on three hardware
+setups: a high-end GPU, a mid-range GPU, and a laptop-like CPU configuration. While exact
+prediction speeds depend on the specific hardware used, we provide a general overview in the
+Table 2.
+    Our benchmarks show that SpecTUS inference can run comfortably on a single CPU with 8
+GB of RAM, processing a spectrum in approximately 8 seconds for a single generated candidate
+or 36 seconds for 10 candidates. Using even an affordable mid-range GPU significantly accelerates
+inference, enabling spectra to be analyzed within seconds or even fractions of a second.
+
+Discussion
+SpecTUS addresses the problem of de novo mass spectra reconstruction, which means a direct
+translation from the domain of mass spectra into the domain of molecular structures. It focuses on
+processing unseen spectra of unknown compounds, and it is the first model specifically designed to
+reconstruct molecular structures from low-resolution GC-EI-MS spectra without requiring addi-
+tional supporting information like a precursor ion mass or molecular formula (on the contrary,
+SpecTUS predicts these even more accurately than recent methods [22]).
+    Our approach was inspired by existing de novo MS/MS spectra reconstruction models, such as
+MSNovelist [18] or Spec2Mol [17], and especially MassGenie [16] which adopted various concepts
+from natural language processing. In addition to adapting our model to a different type of spectra,
+we introduced several novel ideas, some inspired by neural machine translation. These include
+integrating multiple sources of synthetic spectra, innovative input encoding, and spectra source
+indication. Each new approach was experimentally evaluated to ensure the optimal configuration
+(see Section 5).
+
+
+                                                        9
+    The SpecTUS’s architecture is an encoder-decoder transformer with 354 million trainable
+parameters, based on BART [23], developed for natural language processing originally. The model
+was pretrained on a large set of synthetic spectra to develop a comprehensive understanding of
+the chemical space of small molecules, followed by finetuning on NIST 20, a smaller high-quality
+set of experimental spectra. While this general pretraining-finetuning strategy has been employed
+in models like MassGenie and MSNovelist, SpecTUS introduces a unique approach to generating
+and integrating synthetic spectra, setting it apart from previous methods.
+    SpecTUS was evaluated on multiple test datasets, including a held-out subset of NIST and
+subsets of SWDRUG, Cayman, and MONA libraries. To align with the unknown compound identi-
+fication scenario, the testing compounds were strictly disjoint from all compounds used for training
+both spectra generators and SpecTUS. Potential data leakage was avoided by excluding conflicting
+records based on canonicalized SMILES strings with stereoisomeric nuances removed, effectively
+ensuring no overlap between the training and testing sets. This rigorous data separation allowed us
+to confidently state that SpecTUS is capable of true generalization on unseen compounds rather
+than simply memorizing the training sets. Across all the testing datasets, the model achieved
+molecule reconstruction accuracies ranging from 21–43% (Acc1 ) and 34–65% (Acc10 ) as shown in
+Table A2.
+    On the other hand, SpecTUS, like many de novo and extended database search approaches,
+cannot explicitly justify its specific outputs for a given input. It lacks an intermediate represen-
+tation, such as peak annotations or fragmentation trees (cf. [24, 25]), and it does not provide
+reference spectra for the candidate structures (typical in standard database searches). This limits
+the possibility of further manual correction of the predicted molecular structures. Additionally,
+the model’s poorer performance on the Cayman and MONA test sets – compared to the more rig-
+orously curated NIST or SWGDRUG libraries – highlights its sensitivity to the quality of input
+spectra.
+    We compare SpecTUS with the traditional structure identification approach widely used
+by practitioners, which relies on searching reference spectra databases. This approach typically
+involves either exact peak matching (simple similarity search – SSS) when the compound is sus-
+pected to be present in the database, or a more complex hybrid similarity search (HSS) to identify
+the closest structure when the compound is absent [2, 3]. Setting aside the combinatorial estimate
+of the number of all possible small molecules, which is around 1060 [26], structural “spectra-
+less” databases contain roughly 109 unique molecules. In contrast, commercially available spectral
+libraries for database searching hold only a few hundred thousand spectra, significantly limiting
+the pool of potential matches for compound identification. As we show on the NIST held-out test-
+ing set, in case the analyzed compound is missing from the reference library, the HSS is able to
+find the library’s closest structure in only 19% cases when retrieving the single best candidate.
+Practitioners typically refine these candidates through manual analysis and suggest structural cor-
+rections. In the same setting, SpecTUS was able to offer a strictly better candidate than HSS in
+76% of the cases, and in 43% it correctly identified the exact compound.
+    The extended database search approaches attempt to address the issue of insufficient library
+coverage by enlarging it artificially. DeepEI [11] achieves a top-1 accuracy (Acc1 ) of 27.8% (com-
+pared to SpecTUS, which ranges from 21% to 43%). However, we argue that its reference library
+of 170,000 fingerprints is far too small to adequately cover chemical space, making it insufficient
+for annotating truly unknown structures. Moreover, increasing the library size would inevitably
+decrease accuracy as a larger search space inherently leads to more false positives. DeepEI also
+relies on molecular weight information, which may not always be available, and is restricted to
+compounds containing only the 10 most common elements. FastEI [12] reports an even higher Acc1
+of 36.7% while expanding its reference library to 2.2 million synthetic spectra. However, we argue
+that this coverage remains inadequate, given the over 1 billion known compounds in ZINC, and it
+is still limited to just 11 elements. In contrast, SpecTUS was trained on 17.2 million spectra from
+8.6 million compounds. Given its de novo nature and demonstrated generalization ability, its pre-
+dictions are not restricted to training spectra. Notably, as the training set size increased (Section
+5), SpecTUS consistently improved in accuracy.
+
+
+
+                                                 10
+    A straightforward comparison of SpecTUS with other de novo approaches is challenging, as
+all existing models were designed and trained for MS/MS spectra. Although MS/MS methods
+suffer from lower output stability, they provide richer spectral information, allowing for the direct
+extraction of precursor ion mass. Notably, except for MassGenie, all previously published de novo
+methods rely on precursor ion mass or molecular formula, which serve as valuable cues in the
+annotation process. In terms of performance, MassGenie [16], which employs a similar transformer-
+based architecture as SpecTUS, reported an Acc100 of 53%. This was measured on an experimental
+testing set of 93 spectra filtered from the original 243 spectra in the CASMI 2017 competition using
+model-specific filters. MSNovelist [18] achieved an Acc128 of 57% on the CASMI 2016 competition
+dataset (127 spectra) and 45% on the GNPS dataset (3863 spectra). However, MSNovelist relies on
+two streams of input – spectral information encoded as a fingerprint and a precomputed molecular
+formula. When the authors removed the spectral information from the input, and the model was
+provided only the molecular formula, the reported Acc128 dropped to 52% and 31% for CASMI
+2016 and GNPS, respectively. This raises concerns about potential data leakage in the declared
+results. Other de novo models, report significantly lower performance and are less comparable to
+SpecTUS. MS2Mol [20] yields 21% of “close match” accuracy, which is a far more relaxed metric.
+Mass2SMILES [21] appears to be rather premature, having less than 1% of exact matches, and
+approx. 2% of close match accuracy. In the most comparable scenario to existing de novo methods,
+SpecTUS achieved an Acc50 of 69% on the NIST test set, which includes 28 267 experimental
+spectra.
+    To summarize, in this paper, we present SpecTUS, a novel end-to-end model for de novo recon-
+struction of low-resolution GC-EI-MS spectra. Through a series of experiments, we demonstrate
+the impact of key design choices, offering transferable insights and good practices for future work.
+These include innovative input and output encoding strategies and the synergistic benefits of
+leveraging multiple synthetic spectra sources for pretraining. After identifying the optimal model
+architecture and training configuration, we rigorously compared SpecTUS to widely used database
+search techniques, showcasing its superior performance in terms of both identification accuracy
+and the molecular similarity of retrieved candidates.
+    We argue that while low-resolution GC-EI-MS spectra are less informationally rich compared
+to MS/MS spectra, SpecTUS achieves accuracy levels that are practically applicable in real-world
+scenarios.
+    Looking forward, we plan to explore how the increasing availability of high-resolution GC-MS
+data could further enhance molecular structure prediction. Additionally, we aim to investigate the
+effects of scaling up pretraining datasets to improve performance further.
+
+
+Methods
+Our model is built upon the standard Transformer architecture [27], the BART [23] in particular,
+with certain design modifications and hyperparameters tuned specifically to optimize molecular
+structure annotation from mass spectra. The training process involved pretraining on large datasets
+of synthetic spectra generated using custom-trained NEIMS and RASSP models, followed by
+finetuning on the experimental spectra from the NIST 20 library.
+
+
+Metrics
+Overall description of metrics used in SpecTUS evaluation and its comparison with other models
+was given in Sect. Results. Here their detailed formal definitions are provided for completeness.
+   Top-k accuracy (Acck ) measures the percentage of predictions where the correct match is
+within the first k retrieved candidates. It is formally defined as:
+
+                                                       n
+                                                  100 X
+                               Acck (Ck , G) :=          1(Gi ∈ Cki )
+                                                   n i=1
+
+
+                                                  11
+Fig. 5 Overview of the SpecTUS method. The diagram illustrates relationships of all models (blue), datasets
+(grey) and training stages (green) involved in constructing SpecTUS. It also highlights the final inference process
+(red), showing how the model transitioned from training to producing ranked molecular predictions.
+
+
+
+where k is the number of candidates considered, n is the number of queries, Ck is a list of n
+predictions and each prediction Cki for query i contains at most k candidate molecules. G is the
+list of ground truth molecules, one for each query, and Gi is a single ground truth molecule for
+query i. 1 is an indicator function that returns 1 if the condition inside is true and 0 otherwise.
+    Average top-k similarity (Simk ) quantifies how structurally similar, on average, the most
+accurate candidate among the first k retrieved molecules is to the ground truth molecule. For each
+query, the similarity is calculated as the highest Tanimoto similarity between the Morgan finger-
+prints of the ground truth molecule and each of the first k retrieved candidates. The similarities
+are then averaged over all queries in the testing set. Mathematically, the metric is defined as:
+
+                                                        n
+                                                 1X
+                                Simk (Ck , G) :=       max T(ϕ(c), ϕ(Gi ))
+                                                 n i=1 c∈Cki
+
+where T (f1 , f2 ) denotes the Tanimoto similarity between two molecular fingerprints, and ϕ(m) is
+the Morgan fingerprint of molecule m.
+    Additionally, we derived two metrics to compare two sets of predictions, Ck and Ck′ , for a
+common set of queries: win rate and at-least-as-good rate.
+    First, we had to define what it means for a prediction Cki to be better than a prediction
+  ′
+Cki  given ground truth molecule Gi . Tanimoto similarity on Morgan fingerprints is the standard
+approach to comparing molecules. However, because fingerprints are typically a lossy representa-
+tion, situations can arise where T(ϕ(m1 ), ϕ(m2 )) = 1 while m1 ̸= m2 . To address such ambiguities,
+we enhanced the ranking function with a control mechanism that checks for an exact match
+between candidates and the ground truth. This mechanism ensures that when both predictions
+achieve perfect similarity, the exact match determines superiority. The ranking function R is then
+defined as follows:
+
+                                             if max T(ϕ(c), ϕ(Gi )) > max T(ϕ(c′ ), ϕ(Gi ))
+                                   
+                                    1                                ′ ′
+                                   
+                                   
+                                               c∈Cki                      c ∈Cki
+                                   
+                       ′
+              R(Cki , Cki , Gi ) =   1       if Gi ∈ Cki ∧ Gi ∈  ′
+                                                              / Cki
+                                   
+                                   
+                                   
+                                   
+                                     0       otherwise
+                                   
+
+
+                                                        12
+Win rate calculates the percentage of cases where predictions Ck are strictly better than
+predictions Ck′ according to the ranking function R. It is defined as:
+                                                         n
+                                                    100 X
+                             Win(Ck , Ck′ , G) :=                   ′
+                                                           R(Cki , Cki , Gi )
+                                                     n i=1
+
+At-least-as-good rate extends the win rate by including cases where the two sets achieve equal
+top-k similarity (draws). This metric completes the information about direct models’ performance
+comparison by reflecting instances where predictions Ck are either better than or equivalent to
+predictions Ck′ :
+                           ALAG(Ck , Ck′ , G) := 100 − Win(Ck′ , Ck , G)
+
+Model
+SpecTUS utilizes an encoder-decoder architecture with 12 encoder blocks and 12 decoder blocks,
+16 attention heads, an embedding size of 1024, and hidden layers of feed-forward blocks of size
+4096.
+    The model’s input is a set of peaks represented by m/z and intensity values. The output is
+an autoregressively generated molecular structure representation encoded as a SMILES string.
+SpecTUS was trained on low-resolution GC-EI-MS spectra, and since integer m/z values already
+encode the relative position of peaks (unlike words/tokens in language models), we use the original
+positional encoding channel to encode intensity information. Thus, the model has three trainable
+sets of embeddings – m/z values, binned intensities, and SMILES characters. The encoder receives
+a sum of embeddings representing m/z values and intensities – one aggregated embedding for
+each peak in the spectrum; the decoder generation is based on a sequence of embeddings, each
+representing one SMILES character.
+    Following the standard bounds for small molecules and NIST 20 library statistics, the model-
+specific thresholds for training and input data were set to a maximum of 300 peaks, an m/z limit
+of 500, and a maximum SMILES length of 100. Applying these thresholds resulted in excluding
+approximately 3% of the NIST dataset. A detailed analysis of the impact of these filters is presented
+in Figure B1.
+    In total, our model consists of 354 million trainable parameters.
+
+Pretraining datasets
+Pretraining on synthetic spectra is a core component of the SpecTUS model. For the early exper-
+iments, we collected 4.7 million compounds (synth1 ) from the ZINC library and proved that
+pretraining greatly boosts the models’ performance. For the last stage of SpecTUS development,
+we decided to step up the pretraining stage and double the size of the pretraining dataset by
+repeating the collection process once again. This time we gathered another 4.8 million compounds
+(synth2 ).
+    To uniformly cover the known chemical space, we first scraped 1.8 billion SMILES strings
+from the ZINC20 library using the 2D-standard-annotated-druglike query. From this dataset, we
+extracted a random sample of 30 million noncorrupted SMILES strings shorter than 100 characters
+in each round. Further, we canonicalized, deduplicated, and stripped the SMILES of stereochemical
+information. Importantly, we removed all NIST 20 compounds to prevent data leakage. Filtering
+the 30-million sets to compounds RASSP can process (8 most common elements, number of possible
+subformulae) reduces the dataset down to approx. 4.7 (synth1 ) and 4.8 (synth2 ) millions. To
+evaluate the impact of RASSP and NEIMS respective spectrum prediction capabilities on SpecTUS
+performance, we generated spectra for the same set of compounds by both models. In total, the
+pretraining datasets comprises 9.4 + 9.6 million spectra.
+    Lastly, we split each synthetic dataset into training, validation, and test sets using a 0.9 : 0.05 :
+0.05 ratio. The splitting process was random, but corresponding splits (training, validation, and
+test sets) for the NEIMS and RASSP-generated spectra contained the same compounds to avoid
+
+
+                                                    13
+cross-leak. Both NEIMS- and RASSP-generated halves of both synthetic datasets (synth1 and
+synth2 ) are available on the Hugging Face Hub for further research and replication.
+
+Finetuning dataset
+For the finetuning stage, we filtered all corrupted or nonannotated spectra from the low-resolution
+NIST 20 GC-EI-MS library, removed stereochemistry information, and canonicalized the SMILES
+strings. The dataset was split into training, validation, and test sets with an 0.8 : 0.1 : 0.1 ratio,
+ensuring that duplicates were always placed in the same split. After applying model-specific filters,
+the final dataset included 224 737 training spectra, 28 177 validation spectra, and 28 267 testing
+spectra. The lists of compounds forming all three datasets are provided in the project’s GitHub
+repository.
+
+Preprocessing
+The preprocessing pipeline for spectra includes two key steps: rounding the m/z values to the
+nearest integer and logarithmically binning the relative intensity values into one of 30 bins using
+a logarithm base of 1.28 (details in Section Experiment 1: Intensity binning). Additionally, each
+encoded SMILES sequence is enriched with a special token indicating the source of the spectra
+(<rassp>, <neims>, <nist>). This strategy, inspired by multilingual language models [23, 28],
+was designed to enable the model to adapt to the unique characteristics of spectra from different
+sources.
+
+Pretraining
+SpecTUS was pretrained on both synth1 and synth2, using a balanced 1:1 mixture of NEIMS-
+generated and RASSP-generated synthetic spectra. This pretraining stage provided the model with
+a broad understanding of the chemical space of small molecules, enhancing its ability to generalize
+effectively (as demonstrated in Section Experiment 3: Pretraining dataset mixing). Pretraining
+was conducted with a batch size of 128 for 448 000 updating steps, allowing the model to process
+each of the 17.2 million spectra approximately three times.
+    The entire pretraining process, including control evaluations on validation sets (single candi-
+date) every 16 000 steps, was completed in 58 hours using a single NVIDIA H100 GPU. To save
+time and computational resources during these evaluations, we used a random subset of 10 000
+NIST validation spectra and 30 000 synthetic spectra.
+    During pretraining, the percentage of correctly reconstructed structures increased steadily but
+it remained relatively low at the end of the stage: 38% for RASSP-generated spectra, 29% for
+NEIMS-generated spectra, and 3% for NIST spectra. However, 96% of the generated SMILES
+strings (RASSP, NEIMS) were valid canonical molecules, with 91% (RASSP), 78% (NEIMS), and
+14% (NIST) having correct molecular formulas, though possibly incorrect structures. These results
+suggest that during the pretraining phase, the model successfully learned molecular structure
+rules and the relationship between atomic weight and m/z values, forming a good foundation for
+subsequent finetuning.
+
+Finetuning
+In the second stage, SpecTUS was finetuned to enhance its ability to recognize and process real-
+world experimental data. The model was trained for 296 000 steps on the NIST training set,
+allowing it to process each spectrum approximately 80 times.
+    The finetuning process, including control evaluations on validation sets every 21 068 steps
+(approximately every 12 epochs), was completed in 28 hours on a single NVIDIA H100 GPU. To
+conserve time and computational resources, control evaluations used the full NIST validation set
+but were limited to a subset of 2 000 synthetic spectra.
+    During finetuning, the model’s ability to reconstruct structures from synthetic spectra dropped
+sharply to zero, with formula-matching accuracy decreasing to 19% for NEIMS-generated spectra
+
+
+                                                 14
+and 17% for RASSP-generated spectra after just six epochs. However, validation results for NIST
+spectra skyrocketed above the convergence level of models trained exclusively on experimental
+spectra, as demonstrated in Section Experiment 3: Pretraining dataset mixing.
+
+Hyperparameter search
+One of the main contributions of this paper is a series of experiments that offer practical insights
+and best practices for developing machine-learning models, particularly transformer-based archi-
+tectures, for spectrometry and chemistry. While some findings are technical, they provide valuable
+guidance to streamline the design and optimization of future models.
+    First, we investigated different methods for binning relative intensity values to effec-
+tively represent continuous data. We compared the performance of two molecular representa-
+tions—SELFIES [29] and SMILES [15]—in a generative modelling task and experimented with
+tokenization techniques for text-based molecular structures. Next, we examined the benefits of
+pretraining on synthetic data and identified best practices for dataset labeling and dataset mix-
+ing strategies. Lastly, we pushed the performance boundaries by leveraging larger datasets and
+extended training durations.
+    To optimize computational resources, we tailored our experimental approach. For the first two
+experiments, we skipped the pretraining phase and conducted only finetuning on the NIST dataset,
+using 74 000 updating steps. For experiments focused on pretraining, we included a pretraining
+phase of 124 000 steps, followed by a finetuning phase of 74 000 steps. These run lengths were
+chosen to identify meaningful trends while maintaining manageable computational costs.
+
+Experiment 1: Intensity binning
+In the first experiment, we tried to find the optimal method for binning relative intensity values,
+enabling each value to be represented as a trainable embedding vector. We compared several
+variants of linear and logarithmic binning methods. For linear binning, we tested precision levels
+of 2, 3, and 4 decimal places, corresponding to 100, 1 000, and 10 000 bins, respectively, each with
+its own trainable embedding. For logarithmic binning, we used the formula
+
+                                     n = max(⌊logb (i)⌋ + s), 0)
+
+where n is the assigned bin index to intensity value i, logarithm base b changes the shape of the
+final bin distribution, and shift s helps to set a particular number of bins for relative intensity
+values between 0 and 1. The max function ensures all the lowest intensities transformed to negative
+values fall into the bin 0. We evaluated four configurations, with the total number of bins (s + 1)
+being 10, 21, 30, and 40. For each variant, we tuned the parameter b on the NIST training set
+intensities to distribute the values into bins as evenly as possible (see the distributions in Section
+C.1). Binning beyond 40 bins was not practical, as the bin ranges became excessively narrow,
+leaving many bins empty and thus non-trainable.
+    Over-simplified binning approaches (linear binning with 2 decimal places and logarithmic bin-
+ning with 10 bins) led to a 3–4% drop in validation Acc1 compared to the other models in the
+experiment. This performance decline was likely caused by significant information loss: for exam-
+ple, 47% of the smallest intensity values were set to zero with 2-decimal-place linear binning.
+Similarly, 10-bin logarithmic binning lacked sufficient granularity for lower intensity values, as
+illustrated by histogram comparisons in Section C.1.
+    Higher-resolution binning methods—linear binning with 3 or 4 decimal places and logarithmic
+binning with 21, 30, or 40 bins—achieved comparable results, with validation performance varying
+within a 1% margin. Among these, logarithmic binning with 30 bins emerged as the optimal choice.
+It provided a 0.9% improvement in validation Acc1 compared to 4-decimal-place linear binning
+while reducing the number of trainable parameters by 10 million, demonstrating its efficiency and
+validity as a binning strategy.
+    The tracked control evaluations for this experiment can be found in Figure C6, and the
+comparison with the rest of the experiment runs is in Table C7.
+
+
+                                                 15
+Experiment 2: Molecular Representations and Tokenization
+In this experiment, we aimed to find the optimal molecular representation generated by the model’s
+decoder. First, we evaluated two different structural representations for molecules, comparing
+SMILES and SELFIES. SELFIES, a token-based successor to the well-established SMILES rep-
+resentation, was specifically designed for generative neural networks, guaranteeing the validity of
+every sequence by construction. Further, we explored enhancing classic character-level SMILES
+encoding through Byte Pair Encoding (BPE) tokenization [30], which segments strings into fre-
+quent multi-character groups. This technique, widely adopted in early natural language generation
+(NLG) applications [31, 32], allows models to directly generate tokens with higher-level semantic
+meanings, potentially corresponding to molecular functional groups.
+    To investigate the impact of BPE tokenization, we trained four BPE tokenizers with varying
+vocabulary sizes on a random set of one million SMILES strings sampled from the synth dataset.
+The vocabulary size was indirectly controlled by adjusting the minimal substring frequency hyper-
+parameter (mf) to values of 10, 100, 10K, and 10M. These settings yielded vocabulary sizes of
+1 286, 780, 367, and 267 tokens, respectively, with the smallest vocabulary (mf10M → 256 byte
+tokens + 11 special tokens) corresponding to a character-level encoding. The relationship between
+vocabulary size and minimal substring frequency is visualized in Figure C7.
+    Models using SMILES strings with BPE tokenization consistently outperformed the model
+trained on SELFIES, achieving improvements of 1.7–5.8% in validation Acc1 . Interestingly, con-
+trary to expectations based on NLG, larger BPE vocabularies did not lead to better performance.
+Instead, the character-level encoding (mf10M) outperformed all the BPE tokenizations by a mar-
+gin of 3.5–4% on validation Acc1 . The trend suggests not only that “the smaller the vocabulary,
+the better the performance” but also that even introducing relatively few aggregated tokens into
+the vocabulary can significantly degrade performance.
+    We currently lack a clear hypothesis to explain why SMILES outperformed SELFIES. How-
+ever, based on the results of the models’ comparison, we infer that the Transformer architecture
+effectively constructs higher-level molecular semantics internally within its decoder blocks. This
+suggests that keeping the representation simple, such as through character-level encoding, grants
+the model greater expressive freedom, ultimately leading to better performance.
+    The tracked control evaluations for the tokenization experiment can be found in Figure C8,
+and the comparison with the rest of the experiment runs is in Table C7.
+
+
+
+Experiment 3: Pretraining dataset mixing
+For pertaining experiments, we used the synth1 dataset (see Section Pretraining datasets) con-
+taining 4.7 million compounds or 9.4 million spectra generated by the NEIMS and RASSP models.
+To assess the impact of pretraining on the final model performance, we compared the 30-bin non-
+pretrained model from the last experiment to four models that were first pretrained on different
+mixtures of datasets and then finetuned on the NIST training set. The dataset mixing strategy
+involved random sampling from all datasets in the mixture without repetition, with the proportion
+of each dataset controlled by a weight parameter.
+    The pretraining experiments used four dataset combinations: RASSP-only, NEIMS-only, a 1:1
+mix of NEIMS and RASSP (NEIMS:RASSP), and a mixture of NEIMS, RASSP, and a small
+fraction of NIST data in a 1:1:0.1 ratio (NEIMS:RASSP:NIST). The inclusion of NIST data in the
+last configuration was intended to accelerate the initial stage of finetuning and potentially keep
+this advantage throughout the training process.
+    Pretraining was conducted for a fixed number of 112 000 steps, and with a batch size of 128,
+approximately 14.3 million examples were processed during pretraining. The number of epochs
+varied depending on the dataset mixture; for example, in the NEIMS:RASSP mix, each spectrum
+was seen approximately 1.7 times on average, while for the RASSP-only mixture, each spectrum
+was encountered about twice as many times. The performance of all models was compared on the
+NIST validation set after the finetuning phase.
+
+
+                                                16
+   In the experiment, the models pretrained on synthetic datasets outperformed the finetuned-only
+model by 7–10% on validation Acc1 , clearly exceeding the convergence level of the non-pretrained
+model. Among the pretrained models, the NEIMS-only model achieved 2% better Acc1 than
+the RASSP-only model. However, combining NEIMS and RASSP datasets in a 1:1 ratio led
+to the best performance, improving accuracy by an additional 1% compared to NEIMS-only
+pretraining. Including a small fraction of experimental NIST data in the pretraining mix
+(NEIMS:RASSP:NIST) did not improve the final performance.
+   From these results, we deduce that despite the questionable quality of synthetic spectra, hav-
+ing broader coverage of the chemical space during pretraining helps the model generalize better.
+Combining spectra from two sources is more effective than training on a single source for twice as
+many epochs.
+   The tracked control evaluations for this experiment can be found in Figure C9, and the
+comparison with the rest of the experiment runs is in Table C7.
+
+Experiment 4: Source indication
+After identifying the optimal pretraining strategy, we evaluated whether the model benefits from
+including source indication via a special token preceding the generated SMILES sequence (see
+Section Preprocessing). To test this, we compared the RASSP:NEIMS pretrained and NIST fine-
+tuned model from the previous experiment, which used distinct source tokens to indicate the origin
+of each spectrum, with an otherwise identical setting that utilized a single generic source token
+for all datasets.
+    The experiment revealed that the source indication had no substantial impact on performance.
+It did not affect control validations during pretraining, and at the end of finetuning, the model
+with a single source token performed 0.2% better on Acc1 than the one with three distinct source
+tokens. Despite this, we retained the source indication mechanism in the final model to allow
+for potential use in future finetuning experiments on smaller custom datasets. Users can decide
+whether to explore this feature further or use the default <nist> token on their data.
+    The tracked control evaluations for this experiment can be found in Figure C10 and the
+comparison with the rest of the experiments runs is in Table C7.
+
+Experiment 5: Training length and dataset size
+In the final experiment, we assessed the impact of extended training duration and a larger dataset
+on the model’s performance. Using the best-performing model from Experiment 3 as the baseline
+– pretrained on synth1 NEIMS:RASSP balanced mix (4.2 million training compounds) for 112 000
+steps and finetuned on the NIST experimental spectra for 74 000 steps – we explored various
+combinations of extended pretraining and finetuning lengths, as well as larger training datasets.
+All other hyperparameters, including those related to binning, tokenization, and dataset mixing,
+were kept consistent with the findings of Experiments 1-3.
+    To simplify comparisons, we used a naming convention: the number of pretraining com-
+pounds, pretraining steps, and finetuning steps (e.g., 4.2M_112k_74k for the baseline model).
+The tested combinations included (1) doubling the pretraining duration to 224k steps while keep-
+ing finetuning at 74k steps (4.2M_224k_74k), (2) doubling both pretraining and finetuning steps
+(4.2M_224k_148k), (3) pretraining on the combined synth1 and synth2 datasets with prolonged
+pretraining and finetuning (8.6M_224k_148k), and (4) a full-scale training setting with both
+datasets and quadrupled pretraining and finetuning to maximize convergence (8.6M_448k_296k).
+    Doubling the pretraining stage alone to 224 000 steps (4.2M_224k_74k) improved Acc1 by
+1.2%. Further doubling the finetuning stage (4.2M_224k_148k) increased Acc1 by another 0.7%.
+Expanding the dataset size to include both synth1 and synth2 (8.6M_224k_148k) yielded a 0.9%
+gain in Acc1 . These isolated improvements indicate that extending training duration and increasing
+dataset size independently benefit the model. While we lack the analysis of all combinations to
+draw definitive conclusions, the results suggest that scaling pretraining, finetuning, and dataset
+size contribute similarly to performance gains. Still, among the tested approaches, expanding the
+dataset size was the most effective option, as it required no additional computing power.
+
+
+                                                17
+    The best results were achieved by combining all three strategies. The final configuration
+(8.6M_448k_296k) improved Acc1 by 2.6% compared to the intermediate 8.6M_224k_148k set-
+ting and by 5.4% compared to the baseline 4.2M_112k_74k model. This fully converged SpecTUS
+model represents the highest-performing configuration across all experiments.
+    The tracked control evaluations for this experiment can be found in Figure C11, and the
+comparison with the rest of the experiment runs is in Table C7.
+Supplementary information.
+• For a quick, zero-install demonstration, SpecTUS inference (with limited throughput) is exposed
+  via REST API at our cluster, accessible with a Binder-ready Jupyter notebook at https://
+  github.com/ljocha/spectus-demo.
+• Complete source code of SpecTUS is available on GitHub: https://github.com/hejjack/
+  SpecTUS.
+• The whole process of building the model from scratch or fine-tuning the pretrained model,
+  and reproducing the test results of this paper, is implemented in a series of Jupyter notebooks
+  included in the repository above.
+• Pretrained model and synthetic datasets are published at https://huggingface.co/MS-ML.
+• Further tables and figures to support reasoning in the main paper are provided separately.
+Acknowledgements. This work was supported by the Ministry of Education, Youth and Sports
+of the Czech Republic through the projects e-Infrastruktura CZ (No. LM2023054) and RECE-
+TOX Research Infrastructure (No. LM2023069), and European Union’s Horizon 2020 research and
+innovation program under grant agreement No. 857560 (CETOCOEN Excellence). This publica-
+tion reflects only the author’s view, and the European Commission is not responsible for any use
+that may be made of the information it contains. Computational resources were provided by the
+e-INFRA CZ project (No. 90254), supported by the Ministry of Education, Youth and Sports of
+the Czech Republic.
+
+References
+ [1] Kelly, K. & Bell, S. Evaluation of the reproducibility and repeatability of gcms retention
+     indices and mass spectra of novel psychoactive substances. Forensic Chemistry 7, 10–18
+     (2018). URL https://www.sciencedirect.com/science/article/pii/S2468170917301157.
+
+ [2] Moorthy, A. S., Wallace, W. E., Kearsley, A. J., Tchekhovskoi, D. V. & Stein, S. E. Combining
+     Fragment-Ion and Neutral-Loss Matching during Mass Spectral Library Searching: A New
+     General Purpose Algorithm Applicable to Illicit Drug Identification. Analytical Chemistry
+     89, 13261–13268 (2017). URL https://doi.org/10.1021/acs.analchem.7b03320.
+
+ [3] Cooper, B. et al. Hybrid search: a method for identifying metabolites absent from tandem
+     mass spectrometry libraries. Analytical Chemistry 91 (2019).
+
+ [4] Wakoli, J. et al. GCMS-ID: a webserver for identifying compounds from gas chromatography
+     mass spectrometry experiments. Nucleic Acids Research 52, W381–W389 (2024). URL
+     https://doi.org/10.1093/nar/gkae425.
+
+ [5] Bauer, C. A. & Grimme, S. How to compute electron ionization mass spectra from first
+     principles. J. Phys. Chem. A 120, 3755–3766 (2016).
+
+ [6] Hecht, H. et al. Quantum chemistry-based prediction of electron ionization mass spectra for
+     environmental chemicals. Anal Chem. 96, 13652–13662 (2024).
+
+ [7] Schymanski, E. L., Meringer, M. & Brack, W. Matching structures to mass spectra using
+     fragmentation patterns: Are the results as good as they look? Analytical Chemistry 81,
+     3608–3617 (2009). URL https://doi.org/10.1021/ac802715e.
+
+
+                                               18
+ [8] Advanced Chemistry Development, Inc. (ACD/Labs). ACD/MS Fragmenter. https://www.
+     acdlabs.com/products/spectrus-platform/ms-fragmenter/. Accessed: 2025-01-21.
+
+ [9] Wei, J. N., Belanger, D., Adams, R. P. & Sculley, D. Rapid prediction of electron–ionization
+     mass spectrometry using neural networks. ACS Cent. Sci. 5, 700––708 (2019). Doi:
+     10.1021/acscentsci.9b00085.
+
+[10] Rogers, D. & Hahn, M. Extended-connectivity fingerprints. J. Chem. Inf. Model. 50, 742–754
+     (2010).
+
+[11] Ji, H., Deng, H., Lu, H. & Zhang, Z. Predicting a molecular fingerprint from an electron
+     ionization mass spectrum with deep neural networks. Analytical Chemistry 92, 8649–8653
+     (2020).
+
+[12] Yang, Q. et al. Ultra-fast and accurate electron ionization mass spectrum matching for
+     compound identification with million-scale in-silico library. Nature Communications 14
+     (2023).
+
+[13] Zhu, R. L. & Jonas, E.        Rapid approximate subset-based spectra prediction for
+     electron ionization-mass spectrometry.  Anal Chem. 95, 2653–2663 (2023).       Doi:
+     10.1021/acs.analchem.2c02093.
+
+[14] Mikolov, T., Chen, K., Corrado, G. & Dean, J. Efficient estimation of word representations in
+     vector space. arXiv preprint arXiv:1301.3781 (2013). URL https://arxiv.org/abs/1301.3781.
+
+[15] Weininger, D. Smiles, a chemical language and information system. 1. introduction to method-
+     ology and encoding rules. Journal of Chemical Information and Computer Sciences 28, 31–36
+     (1988). URL https://doi.org/10.1021/ci00057a005.
+
+[16] Shrivastava, A. D. et al. MassGenie: A transformer-based deep learning method for identifying
+     small molecules from their mass spectra. Biomolecules 11, 1793 (2021).
+
+[17] Litsa, E. E., Chenthamarakshan, V., Das, P. & Kavraki, L. E. An end-to-end deep learning
+     framework for translating mass spectra to de-novo molecules. Communications Chemistry 6,
+     132 (2023).
+
+[18] Stravs, M. A., Dührkop, K., Böcker, S. et al. MSNovelist: de novo structure generation
+     from mass spectra. Nature Methods 19, 865–870 (2022). URL https://doi.org/10.1038/
+     s41592-022-01486-3.
+
+[19] Dührkop, K., Fleischauer, M., Ludwig, M. et al. SIRIUS 4: a rapid tool for turning tandem
+     mass spectra into metabolite structure information. Nature Methods 16, 299–302 (2019).
+     URL https://doi.org/10.1038/s41592-019-0344-8.
+
+[20] Butler, T. et al. MS2Mol: A transformer model for illuminating dark chemical space from
+     mass spectra. ChemRxiv (2023). Preprint.
+
+[21] Elser, D., Huber, F. & Gaquerel, E. Mass2SMILES: deep learning based fast prediction
+     of structures and functional groups directly from high-resolution MS/MS spectra. bioRxiv
+     (2023). URL https://api.semanticscholar.org/CorpusID:259834060.
+
+[22] Moorthy, A. S., Kearsley, A. J., Mallard, W. G., Wallace, W. E. & Stein, S. E. Inferring the
+     nominal molecular mass of an analyte from its electron ionization mass spectrum. Analytical
+     Chemistry 95, 13132–13139 (2023). URL https://doi.org/10.1021/acs.analchem.3c01815.
+
+
+
+
+                                               19
+[23] Liu, Y. et al. Multilingual denoising pre-training for neural machine translation. Transactions
+     of the Association for Computational Linguistics 8, 726–742 (2020). URL https://doi.org/
+     10.1162/tacl_a_00343.
+
+[24] Hufsky, F., Rempt, M., Rasche, F., Pohnert, G. & Böcker, S. De novo analysis of electron
+     impact mass spectra using fragmentation trees. Analytica Chimica Acta 739, 67–76 (2012).
+     URL https://www.sciencedirect.com/science/article/pii/S0003267012008884.
+
+[25] Wakoli, J. et al. Gcms-id: a webserver for identifying compounds from gas chromatography
+     mass spectrometry experiments. Nucleic Acids Research 52, W381–W389 (2024). URL
+     https://doi.org/10.1093/nar/gkae425.
+
+[26] Reymond, J.-L. & Awale, M. Exploring chemical space for drug discovery using the chemical
+     universe database. ACS Chemical Neuroscience 3, 649–657 (2012). URL https://doi.org/10.
+     1021/cn3000422.
+
+[27] Vaswani, A. et al. Attention is all you need. Advances in neural information process-
+     ing systems 30 (2017). URL https://proceedings.neurips.cc/paper_files/paper/2017/file/
+     3f5ee243547dee91fbd053c1c4a845aa-Paper.pdf.
+
+[28] CONNEAU, A. & Lample, G. Wallach, H. et al. (eds) Cross-lingual language model pretrain-
+     ing. (eds Wallach, H. et al.) Advances in Neural Information Processing Systems, Vol. 32
+     (Curran Associates, Inc., 2019). URL https://proceedings.neurips.cc/paper_files/paper/
+     2019/file/c04c19c2c2474dbf5f7ac4372c5b9af1-Paper.pdf.
+
+[29] Krenn, M., Häse, F., Nigam, A., Friederich, P. & Aspuru-Guzik, A. Self-referencing embedded
+     strings (selfies): A 100% robust molecular string representation. Machine Learning: Science
+     and Technology 1, 045024 (2020). URL https://dx.doi.org/10.1088/2632-2153/aba947.
+
+[30] Sennrich, R., Haddow, B. & Birch, A. Erk, K. & Smith, N. A. (eds) Neural machine translation
+     of rare words with subword units. (eds Erk, K. & Smith, N. A.) Proceedings of the 54th
+     Annual Meeting of the Association for Computational Linguistics (Volume 1: Long Papers),
+     1715–1725 (Association for Computational Linguistics, Berlin, Germany, 2016). URL https:
+     //aclanthology.org/P16-1162/.
+
+[31] Radford, A. & Narasimhan, K. Improving language understanding by generative pre-training
+     (2018). URL https://api.semanticscholar.org/CorpusID:49313245.
+
+[32] Radford, A. et al. Language models are unsupervised multitask learners (2019). URL https:
+     //api.semanticscholar.org/CorpusID:160025533. OpenAI Technical Report.
+
+
+
+
+                                                20
+Supplementary Information A                          Results
+A.1   Baseline results
+
+                                  NIST     SWGDRUG         Cayman      MONA
+                        HSS50     45.0%    55.2%           58.2%       22.2%
+                        HSS10     35.5%    47.1%           50.3%       16.0%
+                        HSS1      18.8%    21.0%           23.9%       5.9%
+                        SSS50     29.4%    29.3%           26.4%       16.1%
+                        SSS10     23.2%    23.2%           23.5%       11.7%
+                        SSS1      12.5%    9.5%            9.4%        5.2%
+                      Table A1 Percentage of cases where database search
+                      methods (SSS and HSS) successfully retrieved the
+                      closest structure from the reference database among the
+                      top-1, top-10, and top-50 suggested candidates.
+                      Performance is evaluated across all test sets: NIST test
+                      split, SWGDRUG, Cayman, and MONA.
+
+
+
+
+A.2   SpecTUS results
+
+                            NIST          SWGDRUG             Cayman           MONA
+                        Simk   Acck      Simk Acck         Simk   Acck      Simk  Acck
+          BDC           0.72    0.0%     0.68     0.0%      0.68    0.0%      0.70 0.0%
+          HSS50         0.62    0.0%     0.61     0.0%      0.61    0.0%      0.47 0.0%
+          HSS10         0.57    0.0%     0.58     0.0%      0.57    0.0%      0.42 0.0%
+          HSS1          0.45    0.0%     0.46     0.0%      0.46    0.0%      0.27 0.0%
+          SSS50         0.55    0.0%     0.50     0.0%      0.47    0.0%      0.44 0.0%
+          SSS10         0.50    0.0%     0.46     0.0%      0.43    0.0%      0.38 0.0%
+          SSS1          0.39    0.0%     0.34     0.0%      0.34    0.0%      0.26 0.0%
+          SpecTUS50     0.84    69.8%    0.86     64.6%     0.78    45.2%     0.58 37.2%
+          SpecTUS10     0.81    65.0%    0.82     58.5%     0.74    38.8%     0.54 34.0%
+          SpecTUS1      0.67    43.3%    0.69     35.0%     0.60    20.7%     0.41 20.8%
+         Table A2 Comparison of Simk and Acck metrics between the final SpecTUS model
+         and database search methods across all testing datasets (NIST test, SWGDRUG,
+         Cayman, MONA).
+
+
+
+
+                                BDC             HSS              SSS
+                  SpecTUS1      46.8% / 50.8%   76.4% / 83.6%    79.6% / 88.1%
+                  SpecTUS10     69.9% / 72.2%   84.4% / 87.3%    87.8% / 91.2%
+                  SpecTUS50     75.8% / 77.9%   85.6% / 88.0%    88.9% / 91.9%
+                Table A3 Win Rate / At-least-as-good Rate of SpecTUS over
+                database search methods on the NIST test set. For all values, the
+                compared performance involves the same number of candidates, e.g.,
+                ALAG(SpecTUS10 , HSS10 ).
+
+
+
+
+                                                21
+                 BDC            HSS               SSS
+  SpecTUS1       44.8% / 49.5%  72.3% / 81.2%     87.7% / 90.2%
+  SpecTUS10      70.2% / 73.7%  81.3% / 84.9%     88.9% / 92.3%
+  SpecTUS50      77.5% / 80.7%  85.3% / 88.0%     90.9% / 93.1%
+Table A4 Win Rate / At-least-as-good Rate of SpecTUS over
+database search methods on the SWGDRUG dataset. For all
+values, the compared performance involves the same number of
+candidates, e.g., ALAG(SpecTUS10 , HSS10 ).
+
+
+
+
+                BDC             HSS              SSS
+  SpecTUS1      31.3% / 35.0%   63.1% / 67.4%    77.0% / 81.7%
+  SpecTUS10     56.3% / 60.3%   71.0% / 74.2%    82.7% / 84.6%
+  SpecTUS50     64.2% / 68.7%   74.2% / 77.2%    84.2% / 86.4%
+Table A5 Win Rate / At-least-as-good Rate of SpecTUS over
+database search methods on the Cayman library. For all values, the
+compared performance involves the same number of candidates, e.g.,
+ALAG(SpecTUS10 , HSS10 ).
+
+
+
+
+                BDC             HSS              SSS
+  SpecTUS1      21.3% / 23.4%   65.0% / 70.6%    65.5% / 72.4%
+  SpecTUS10     35.6% / 37.4%   63.7% / 66.8%    66.8% / 70.4%
+  SpecTUS50     39.6% / 41.6%   61.6% / 64.9%    64.2% / 68.0%
+Table A6 Win Rate / At-least-as-good Rate of SpecTUS over
+database search methods on the MONA library. For all values, the
+compared performance involves the same number of candidates, e.g.,
+ALAG(SpecTUS10 , HSS10 ).
+
+
+
+
+                               22
+Supplementary Information B                                 Methods
+
+
+
+
+Fig. B1 Frequency plots of the three data filtering criteria, measured on the NIST train set.
+
+
+
+
+                                                       23
+Supplementary Information C                                Experiments
+
+                                                                        Acc1     Acc10    Sim1    Sim10
+     exp5: 8.6M_448k+296k (SpecTUS)                                     43.3%    64.8%    0.67    0.81
+     exp5: 8.6M_224k+148k                                               40.7%    62.8%    0.65    0.80
+     exp5: 4.2M_224k_148k                                               39.8%    61.8%    0.64    0.79
+     exp5: 4.2M_224k_74k                                                39.1%    61.8%    0.64    0.79
+     exp4: one src token                                                38.1%    61.4%    0.63    0.79
+     exp3: RASSP:NEIMS / exp5: 4.2M_112k_74k                            37.9%    60.7%    0.63    0.78
+     exp3: RASSP:NEIMS:NIST                                             37.6%    60.6%    0.62    0.78
+     exp3: NEIMS-only                                                   36.8%    59.7%    0.62    0.77
+     exp3: RASSP-only                                                   34.8%    57.6%    0.61    0.76
+     exp1: log30bins / exp2: mf10M (char-level) / exp3: no pretraining  28.1%    50.7%    0.56    0.72
+     exp1: log40bins                                                    27.6%    49.7%    0.55    0.72
+     exp1: lin4dec                                                      27.4%    49.9%    0.55    0.72
+     exp1: lin3dec                                                      27.3%    49.8%    0.55    0.72
+     exp1: log21bins                                                    27.2%    49.6%    0.55    0.72
+     exp1: log10bins                                                    24.7%    47.0%    0.54    0.70
+     exp2: mf10K                                                        24.5%    46.4%    0.54    0.70
+     exp2: mf100                                                        24.5%    47.2%    0.55    0.71
+     exp2 mf10                                                          24.0%    46.1%    0.54    0.70
+     exp1: lin2dec                                                      24.0%    46.1%    0.53    0.69
+     exp2: SELFIES                                                      22.3%    41.1%    0.49    0.65
+    Table C7 Summary of all experiments conducted during the development of the final SpecTUS model.
+    The metrics were evaluated on the NIST validation set. The experiments are ordered by Acc1 values,
+    which served as the primary criterion for assessing the results.
+
+
+
+
+C.1     Experiment 1: Intensity binning
+
+
+
+
+Fig. C2 Bin frequency plot after logarithmic binning with a log base of 2.2 and a shift of 9, producing 10 bins.
+The distribution is calculated on our train split of the NIST dataset.
+
+
+
+
+                                                      24
+Fig. C3 Bin frequency plot after logarithmic binning with a log base of 1.43 and a shift of 20, producing 21 bins.
+The distribution is calculated on our train split of the NIST dataset.
+
+
+
+
+Fig. C4 Bin frequency plot after logarithmic binning with a log base of 1.28 and a shift of 29, producing 30 bins.
+The distribution is calculated on our train split of the NIST dataset.
+
+
+
+
+Fig. C5 Bin frequency plot after logarithmic binning with a log base of 1.2 and a shift of 39, producing 40 bins.
+The distribution is calculated on our train split of the NIST dataset.
+
+
+                                                       25
+Fig. C6 Tracked control evaluations of the intensity binning experiment. Displays the dependency of Acc1 on
+global step measured on the full NIST validation set. The table shows the final Acc1 values.
+
+
+
+
+                                                    26
+C.2     Experiment 2: Molecular Representations and Tokenization
+
+
+
+
+Fig. C7 Dependence of the number of learned tokens on the minimal frequency parameter. The highlighted points
+denote the tokenizers that we selected for examination. The x-axis is in logarithmic scale.
+
+
+
+
+Fig. C8 Tracked control evaluations of the tokenization experiment. Displays the dependency of Acc1 on global
+step measured on the full NIST validation set. The table shows the final Acc1 values.
+
+
+
+
+                                                     27
+C.3     Experiment 3: Pretraining dataset mixing
+
+
+
+
+Fig. C9 Tracked control evaluations of the pretraining dataset mixing experiment. Displays the dependency
+of Acc1 on global step measured on the full NIST validation set. The table shows the final Acc1 values.
+
+
+
+
+                                                   28
+C.4     Experiment 4: Source indication
+
+
+
+
+Fig. C10 Tracked control evaluations of the source indication experiment. Displays the dependency of Acc1 on
+global step measured on the full NIST validation set. The table shows the final Acc1 values.
+
+
+
+
+                                                    29
+C.5     Experiment 5: Training length and dataset size
+
+
+
+
+Fig. C11 Tracked control evaluations of the training length and dataset size experiment. Displays the depen-
+dency of Acc1 on global step measured on the full NIST validation set. The table shows the final Acc1 values.
+
+
+
+
+                                                     30
+

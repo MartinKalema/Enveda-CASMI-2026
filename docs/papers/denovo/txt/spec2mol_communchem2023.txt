@@ -1,0 +1,656 @@
+                  ARTICLE
+                  https://doi.org/10.1038/s42004-023-00932-3               OPEN
+
+                  An end-to-end deep learning framework for
+                  translating mass spectra to de-novo molecules
+                  Eleni E. Litsa1, Vijil Chenthamarakshan                 2, Payel Das        2 ✉ & Lydia E. Kavraki               1✉
+
+
+
+
+                  Elucidating the structure of a chemical compound is a fundamental task in chemistry with
+                  applications in multiple domains including drug discovery, precision medicine, and biomarker
+                  discovery. The common practice for elucidating the structure of a compound is to obtain a
+                  mass spectrum and subsequently retrieve its structure from spectral databases. However,
+                  these methods fail for novel molecules that are not present in the reference database. We
+
+1234567890():,;
+                  propose Spec2Mol, a deep learning architecture for molecular structure recommendation
+                  given mass spectra alone. Spec2Mol is inspired by the Speech2Text deep learning archi-
+                  tectures for translating audio signals into text. Our approach is based on an encoder-decoder
+                  architecture. The encoder learns the spectra embeddings, while the decoder, pre-trained on a
+                  massive dataset of chemical structures for translating between different molecular repre-
+                  sentations, reconstructs SMILES sequences of the recommended chemical structures. We
+                  have evaluated Spec2Mol by assessing the molecular similarity between the recommended
+                  structures and the original structure. Our analysis showed that Spec2Mol is able to identify
+                  the presence of key molecular substructures from its mass spectrum, and shows on par
+                  performance, when compared to existing fragmentation tree methods particularly when test
+                  structure information is not available during training or present in the reference database.
+
+
+
+
+                  1 Department of Computer Science, Rice University, Houston, TX, USA. 2 IBM Research, IBM Thomas J. Watson Research Center, Yorktown Heights, NY, USA.
+                  ✉email: daspa@us.ibm.com; kavraki@rice.edu
+
+                  COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                     1
+ARTICLE                                                          COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+
+
+T
+        he identiﬁcation of the chemical compounds that are                large percentage of the molecules that are found in human tissues.
+        present in a sample of chemical matter is a fundamental            It is estimated that in untargeted metabolomics studies less than
+        task in chemical analysis with applications in multiple            2% of the detected spectral features are identiﬁed8.
+domains. The ﬁeld of metabolomics, for example, seeks to iden-                An approach that has been developed to address the problem
+tify the chemical molecules that are present in a biological sample.       of limited amount of experimental spectra data is in silico frag-
+In humans, the metabolome, that is the set of all chemical                 mentation which essentially attempts to solve the inverse pro-
+molecules that can be found in human tissues, is a great source            blem. This approach aims at enhancing the content of existing
+for biomarker discovery as it reﬂects changes at a genetic, pro-           spectra databases with computed spectra of known molecular
+teomic or environmental level1. Additionally, mapping the                  structures which have no available experimental spectra. Essen-
+human metabolome will lead to a better understanding of human              tially this approach seeks to close the gap between spectral and
+physiology and disease etiology and pathology which is essential           structural databases. In silico fragmentation tools predict the
+for the identiﬁcation of new therapeutic targets for developing            fragmentation process either relying on fragmentation rules or
+new treatments. The increasing interest in mapping the meta-               using combinatorial/optimization-based approaches or employ-
+bolome extends to other organisms as well, such as plants which            ing machine learning methodologies6,9,10. Fragment prediction
+have been a great source of bioactive compounds for multiple               methods have been especially successful for predicting spectra of
+products including drugs and supplements2. The identiﬁcation of            peptides, however, fragmentation of small molecules into ions is a
+chemical compounds is also critical in product development such            more stochastic process that is especially challenging to predict6.
+as in the production of pharmaceuticals and agrochemicals.                    A more direct approach to the structure elucidation problem
+Structure elucidation practices are being used for quality control         would be to reconstruct the underlying chemical structures given
+and detection of impurities, as well as in safety studies for iden-        spectra features. Such an undertaking though is computationally
+tifying potential metabolites that can be formed in the human              challenging as it requires the generation of a molecular structure.
+body. Finally, structure elucidation practices are being employed          Indeed, this approach is performed as a two-step process to cir-
+in forensics analysis.                                                     cumvent the need for generating molecular structures: A machine
+   The identiﬁcation of the structure of a chemical compound is            learning model is used to map the spectrum to an intermediate
+perceived as one of the most time consuming and laborious task             vector representation such as a molecular ﬁngerprint. Once the
+in chemical analysis. This is often performed through analytical           ﬁngerprint is obtained then it is matched against the content of
+techniques such as mass spectroscopy (MS) and nuclear magnetic             structural databases in order to identify candidate molecular
+resonance (NMR)3–5 with MS being used more often due to its                structures with similar ﬁngerprints11,12. This method though will
+higher sensitivity and speciﬁcity3. In MS, the molecules that are          also fail for molecules that are not present in the structural data-
+present in a biological sample are ﬁrst separated using a chro-            base and especially for novel molecules. A more direct association
+matographic technique, such as liquid chromatography (LC) and              of spectra features with molecular structures through a rule-based
+gas chromatography (GC), with the latter being used more                   approach has also been explored13. More speciﬁcally, this approach
+commonly1,6. After the separation, the molecule is fragmented              extracts rules, that associate spectra features with substructures,
+into positive or negative charged ions using an ionization source          from spectra databases aiming at a partial structure identiﬁcation.
+such as electron ionization (EI), chemical ionization (CI) and                An additional concept that has been introduced to facilitate the
+electrospray ionization source (ESI)1,6. What the instrument               interpretation of mass spectra, and subsequently structure iden-
+records is the mass-to-charge (m/z) ratios of the generated frag-          tiﬁcation, is that of fragmentation trees6,14. A fragmentation tree is
+ment ions. The information that is collected from this process is          derived computationally from tandem mass spectra using opti-
+presented in the mass spectrum which is a graph with the m/z of            mization algorithms such that its nodes correspond to fragments
+each recorded fragment in the horizontal axis and the relative             or precursor ions and the edges correspond to fragmentation
+abundance in the vertical axis. In order to obtain more detailed           reactions. Fragmentation trees have various uses such as identi-
+information on the query structure, a sequential fragmentation             fying the molecular formula and clustering molecules by aligning
+process is often used called tandem mass spectrometry5. Once the           fragmentation trees15. They have also been used for the prediction
+molecule has been fragmented into ions, a set of them, called              of molecular ﬁngerprints that are subsequently used to search
+precursor ions, is selected and further fragmented to generate             structural databases16,17. The information in a mass spectrum is
+MS2 (also called MS/MS) spectra. These second-level ions can be            thought to be insufﬁcient to explain the fragmentation process by
+fragmented even further giving MS3 spectra and so on. The peaks            itself while the fragmentation tree provides complementary
+and their intensity in the resulting spectrum depend not only on           information by elucidating the dependencies between the mass
+the structure of the chemical molecule that is being fragmented,           peaks6. However, fragmentation trees are expensive to compute
+but also on the experimental conditions, that is the instrument            and often approximations are preferred for practical applications.
+used, the collision energy, the selected precursor ion and the                A more thorough review of existing methodologies for meta-
+ionization mode, as it is illustrated in Fig. 1.                           bolite identiﬁcation, including in silico fragmentation tools, ﬁn-
+   Once the mass spectrum is obtained, it is matched against the           gerprint prediction, and fragmentation trees, was recently
+content of spectral databases of reference compounds in order to           presented by Nguyen et al. with a focus on machine learning
+retrieve its structure. Various chemical databases provide spectra         (ML) approaches6. It should be noted here that early ML-based
+data of metabolites7 such as Human Metabolome Database,                    approaches were built on shallow ML models, such as Support
+METLIN, MassBank, and mzCloud7. Certain databases are focused              Vector Machines (SVMs) and Random Forests (RFs), applied
+on the metabolites of speciﬁc organisms, such as the Human                 either on features extracted from the mass spectra or the frag-
+Metabolome Database, or on speciﬁc molecular classes, such as the          mentation trees, and also kernel-based methods to determine
+LIPID MAPS Structure Database, while others have greater cov-              similarity between either spectra or fragmentation trees. However,
+erage such as METLIN. However, despite the intense ongoing                 lately, there is a growing interest in exploring Deep Learning (DL)
+efforts to map the metabolome of various organisms, existing               architectures for the development of computation tools to sup-
+databases cover only a small percentage of the actual metabolites          port structure elucidation. There have been efforts to learn
+that occur in organisms. Particularly for humans, it is estimated          spectra embeddings that can be subsequently used to assess
+that less than 10% of metabolites have experimental reference mass         spectral similarity when searching in spectral databases12,18.
+spectra8, which means that the current practice cannot identify a          Additionally, there are DL-based methodologies for clustering
+
+2                    COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3                                                             ARTICLE
+
+
+
+
+Fig. 1 MS/MS spectra from different experimental conditions for the same molecule. MS/MS spectra obtained through different experimental conditions
+from the same molecule (approximate spectra based on data obtained from the Human Metabolome Database). a Precursor ion: [M+H]+, NCE: 35%,
+Instrument: HCD. b Precursor ion: [M+H]+, NCE: 130%, Instrument: HCD. c Precursor ion: [M+H-Br]+, NCE: 35%, Instrument: HCD. d Precursor ion:
+[M+H+2i]+, NCE: 35%, Instrument: IT-FT.
+
+
+
+
+COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                   3
+ARTICLE                                                          COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+spectra, either for identifying the compound class12,19 or for             This is performed by comparing the canonicalized input SMILES
+aiding medical diagnosis by differentiating between healthy and            and the canonicalized output SMILES and evaluating whether
+cancerous tissues20. Most DL-based methodologies that operate              there is an exact match between the two. The autoencoder is
+directly on spectra data are based on Convolutional Neural                 trained by minimizing the mean reconstruction error on a single-
+Networks (CNNs) representing the spectrum as a vector that                 character level for each input sequence. Therefore, the recon-
+indicates the intensities of each fragment mass20–22. The CNN              struction accuracy is estimated on a single-character level, by
+attempts to automatically identify spectra features replacing the          comparing the correct character in the target sequence with the
+need for manual featurization. Architectures that have adopted             most probable character in the decoder RNN’s output at each
+concepts from Natural Language Processing (NLP) have also                  position. It should be noted, that the reconstructed SMILES, as
+emerged representing the mass spectrum as text and the mass                well as neural ﬁngerprints derived from SMILES25–27, has been
+peaks as words18. Due to the limited amount of mass spectra data,          successfully used in similarity search and have been found to be
+different workarounds have been investigated including hybrid              more informative, when compared to molecular ﬁngerprints.
+approaches19, combining statistical ML models and DL archi-                   The AE was able to correctly reconstruct the SMILES sequence
+tectures, and approaches based on transfer learning20.                     for about 93.3% of the NIST molecules. This is very close to the
+   It should be noted that, at the same time, DL-based approaches          reconstruction rate of the AE on a held-out test set which was
+are being investigated for identifying protein sequences from mass         94.95%. This demonstrates that the pre-trained model has been
+spectra in proteomics studies21–23. A noteworthy effort, DeepNovo,         trained on a diverse set of molecules and therefore it is able to
+consists of an end-to-end DL architecture for de novo peptide              handle the large variability of the molecules in the NIST dataset.
+sequencing from mass spectra22, which is a direct reconstruction of
+the peptide sequence from the mass spectra data. Structure eluci-          Spec2Mol performance evaluation. Spec2Mol generates a set of
+dation of small molecules though is perceived as a more challenging        recommended molecular structures given MS/MS spectra. Our
+problem due to the stochastic nature of the fragmentation process.         evaluation focuses on assessing the similarity between the gen-
+On top of that, the structure of small molecules has a graph-like          erated structures and the reference molecular structure from the
+representation as opposed to the linear nature of a peptide                NIST dataset. We recall here that the information in an MS/MS
+sequence. Existing approaches essentially attempt to retrieve              spectrum may not be sufﬁcient to fully reconstruct the molecular
+molecules from structure databases that have a spectrum similar to         structure. It is possible that more than one molecular structures
+the query spectrum. This method though, cannot identify novel              may explain a given spectrum. For that reason our analysis has
+molecules, that is molecules whose structure currently remains             been focused on assessing whether the model has learned to
+unknown and therefore they do not exist in chemical databases.             identify key features in the molecular structure from the mass
+   In this paper, we present Spec2Mol, an end-to-end DL archi-             spectra rather than identifying the exact same structure with the
+tecture for translating MS/MS spectra to molecular structures.             reference molecule from the NIST dataset.
+Spec2Mol is intended for recommending molecular structures that               For the evaluation of the model, we ﬁrst perform a coarse-level
+can explain observed MS/MS spectra. We represent molecular                 comparison taking into account physicochemical properties and
+structures as sequences using the SMILES notation24 and MS/MS              more speciﬁcally the molecular weight and the element
+spectra as vectors of fragment intensities. Spec2Mol consists of an        composition of the molecule. Next, we assess molecular similarity
+encoder, that learns an embedding for the MS/MS spectrum, and a            at the substructure level. In particular, we compute the ﬁngerprint
+decoder that generates the SMILES sequences of the recommended             similarity as well as the maximum common substructure between
+chemical molecules. Due to the limited amount of available spectra         the generated structures and the reference structure. The
+data, our approach is based on unsupervised pre-training on a large        speciﬁcations for each metric are given below. We evaluate
+dataset of unlabeled molecules. In particular, we pre-trained the          the overall performance in the entire test set as well as
+decoder as part of an auto-encoder (AE) architecture which is              the performance of the model when not all four required spectra
+trained to reconstruct a molecule through its SMILES sequence. The         are available as input. Additionally, we assess the contribution of
+encoder is subsequently trained such that the spectra embeddings           each of the two strategies for generating the recommended
+match the embeddings that the AE has learned. In the following             structures.
+sections, we discuss the data used to develop and evaluate the model,
+the architecture of Spec2Mol, as well as, the evaluation of the model.        ●   Physiochemical attributes: A property of special interest is
+   The main contributions of this work are as follows:                            the molecular weight since it is directly reﬂected in the
+                                                                                  mass spectrum. In particular, the spectra indicates the mass
+    ●   To our knowledge, this is the ﬁrst approach for generating                of the fragments and therefore the mass of the original,
+        potential molecular structures from mass spectrometry data                non-fragmented, molecule can be approximated more
+        that is not based solely on database retrieval.                           easily given the mass spectra as opposed to determining
+    ●   Our method can facilitate database retrieval and addition-                the composition or the structure of the molecule. We
+        ally de novo molecular structure recommendation.                          record the difference between the molecular weight of
+    ●   Our approach takes advantage of large datasets of                         the generated structures and the reference structure and we
+        unlabeled molecules using unsupervised pre-training.                      report the relative average-minimum difference, that is, the
+    ●   We introduce metrics to assess the similarity of the                      average-minimum difference over all the predicted struc-
+        generated molecules with the reference ones and we                        tures divided by the average molecular weight of the
+        perform a comparative evaluation with a widely accepted                   reference structures (DMWmin ). We also report the
+        method that makes use of additional information, that is                  average-average difference over all the predicted structures
+        fragmentation trees.                                                      divided by the average molecular weight of the reference
+                                                                                  structures (DMWavg). Additionally, we also evaluate
+                                                                                  whether the model is able to identify the element
+Results and discussion                                                            composition of the molecule. In particular, we assess
+Reconstruction accuracy of the autoencoder. As a sanity check,                    whether the atom species that are present in the reference
+we evaluated the ability of the pre-trained AE to reconstruct the                 molecule have been identiﬁed in the predicted structures
+SMILES of the molecules in the testing set of the spectra dataset.                ignoring the numbers of atoms for each atom species. More
+
+4                    COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3                                                                                                               ARTICLE
+
+ Table 1 Effect of missing spectra in the model input.
+
+ metric                                                      full dataset                    4 spectra                3 spectra                  2 spectra                   1 spectrum
+ # test cases                                                1000                            413                      65                         483                         39
+ Avg. MW                                                     275.3                           287.5                    242.6                      267.4                       300.3
+ Avg. SMILES length                                          34.5                            37.0                     28.5                       32.5                        43.6
+ correct molecules (↑)                    (%)                7.0                             9.2                      15.2                       4.1                         5.1
+ correct formulas (↑)                     (%)                39.3                            45.1                     46.9                       34.8                        20.5
+ DMW% (↓)                                 Min                2.3                             1.6                      0.5                        2.4                         9.5
+                                          Avg                6.3                             5.5                      3.9                        6.6                         14.6
+ DMF% (↓)                                 Min                9.2                             6.5                      8.1                        10.8                        21.1
+                                          Avg                21.7                            17.8                     24.5                       24.0                        32.9
+ Fngpcosine (↑)                           Max                0.53                            0.56                     0.57                       0.50                        0.45
+                                          Avg                0.36                            0.39                     0.38                       0.34                        0.31
+ MCSratio (↑)                             Max                0.68                            0.70                     0.72                       0.66                        0.57
+                                          Avg                0.51                            0.53                     0.55                       0.50                        0.43
+ MCStan (↑)                               Max                0.55                            0.58                     0.60                       0.53                        0.44
+                                          Avg                0.38                            0.39                     0.41                       0.36                        0.30
+ MCScoef (↑)                              Max                0.71                            0.73                     0.74                       0.69                        0.63
+                                          Avg                0.54                            0.55                     0.58                       0.53                        0.48
+
+ Evaluation metrics when considering the entire test set and the test-data partitions that have available all 4, only 3, only 2, and only 1 spectrum. The arrows show the desired trend for each metric.
+
+
+
+        speciﬁcally, for each atom species we report sensitivity and                                      Table 1 summarizes the evaluation of the effect of missing data
+        speciﬁcity for detecting the presence of this species. In                                      in the predictions. More speciﬁcally, we present the evaluation
+        order to account for discrepancies in the number of atoms                                      metrics on four different partitions of the test-set depending on
+        per atom species, we also report the difference between the                                    the number of the available spectra. We recall that the input to
+        molecular formulas of the predicted structures and the                                         the model consists of four different spectra obtained through
+        reference structure (DMF). We deﬁne the distance between                                       different speciﬁcations. However, not all molecules in the dataset
+        two molecular formulas as the number of atoms that differ                                      have all four spectra available. Our results indicate that missing
+        between two molecules when accounting for the atom                                             only one spectrum does not severely impact performance, but
+        species and the number of atoms for each species (without                                      performance starts to degrade when less than three spectra are
+        including hydrogen atoms). We report the minimum                                               available. This is expected as the number of spectral peaks that
+        distance over all predictions divided by the average number                                    will be observed in one spectrum (or two) most likely will not
+        of heavy atoms (DMFmin ) as well as the average distance                                       be adequate to reconstruct the molecular structure. It should
+        over all predictions divided by the average number of heavy                                    be noted though that other factors, such as the molecular size, are
+        atoms (DMFavg). The exact mathematical formulas for the                                        also potentially contributing to the variability observed among
+        calculation of the DMW and DMF are provided in the                                             the different subsets of the test-set. The set of molecules with
+        supplementary material (Supplementary Methods 3).                                              three available spectra for example, includes molecules that on
+   ●    Fingerprint similarity: Fingerprints are vector representa-                                    average have smaller molecular weight and shorter SMILES
+        tions of chemical molecules, which indicate the presence of                                    representation. The model appears to have the highest perfor-
+        certain substructures in the molecule, and are widely used                                     mance on this subset of the test-set since reconstructing shorter
+        as an efﬁcient way to judge similarity between molecules28.                                    SMILES is expected to be less of a challenge for the decoder. The
+        We extracted ﬁngerprint representations based on the                                           evaluation of the model on the training set is presented in the
+        Morgan algorithm29 using the RDKit toolkit30 and used the                                      supplementary material (Supplementary Note 1, Table S3).
+        cosine coefﬁcient to assess similarity (Fngpcosine). The                                          Next, we evaluate the effect of the strategy that is used to
+        Morgan ﬁngerprints are computed for radius 2 and 1024                                          generate the recommended molecules. The analysis is shown in
+        bits. We report the maximum ﬁngerprint similarity among                                        Table 2. We recall that the recommended structures are obtained
+        all model predictions when compared with the reference                                         either directly through decoding the computed embeddings or
+        structure as well as the average similarity of all predicted                                   indirectly by identifying the closest embeddings from the pre-
+        structures.                                                                                    trained dataset. In particular, we are comparing the top-20
+   ●    Maximum common substructure (MCS): We computed                                                 predictions, as ranked using the molecular weight criterion,
+        the MCS between two molecular structures using the                                             through (i) only the direct strategy, (ii) only the indirect strategy,
+        RDKit toolkit30 with the following constraints: the                                            and, (iii) the two strategies combined. According to the results,
+        substructure match respects the atom species, the bond                                         the indirect approach, which generates molecules through
+        orders, as well as the ring bonds, that is ring bonds are only                                 decoding the closest embeddings from the pre-trained dataset
+        matched to ring bonds. From the computed MCS we                                                appears to have a larger contribution to the effectiveness of the
+        extracted the following three metrics: i) MCS ratio, ii) MCS                                   method to generate relevant structures. However, combining the
+        Tanimoto, and iii) overlap coefﬁcient, which are deﬁned as                                     two strategies appears to slightly improve performance.
+        follows, respectively: MCSratio ¼ aMCS                 aMCS
+                                             a , MCStan ¼ a þa a ,
+                                                                                                          Overall, the results illustrate that the predicted structures have a
+                                                              r                      r   p     MCS
+                      aMCS
+        MCSovrlp ¼ minða         , where aMCS denotes the number of                                    molecular weight that is signiﬁcantly close to the molecular weight
+                         r ;ap Þ                                                                       of the reference compound. This is not surprising as the generated
+        atoms in the MCS, ar the number of atoms in the reference                                      molecules are ranked based on the molecular weight. The
+        compound, and ap the number of atoms in the predicted                                          molecular formula though seems to also be considered close to
+        compound. For each metric, we report the maximum value                                         the reference one. The model was able to retrieve the exact
+        as well as the average value over all predictions.                                             structure for a small percentage of the test cases (7%) while it
+
+COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                                                                             5
+ARTICLE                                                                                     COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+identiﬁed the exact molecular formula for a considerably larger                                          Finally, we investigated the effect of the molecular weight as
+percentage (26%). The performance of the model was signiﬁcantly                                       well as the presence of heteroatoms on the ability of the model to
+better when at least 3 out of the 4 input spectra were available.                                     identify the exact structure or the exact molecular formula. More
+   Regarding the structural similarity between the predicted                                          speciﬁcally, we divided the test set molecules into those that
+structures and the reference structure, the obtained values for                                       have molecular weight (MW) less than 300Da and those that have
+the respective metrics demonstrate that the structures share                                          molecular weight greater than or equal to 300Da (the average
+common substructures. More speciﬁcally, the metrics that are                                          molecular weight in the test set is 275Da). Furthermore, we
+based on the MCS between the reference and the predicted                                              created four categories based on the presence of heteroatoms: (1)
+structures indicate that the common substructure is, on average,                                      molecules that have only C and O, (2) molecules in which N is
+nearly 70% of the size of the reference structure for the closest                                     present, (3) molecules in which S is present, and, (4) molecules in
+structure and more than 50% for the average prediction. This                                          which a halogen (one of Br, Cl, F, I) is present. Table 4
+result is in agreement with the high correlation between the                                          summarizes this analysis. The model is able to identify the atom
+molecular ﬁngerprints.                                                                                species and atom counts for almost half of the molecules (45.4%)
+   Regarding the ability of the model to identify the presence of                                     with MW less than 300Da and for more than 60% of the
+each atom species in the molecular structure, it varies signiﬁcantly                                  molecules that contain only C and O (63.6%). The higher
+and it correlates with the frequency of each atom species in the                                      molecular weight as well as the presence of atoms that are under-
+training dataset, as it is shown in Table 3. More speciﬁcally, the                                    represented in the training set (S and halogens) degrades the
+model has very high sensitivity for nitrogen (N) and oxygen (O)                                       ability of the model to identify the molecular structure or
+which are the most common atom species in the dataset                                                 formula.
+(excluding carbon which is not included in this analysis as it                                           Figure 2 shows a few examples of successful cases with the
+is present in all molecules). However, the speciﬁcity for oxygen is                                   model correctly identifying key substructures such as rings and
+signiﬁcantly lower than that of nitrogen which means that there is                                    long chains and the presence of rare atoms and functional groups.
+a signiﬁcant number of false positives for oxygen compared to                                         Given the vast space of possible molecular structures, these cases
+nitrogen. Regarding the rare atom species, the opposite                                               demonstrate that the model has indeed learned to associate
+phenomenon is observed: speciﬁcity is signiﬁcantly high while                                         spectra features with molecular structures.
+sensitivity is low. This means that for the rare species there is a                                      We also identify two general scenarios where the model has
+very small number of false positives which is expected as these                                       difﬁculty in predicting relevant structures: (1) Molecules with
+atoms are under-represented in the training set. However,                                             large rings and (2) Molecules that have poor-quality spectra. An
+sensitivity is at least 0.5 for all atoms, which shows that the                                       example of the ﬁrst case is illustrated in Fig. 3. We believe this is
+model is able to capture the presence of rare atoms quite well                                        because molecules with large rings are signiﬁcantly under-
+considering that some atom species are severely under-                                                represented in the dataset that was used to pre-train the decoder.
+represented in the training set.                                                                      Also, it is hard to generate a valid SMILES sequence for molecules
+                                                                                                      with very large rings. Regarding the second case of poor quality
+                                                                                                      input spectra, it includes cases where there is a very small number
+                                                                                                      of peaks in the spectra and therefore not adequate information to
+ Table 2 Effect of the molecule generation strategy.                                                  reconstruct the SMILES sequence.
+
+ Metric                                   Direct           Indirect            Combined
+ Correct                    (%)           0.8              6.9                 7.0                    Comparative evaluation. In order to perform a comparative
+ molecules (↑)                                                                                        evaluation, we have used SIRIUS 431, which offers multiple
+ Correct formulas           (%)           26.1             28.0                39.3                   functions including chemical formula, as well as molecular
+ (↑)                                                                                                  structure, identiﬁcation from mass spectra. SIRIUS’ structure
+ DMW% (↓)                   min           3.1              4.4                 2.3                    elucidation method, called CSI:FingerID, is a database retrieval
+                            avg           11.6             9.3                 6.3                    method16. It relies on Support Vector Machines (SVMs) for
+ DMF% (↓)                   min           10.4             11.9                9.2                    predicting a molecular ﬁngerprint and subsequently compares the
+                            avg           24.2             22.4                21.7                   predicted ﬁngerprint against those of a reference database in
+ Fngpcosine (↑)             max           0.46             0.53                0.53                   order to identify candidate structures. The input to the SVM is
+                            avg           0.33             0.36                0.36
+                                                                                                      the MS/MS spectrum along with the corresponding computed
+ MCSratio (↑)               max           0.65             0.66                0.68
+                            avg           0.50             0.51                0.51
+                                                                                                      fragmentation tree. CSI:FingerID has shown superior perfor-
+ MCStan (↑)                 max           0.50             0.55                0.55                   mance when compared to other existing tools for the automatic
+                            avg           0.34             0.38                0.38                   identiﬁcation of molecular structures from spectra data. In par-
+ MCScoef (↑)                max           0.68             0.71                0.71                   ticular, it was the best-performing method in the Critical
+                            avg           0.53             0.56                0.54                   Assessment of Small Molecule Identiﬁcation (CASMI) contest for
+                                                                                                      2016 and 201731. However, the performance of this method
+ Comparative evaluation of the top-20 predictions using the direct strategy, the indirect strategy,
+ and the two strategies combined. The arrows show the desired trend for each metric.
+                                                                                                      degrades signiﬁcantly for cases that are not covered in the
+                                                                                                      training set31. Additionally, the dependence of CSI:FingerID on
+
+
+ Table 3 Sensitivity and speciﬁcity for detecting the presence of each atom species in the entire test set, having as reference the
+ frequency of each species in the training spectra dataset.
+
+                                      O                      N                       S                Cl              F               Br             P               I
+ Sensitivity                          0.94                   0.86                    0.50             0.68            0.48            0.79           0.53            0.51
+ Speciﬁcity                           0.50                   0.76                    0.96             0.91            0.92            0.98           0.99            0.99
+ Frequency (%)                        85.4                   71.5                    18.4             15.2            11.5            7.5            2.5             1.4
+
+
+6                              COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3                                                             ARTICLE
+
+ Table 4 Effect of molecular weight and presence of heteroatoms.
+
+                              MW < 300            MW ≥ 300             Only C and O           N present          S present       Halogen present
+ Number of cases              668                 332                  184                    769                199             318
+ Exact structure (%)          8.5                 3.9                  9.8                    6.1                5.5             5.7
+ Exact formula (%)            45.4                27.1                 63.6                   34.1               23.6            25.8
+
+
+
+
+Fig. 2 Examples of cases where Spec2Mol successfully identiﬁed key substructures. Examples of the most likely predicted structures from Spec2Mol
+along with the cosine similarity values with respect to the original reference structures.
+
+
+fragmentation tree data adds signiﬁcantly to the running time of              ions were not used since a single run for SIRIUS accepts spectra
+this method.                                                                  from a single precursor which may be obtained through different
+   We run SIRIUS on the same test set we developed for                        energies. As 53 test cases out of the 1000 cases of the test set did
+evaluating Spec2Mol. As input, we provided SIRIUS with the                    not have any positive mode spectra and therefore the test set used
+positive mode spectra (that is [M+H]+ at low and high energy)                 for the comparison consists of 947 cases. As a side note, SIRIUS
+as they were selected for Spec2Mol. The spectra from negative                 performs structure elucidation after identifying the molecular
+
+COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                  7
+ARTICLE                                                           COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+
+
+Fig. 3 A case where Spec2Mol did not identify relevant structures. An example where Spec2Mol failed to identify a similar structure for a reference
+compound containing a large ring.
+
+
+formula. The number of molecular formulas to be explored is one
+of the parameters of the tool which we set to 10. An additional              Table 5 Comparative evaluation between SIRIUS and
+parameter is the reference database which we set to PubChem,                 Spec2Mol, based on structural similarity between the
+which is the largest available source offered by SIRIUS. Finally,            recommended structures and the reference structure, on the
+SIRIUS allows the user to deﬁne the set of chemical elements to              subset of the test set where SIRIUS failed to identify an
+be considered when performing the search which we set to C, H,               exact match.
+O, N, S, Cl, F, Br, P, and I. It should be noted that expanding the
+pre-deﬁned set of atoms (C, H, N, O, P, S) to account for more               Method                  Fngpcosine     MCSratio     MCStan   MCScoef
+rare atoms, which were present in the NIST dataset, signiﬁcantly             SIRIUS         Max      0.49           0.65         0.54     0.66
+increased the running time.                                                                 Avg      0.33           0.49         0.35     0.49
+   On the test set of 947 cases, SIRIUS found the correct formula            Spec2Mol       Max      0.49           0.66         0.53     0.69
+for about 98% of the test cases while it found the correct structure                        Avg      0.34           0.50         0.36     0.53
+for about 67%. For 6 cases out of 947, SIRIUS did not return any
+structures. It should be highlighted that the CSI:FingerID method
+from SIRIUS has been trained on the NIST dataset (NIST v17).
+As it is discussed in the original study on the SIRIUS tool, the            input the computed fragmentation tree on top of the raw mass
+presence of spectra for a given test structure in the training set          spectra. It should be stressed that a direct comparison of the two
+can signiﬁcantly boost performance even if the spectra that are             methods is not possible since they differ signiﬁcantly: CSI:Fin-
+used when testing is not the exact same spectra as the ones used            gerID uses predicted ﬁngerprints from the MS/MS spectrum of an
+in training31.                                                              unknown compound to ﬁnd the best match against a chemical
+   The comparative evaluation between SIRIUS and Spec2Mol                   structure database, while Spec2Mol aims for de-novo generation
+was performed on the cases where SIRIUS failed to ﬁnd the exact             of potential molecular structures rather than attempting the best
+molecular structure. Since Spec2Mol is intended for recommend-              match retrieval from a database. Therefore, Spec2Mol is useful
+ing potential molecular structures given mass spectra, our                  in situations where a reference database is not available or CSI-
+intention here is to evaluate how relevant the recommendations              FingerID cannot ﬁnd an exact match. For that reason, the
+are, when compared to a widely accepted and state-of-the-art                comparison is performed on the cases where CSI-FingerID failed
+method like SIRIUS. By focusing our comparison on the cases                 to identify the exact structure, and the metrics used aim at
+where SIRIUS did not ﬁnd an exact match, we are essentially                 evaluating molecular similarity rather than exact matches.
+evaluating the relevance of the recommended structures when an                 Still, the outcome of our comparative evaluation demonstrates
+exact match is not found, which points to the case of novel                 that the molecular structures generated by Spec2Mol are at least
+molecules. In particular, we compared SIRIUS and Spec2Mol on                as successful as the ones obtained by state-of-the-art tools when
+the 307 cases, for which SIRIUS failed to ﬁnd an exact match,               considering novel molecules despite the fact that Spec2Mol relies
+using the metrics based on ﬁngerprint similarity and MCS. It                solely on raw MS/MS spectra.
+should be noted here that failure to identify the exact structure
+includes cases where SIRIUS either did not return any structure             Conclusions
+as well as cases where the reference structure was not among                Elucidating the structure of chemical compounds is a funda-
+the predicted structures. The results are summarized in Table 5.            mental, but cumbersome, task in metabolomics studies, as well as
+The comparison of the full test set (including cases where SIRIUS           in chemical analysis in various domains including drug devel-
+found the exact structure) is provided in the supplementary                 opment and forensics analysis. The available computational tools
+material (Supplementary Note 2, Table S4). According to our                 for aiding structure elucidation are based on fragment annotation
+analysis, the structures recommended by Spec2Mol are at least as            and database retrieval methods. This approach fails to identify
+relevant as the ones recommended by SIRIUS. More speciﬁcally,               molecules that are not present in the reference database which, in
+Spec2Mol achieved slightly better cosine similarity for the closest         practice, may correspond to a considerably large percentage of the
+structure, while almost all metrics based on the MCS are                    query spectra. We have developed Spec2Mol, an end-to-end deep
+improved in the case of Spec2Mol. This outcome is                           learning architecture for directly generating molecular structures
+especially interesting and encouraging, given that Spec2Mol is              (as SMILES sequences) from the input MS/MS spectra. Spec2Mol
+an end-to-end approach that does not take into account any prior            is based on an encoder-decoder architecture that generates
+knowledge. Spec2Mol generates potential molecular structures by             molecular SMILES sequences, given mass spectra. While the
+solely looking at raw MS/MS spectra. On the other hand, the                 proposed architecture supports the retrieval of molecules from a
+combination of CSI:FingerID and SIRIUS attempts to retrieve the             database that best matches the input spectra, it can also generate
+exact molecular structure from a reference database taking as               new molecules that have not been seen before in any dataset. Our
+
+8                     COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3                                                               ARTICLE
+
+analysis demonstrates that the recommended molecules are                     are presented in the supplementary material (Supplementary
+structurally, and physiochemically, similar to the reference                 Methods 1, S1.2, Tables S1-S2).
+compounds, suggesting that the latent space has indeed learned
+informative associations between the spectra and the structural
+features. When compared to an existing method that depends on                Data processing and representation. In order to minimize var-
+the fragmentation tree annotation, on top of the raw spectra for             iations in the spectra data, due to differences in the experimental
+molecule identiﬁcation, Spec2Mol performed on par for the task               conditions, we chose to keep certain variables in the dataset ﬁxed.
+of recommending potential molecular structures. Our results                  Details on the ﬁltering process that we followed for constructing
+indicate that the proposed approach of recommending de-novo                  the spectral dataset are provided in the supplementary material
+molecules directly from input MS spectra provides critical                   (Supplementary Methods 1, S1.1). More importantly, we used only
+insights into the characteristics of the underlying molecular                the spectra that are obtained through the most common precursor
+structure, and, can complement existing tools especially when the            ions, that is [M+H]+ and [M-H]-. For each precursor ion, we
+current tools fail to identify the right molecule from existing              used two spectra, one obtained using low collision energy (35%
+databases. We speculate that incorporating prior knowledge in                NCE) and one with high collision energy (130% NCE). Therefore,
+the model, for example in the form of fragmentation trees, can               each instance in the dataset we constructed is characterized by four
+further boost the performance of the proposed method. Further,               MS/MS spectra derived from two different precursor ions and two
+even though the main focus of our work is on de-novo generation              energy levels. The four spectra constitute the input to the spectra
+of molecules given an input spectrum, the indirect method pro-               encoder as described in paragraph 3.2. It should be highlighted
+posed by our paper can be extended to identify the correct                   though, that not all molecules in the NIST dataset have experi-
+molecule from a library of a plausible set of molecules, similar to          mental data for the speciﬁc precursors and energy levels. However,
+the work proposed by Lim et al.32. A substructure-constrained                we have allowed cases with missing data in the dataset and the
+similarity search or the nearest neighbor search on the embed-               missing spectra are represented as empty spectra, that is spectra
+dings of the molecule library with the spectra embedding as a                with no peaks, in an attempt to develop a model that is robust to
+query can be used to identify the best candidates from a relevant            missing data. Therefore, the model is being trained and evaluated
+library.                                                                     on cases that may not have available all four spectra.
+
+                                                                             Data representation. We represent each MS/MS spectrum as a
+Methodology                                                                  vector in which each bit corresponds to a speciﬁc mass-over-
+Spec2Mol consists of an encoder that learns spectra embeddings               charge (m/z) value, representing the m/z value of the recorded
+and a pre-trained decoder, which has been trained as part of an              fragments, while the value of each bit corresponds to the intensity,
+autoencoder architecture. The autoencoder has been trained on a              or otherwise frequency, of the fragments that have been recorded
+large set of molecules (molecule dataset discussed in section                with that speciﬁc mass-over-charge value. We have normalized the
+Molecule dataset), while the encoder has been trained on a set of            intensity values by dividing with the maximum intensity over all
+molecules for which MS/MS data are available (spectral dataset               the vector bits of a given spectrum. More details on the repre-
+discussed in section Spectral dataset).                                      sentation of the MS/MS spectra are provided in the supplementary
+                                                                             material (Supplementary Methods 1, S1.3). Regarding the mole-
+                                                                             cular structures, we represent them using canonical SMILES
+Datasets                                                                     without indicating stereochemistry information.
+Molecule dataset. The autoencoder, from which the Spec2Mol
+decoder has been derived, was pre-trained on about 135 million               Data augmentation. The variability in the spectra for a given
+molecules which were sourced from the PubChem33 and ZINC-                    molecule opens up the possibility for data augmentation. In
+1234 datasets. The structures of these molecules are represented             particular, although some spectra from the same molecule may
+using the SMILES notation24. Stereochemistry information was                 differ signiﬁcantly, as shown in Fig. 1, in many cases the obtained
+not indicated in the SMILES representation. The reason for not               spectra are closely related. One such case is when the collision
+accounting for stereochemistry is that, in the subsequent task of            energies that are being used are relatively close.
+spectra translation, recovering stereochemistry information from                In order to augment the dataset, for each instance in the training
+the mass spectra is especially challenging or possibly even                  set we are creating an additional training instance by slightly
+impossible and therefore it is out of the scope of this work.                perturbing the collision energy in all four spectra. In particular, each
+                                                                             spectrum, out of the four spectra that are used to represent an
+Spectral dataset. The mass spectra data for training the encoder             instance in the dataset, is replaced with a spectrum that has the
+has been derived from the NIST Tandem Mass Spectral Library                  closest collision energy in the dataset while all other parameters
+2020 which is a commercial dataset of more than 1M spectra                   (precursor ion, instrument) are shared. More information is provided
+obtained from more than 30K compounds35,36. The largest per-                 in the supplementary material (Supplementary Methods 1, S1.4).
+centage of the NIST dataset (60%) corresponds to metabolites (6K
+human metabolites and 8K plant metabolites) while a signiﬁcant               Data partition. After the data ﬁltering process, the acquired
+amount of the data is drugs (20%). The rest corresponds to                   dataset consists of 23K molecules, each one of them is asso-
+peptides, lipids, forensics, surfactants/contaminants and sugars/            ciated with four MS/MS spectra, or more precisely, up to four
+glycans. The dataset contains low and high resolution MS/MS                  MS/MS spectra given that there are cases with missing spectra.
+spectra, obtained through different fragmentation techniques.                This dataset was partitioned into a training, a validation and a
+Each molecule in the dataset may be associated with more than                test set with the validation and test set having about 1K
+one spectra which may be obtained through different experi-                  molecules each. For the test set speciﬁcally, we used ﬁngerprint
+mental conditions, that is, different fragmentation instrument,              similarity, based on the Tanimoto coefﬁcient28, in order to
+precursor ion, ionization mode, collision energy or fragmentation            ensure that no test molecule is either in the train or in the
+level (MS2, MS3 or MS4). Statistics of the dataset regarding                 validation set. The validation set was used to select the model
+common molecular properties (e.g. molecular weight, number of                hyper-parameters and the test set was used to evaluate the
+atoms and number of rings), as well as the atom species coverage,            performance of the model.
+
+COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                     9
+ARTICLE                                                           COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+
+
+Fig. 4 Spec2Mol architecture. The Spec2Mol model consists of a spectra encoder and a SMILES decoder which have been trained separately but share the
+same embedding space. a The AE is pre-trained to translate from a random SMILES to the canonical SMILES string. b The spectra encoder is trained to
+learn the same embedding as the SMILES encoder. c During inference, the spectra encoder and the SMILES decoder of the pre-trained model are used to
+translate spectra into molecular structures.
+
+Spec2Mol architecture. Spec2Mol uses an encoder-decoder                     variation of the standard long short term memory (LSTM)
+architecture for recommending molecular structures from MS/                 models, that are commonly used for learning sequence repre-
+MS spectra. The Spec2Mol encoder generates spectra embeddings               sentations, with fewer parameters. The details regarding the
+while the decoder reconstructs the SMILES sequence from a                   autoencoder architecture are in the supplementary material
+spectra embedding. The encoder and the decoder have been                    (Supplementary Methods 2, S2.1).
+trained separately as it is shown in Fig. 4. First, the decoder is
+trained as part of an autoencoder architecture for reconstructing
+the SMILES sequence from a SMILES embedding. Next, the                      Training the spectra encoder. The spectra encoder is trained in a
+spectra encoder is trained such that the learnt spectra embeddings          supervised manner such that the learned spectra embeddings are
+match the corresponding SMILES embeddings. Finally, for                     the same as the SMILES embeddings that the AE has learned.
+making inference on unseen cases, Spec2Mol uses the spectra                 More speciﬁcally, the input of the spectra encoder consists of the
+encoder to obtain the spectra embedding which is subsequently               four spectra that have been pre-selected to represent each mole-
+used in order to decode potentially novel molecules and also to             cule. The spectra encoder is based on 1-D CNNs and in particular
+retrieve molecules from the pre-training dataset.                           consists of two 1-D CNN layers and two fully connected layers.
+   The speciﬁcations for training each model are given in the               The four spectra are represented as 4 discrete vectors which are
+following paragraphs while more details on the architectures of             fed into the 1-D CNN as data from four different channels. Each
+the models, hyperparameters, and training parameters are                    channel corresponds to a speciﬁc precursor ([M+H]+ or [M-H]-)
+provided in the supplementary material (Supplementary                       and energy level (low or high). If any of the required four spectra
+Methods 2).                                                                 are not available, then the input to the respective channel is an all-
+                                                                            zeros vector. The output of the spectra encoder is a 1-D vector
+                                                                            which is the latent representation of the spectra in the embedding
+Pre-training the AE on chemical structures. The autoencoder is              space. The model is trained such that the distance (root mean
+trained on a translation task where a randomized input SMILES is            square error) between the latent representation that is learned by
+translated into its corresponding canonical SMILES, similar to the          the spectra encoder and the latent representation that is obtained
+work of Winter et al25. The encoder and the decoder of the AE               from the pre-trained SMILES encoder is minimized. Details
+are both based on gated recurrent units (GRU) which is a                    regarding the architecture and training of the spectra encoder are
+
+10                    COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3                                                                                        ARTICLE
+
+provided in the supplementary material (Supplementary Meth-                               10. Wei, J. N., Belanger, D., Adams, R. P. & Sculley, D. Rapid prediction of
+ods 2, S2.2).                                                                                 electron-ionization mass spectrometry using neural networks. ACS Cent. Sci.
+                                                                                              5, 700–708 (2019).
+                                                                                          11. Heinonen, M., Shen, H., Zamboni, N. & Rousu, J. Metabolite identiﬁcation
+Recommending molecular structures for unseen spectra.                                         and molecular ﬁngerprint prediction through machine learning.
+Spec2Mol provides as output molecular structures that can                                     Bioinformatics 28, 2333–2341 (2012).
+potentially explain the observed spectra peaks. The recommended                           12. Ji, H., Deng, H., Lu, H. & Zhang, Z. Predicting a molecular ﬁngerprint from an
+molecules for unseen spectra are obtained using two strategies: a                             electron ionization mass spectrum with deep neural networks. Anal. Chem.
+                                                                                              92, 8649–8653 (2020).
+direct and an indirect molecule generation strategy. The direct                           13. Liu, Y. et al. Messar: Automated recommendation of metabolite substructures
+molecule generation strategy generates molecular structures using                             from tandem mass spectra. PLoS ONE 15, 1–17 (2020).
+the SMILES decoder from the computed MS/MS embedding.                                     14. Vaniya, A. & Fiehn, O. Using fragmentation trees and mass spectral trees for
+Multiple SMILES are generated for each MS/MS embedding using                                  identifying unknown compounds in metabolomics. TrAC Trends Anal. Chem.
+a pure sampling strategy37, and subsequently ﬁltered in order to                              69, 52–61 (2015).
+                                                                                          15. Rasche, F. et al. Identifying the unknowns by aligning fragmentation trees.
+retain only the valid ones, i.e., the sequences that are in accor-                            Anal. Chem. 84, 3417–3426 (2012).
+dance with the SMILES syntax. The indirect strategy retrieves                             16. Dührkop, K., Shen, H., Meusel, M., Rousu, J. & Böcker, S. Searching molecular
+molecular structures from the dataset that was used for pre-                                  structure databases with tandem mass spectra using CSI:ﬁngerID. Proc. Natl
+training the AE based on the distance in the embedding space.                                 Acad. Sci. USA 112, 12580–12585 (2015).
+More speciﬁcally, for each MS/MS embedding we ﬁnd the closest                             17. Shen, H., Dührkop, K., Böcker, S. & Rousu, J. Metabolite identiﬁcation
+                                                                                              through multiple kernel learning on fragmentation trees. Bioinformatics 30,
+embeddings from the pool of molecules used to pre-train the AE                                i157–i164 (2014).
+and decode those embeddings into SMILES sequences.                                        18. Huber, F. et al. Spec2vec: Improved mass spectral similarity scoring through
+   The predicted molecules obtained through these two strategies                              learning of structural relationships. PLOS Computational Biol. 17, 1–18
+are combined and ranked based on their discrepancy from the                                   (2021).
+expected molecular weight. The molecular weight of the under-                             19. Dührkop, K. et al. Systematic classiﬁcation of unknown metabolites using
+                                                                                              high-resolution fragmentation mass spectra. Nature Biotechnology (2020).
+lying chemical structure is easily inferred from the mass spectrum                        20. Seddiki, K. et al. Cumulative learning enables convolutional neural network
+and therefore in this work we consider it as known. The                                       representations for small mass spectrometry data classiﬁcation. Nat. Commun.
+molecular structures that have molecular weight closer to the                                 11, 5595 (2020).
+reference weight are highly ranked. The top-20 ranked predic-                             21. Lin, Y.-M., Chen, C.-T. & Chang, J.-M. MS2CNN: predicting MS/MS
+tions are returned to the user.                                                               spectrum based on protein sequence using deep convolutional neural
+                                                                                              networks. BMC Genomics 20, 906 (2019).
+                                                                                          22. Tran, N. H., Zhang, X., Xin, L., Shan, B. & Li, M. De novo peptide sequencing
+                                                                                              by deep learning. Proc. Natl Acad. Sci. USA 114, 8247–8252 (2017).
+Data availability                                                                         23. Zohora, F. T. et al. DeepIso: A deep learning model for peptide feature
+The spectra dataset used for training and evaluating the model cannot be made publicly        detection from LC-MS map. Sci. Rep. 9, 17168 (2019).
+available as it is a commercial dataset.                                                  24. Weininger, D. Smiles, a chemical language and information system. 1.
+                                                                                              introduction to methodology and encoding rules. J. Chem. Inf. Comput. Sci.
+                                                                                              28, 31–36 (1988).
+                                                                                          25. Winter, R., Montanari, F., Noé, F. & Clevert, D.-A. Learning continuous and
+Code availability                                                                             data-driven molecular descriptors by translating equivalent chemical
+The code is available at https://github.com/KavrakiLab/Spec2Mol.                              representations. Chem. Sci. 10, 1692–1701 (2019).
+                                                                                          26. Ross, J. et al. Large-scale chemical language representations capture molecular
+                                                                                              structure and properties. Nat. Mach. Intell. 4, 1256–1264 (2022).
+Received: 17 November 2021; Accepted: 13 June 2023;                                       27. Belgodere, B. et al. Cloud-based real-time molecular screening platform with
+                                                                                              molformer. In ECML PKDD (2022).
+                                                                                          28. Maggiora, G., Vogt, M., Stumpfe, D. & Bajorath, J. Molecular similarity in
+                                                                                              medicinal chemistry. J. Med. Chem. 57, 3186–3204 (2014).
+                                                                                          29. Morgan, H. L. The generation of a unique machine description for chemical
+                                                                                              structures-a technique developed at chemical abstracts service. J. Chem.
+References                                                                                    Document. 5, 107–113 (1965).
+1.   Nalbantoğlu, S. Metabolomics: Basic principles and strategies. In Nalbantoğlu,       30. Rdkit: Open-source cheminformatics software. https://www.rdkit.org/.
+     S. & Amri, H. (eds.) Molecular Medicine (IntechOpen, 2019).                          31. Dührkop, K. et al. SIRIUS 4: a rapid tool for turning tandem mass spectra into
+2.   Lee, S. et al. Exploring the metabolomic diversity of plant species across spatial       metabolite structure information. Nat. Methods 16, 299–302 (2019).
+     (leaf and stem) components and phylogenic groups. BMC Plant Biol. 20, 39             32. Lim, J. et al. Chemical structure elucidation from mass spectrometry by
+     (2020).                                                                                  matching substructures https://arxiv.org/abs/1811.07886 (2018).
+3.   Emwas, A. H. The strengths and weaknesses of NMR spectroscopy and mass               33. Kim, S. et al. PubChem in 2021: new data content and improved web
+     spectrometry with particular focus on metabolomics research. Methods in                  interfaces. Nucleic Acids Res. 49, D1388–D1395 (2020).
+     Molecular Biology 161–193 (2015).                                                    34. Irwin, J. J. & Shoichet, B. K. ZINC - a free database of commercially
+4.   Wishart, D. S. Computational strategies for metabolite identiﬁcation in                  available compounds for virtual screening. J. Chem. Inf. Modeling 45, 177–182
+     metabolomics. Bioanalysis 1, 1579–1596 (2009).                                           (2005).
+5.   Demartini, D. R. A short overview of the components in mass spectrometry             35. Yang, X., Neta, P. & Stein, S. Extending a tandem mass spectral library to
+     instrumentation for proteomics analyses. In Coelho, A. V. & Ferraz Franco, C.            include MS2 spectra of fragment ions produced in-source and MSn spectra. J.
+     D. M. (eds.) Tandem Mass Spectrometry - Molecular Characterization                       Am. Soc. Mass Spectrom. 28, 2280–2287 (2017).
+     (IntechOpen, 2013).                                                                  36. NIST 20 dataset. https://chemdata.nist.gov/dokuwiki/lib/exe/fetch.php?
+6.   Nguyen, D. H., Nguyen, C. H. & Mamitsuka, H. Recent advances and                         media=chemdata:asms2020:xiaoyu_yang_asms2020_presentation.pdf.
+     prospects of computational methods for metabolite identiﬁcation: a review                Accessed: 2021-04-04.
+     with emphasis on machine learning approaches. Brief. Bioinforma. 20,                 37. Holtzman, A., Buys, J., Du, L., Forbes, M. & Choi, Y. The curious case of
+     2028–2043 (2019).                                                                        neural text degeneration. arXiv preprint arXiv:1904.09751 (2019).
+7.   Vinaixa, M. et al. Mass spectral databases for LC/MS - and GC/MS-based
+     metabolomics: State of the ﬁeld and future prospects. TrAC Trends Anal.
+     Chem. 78, 23–35 (2016).
+8.   Wishart, D. et al. HMDB 4.0: the human metabolome database for 2018.                 Acknowledgements
+     Nucleic Acids Res. 46, D608–D617 (2018).                                             E.E.L. and L.E.K. have been supported in part by Rice University funds. L.E.K. has also
+9.   Djoumbou-Feunang, Y. et al. Cfm-id 3.0: Signiﬁcantly improved ESI-MS/MS              been supported by NIH U01CA258512. C.V. and P.D. have been supported by IBM
+     prediction and compound identiﬁcation. Metabolites 9, https://www.mdpi.              Research. E.E.L. and L.E.K. would like to thank Jin Wang and Jin Feng for introducing
+     com/2218-1989/9/4/72 (2019).                                                         them to the problem and for initial discussions.
+
+
+
+COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem                                                                11
+ARTICLE                                                                             COMMUNICATIONS CHEMISTRY | https://doi.org/10.1038/s42004-023-00932-3
+
+
+Author contributions                                                                            Reprints and permission information is available at http://www.nature.com/reprints
+Conceptualization: E.E.L., Methodology: E.E.L., P.D., and L.E.K., Software: E.E.L. for
+Spectra Encoder and V.C. for Pre-trained Autoencoder, Data analysis: E.E.L., Inter-             Publisher’s note Springer Nature remains neutral with regard to jurisdictional claims in
+pretation of results: All authors, Visualization, ﬁgures and tables: E.E.L. Supervision: P.D.   published maps and institutional afﬁliations.
+and L.E.K., Manuscript-original draft: E.L. Review and editing: All authors. All authors
+approved the manuscript.
+                                                                                                                  Open Access This article is licensed under a Creative Commons
+                                                                                                                  Attribution 4.0 International License, which permits use, sharing,
+Competing interests
+The authors declare no competing interests.                                                     adaptation, distribution and reproduction in any medium or format, as long as you give
+                                                                                                appropriate credit to the original author(s) and the source, provide a link to the Creative
+                                                                                                Commons license, and indicate if changes were made. The images or other third party
+Additional information                                                                          material in this article are included in the article’s Creative Commons license, unless
+Supplementary information The online version contains supplementary material                    indicated otherwise in a credit line to the material. If material is not included in the
+available at https://doi.org/10.1038/s42004-023-00932-3.                                        article’s Creative Commons license and your intended use is not permitted by statutory
+                                                                                                regulation or exceeds the permitted use, you will need to obtain permission directly from
+Correspondence and requests for materials should be addressed to Payel Das or Lydia E.          the copyright holder. To view a copy of this license, visit http://creativecommons.org/
+Kavraki.                                                                                        licenses/by/4.0/.
+
+Peer review information Communications Chemistry thanks Seungwu Han, Marc-André
+Delsuc, and the other, anonymous, reviewer for their contribution to the peer review of         © The Author(s) 2023
+this work.
+
+
+
+
+12                           COMMUNICATIONS CHEMISTRY | (2023)6:132 | https://doi.org/10.1038/s42004-023-00932-3 | www.nature.com/commschem
+

@@ -1,0 +1,890 @@
+From RankNet to LambdaRank to
+LambdaMART: An Overview
+
+Christopher J.C. Burges
+Microsoft Research Technical Report MSR-TR-2010-82
+
+
+
+
+Abstract
+LambdaMART is the boosted tree version of LambdaRank, which is based on
+RankNet. RankNet, LambdaRank, and LambdaMART have proven to be very suc-
+cessful algorithms for solving real world ranking problems: for example an ensem-
+ble of LambdaMART rankers won Track 1 of the 2010 Yahoo! Learning To Rank
+Challenge. The details of these algorithms are spread across several papers and re-
+ports, and so here we give a self-contained, detailed and complete description of
+them.
+
+
+
+1 Introduction
+
+LambdaMART is the boosted tree version of LambdaRank, which is based on
+RankNet. RankNet, LambdaRank, and LambdaMART have proven to be very suc-
+cessful algorithms for solving real world ranking problems: for example an ensem-
+ble of LambdaMART rankers won the recent Yahoo! Learning To Rank Challenge
+(Track 1) [5]. Although here we will concentrate on ranking, it is straightforward to
+modify MART in general, and LambdaMART in particular, to solve a wide range
+of supervised learning problems (including maximizing information retrieval func-
+tions, like NDCG, which are not smooth functions of the model scores).
+   This document attempts to give a self-contained explanation of these algorithms.
+The only mathematical background needed is basic vector calculus; some familiarity
+with the problem of learning to rank is assumed. Our hope is that this overview is
+sufficiently self-contained that, for example, a reader who wishes to train a boosted
+tree model to optimize some information retrieval measure they have in mind, can
+understand how to use these methods to achieve this. Ranking for web search is used
+as a concrete example throughout. Material in gray sections is background material
+
+Christopher J.C. Burges
+Microsoft Research, Redmond, WA. e-mail: chris.burges@microsoft.com
+
+
+                                                                                   1
+2               Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+that is not necessary for understanding the main thread. These ideas were originated
+over several years and appeared in several papers; the purpose of this report is to
+collect all of the ideas into one, easily accessible place (and to add background and
+more details where needed). To keep the exposition brief, no experimental results are
+presented in this chapter, and we do not compare to any other methods for learning
+to rank (of which there are many); these topics are addressed extensively elsewhere.
+
+
+
+2 RankNet
+
+For RankNet [2], the underlying model can be any model for which the output of the
+model is a differentiable function of the model parameters (typically we have used
+neural nets, but we have also implemented RankNet using boosted trees, which we
+will describe below). RankNet training works as follows. The training data is par-
+titioned by query. At a given point during training, RankNet maps an input feature
+vector x ∈ R n to a number f (x). For a given query, each pair of urls Ui and U j
+with differing labels is chosen, and each such pair (with feature vectors xi and x j )
+is presented to the model, which computes the scores si = f (xi ) and s j = f (x j ). Let
+Ui BU j denote the event that Ui should be ranked higher than U j (for example, be-
+cause Ui has been labeled ’excellent’ while U j has been labeled ’bad’ for this query;
+note that the labels for the same urls may be different for different queries). The two
+outputs of the model are mapped to a learned probability that Ui should be ranked
+higher than U j via a sigmoid function, thus:
+
+                                                          1
+                         Pi j ≡ P(Ui BU j ) ≡
+                                                  1 + e−σ (si −s j )
+where the choice of the parameter σ determines the shape of the sigmoid. The use
+of the sigmoid is a known device in neural network training that has been shown to
+lead to good probability estimates [1]. We then apply the cross entropy cost function,
+which penalizes the deviation of the model output probabilities from the desired
+probabilities: let P̄i j be the known probability that training url Ui should be ranked
+higher than training url U j . Then the cost is
+
+                      C = −P̄i j log Pi j − (1 − P̄i j ) log(1 − Pi j )
+
+For a given query, let Si j ∈ {0, ±1} be defined to be 1 if document i has been la-
+beled to be more relevant than document j, −1 if document i has been labeled to
+be less relevant than document j, and 0 if they have the same label. Throughout
+this paper we assume that the desired ranking is deterministically known, so that
+P̄i j = 12 (1 + Si j ). (Note that the model can handle the more general case of mea-
+sured probabilities, where, for example, P̄i j could be estimated by showing the pair
+to several judges). Combining the above two equations gives
+From RankNet to LambdaRank to LambdaMART: An Overview                                         3
+
+                       1
+                    C = (1 − Si j )σ (si − s j ) + log (1 + e−σ (si −s j ) )
+                       2
+The cost is comfortingly symmetric (swapping i and j and changing the sign of Si j
+should leave the cost invariant): for Si j = 1,
+
+                                 C = log (1 + e−σ (si −s j ) )
+
+while for Si j = −1,
+
+                                 C = log (1 + e−σ (s j −si ) )
+
+Note that when si = s j , the cost is log 2, so the model incorporates a margin (that
+is, documents with different labels, but to which the model assigns the same scores,
+are still pushed away from each other in the ranking). Also, asymptotically, the
+cost becomes linear (if the scores give the wrong ranking), or zero (if they give the
+correct ranking). This gives
+                                                              
+                   ∂C         1                    1                ∂C
+                        =σ      (1 − Si j ) −       (s  −s   )
+                                                                 =−               (1)
+                   ∂ si       2               1+e σ   i    j        ∂ sj
+
+This gradient is used to update the weights wk ∈ R (i.e. the model parameters) so
+as to reduce the cost via stochastic gradient descent1 :
+                                                                    
+                               ∂C               ∂C ∂ si    ∂C ∂ s j
+                wk → wk − η         = wk − η             +                    (2)
+                              ∂ wk              ∂ si ∂ wk ∂ s j ∂ wk
+
+where η is a positive learning rate (a parameter chosen using a validation set; typi-
+cally, in our experiments, 1e-3 to 1e-5). Explicitly:
+                                                                               2
+                ∂C            ∂C                  ∂C                       ∂C
+         δC = ∑      δ wk = ∑                  −η            = −η ∑                    <0
+              k ∂ wk        k ∂ wk                ∂ wk             k       ∂ wk
+
+   The idea of learning via gradient descent is a key idea that appears throughout
+this paper (even when the desired cost doesn’t have well-posed gradients, and even
+when the model (such as an ensemble of boosted trees) doesn’t have differentiable
+parameters): to update the model, we must specify the gradient of the cost with
+respect to the model parameters wk , and in order to do that, we need the gradient
+of the cost with respect to the model scores si . The gradient descent formulation of
+boosted trees (such as MART [8]) bypasses the need to compute ∂C/∂ wk by directly
+modeling ∂C/∂ si .
+
+
+
+
+1 We use the convention that if two quantities appear as a product and they share an index, then
+
+that index is summed over.
+4               Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+2.1 Factoring RankNet: Speeding Up Ranknet Training
+
+The above leads to a factorization that is the key observation that led to LambdaRank
+[4]: for a given pair of urls Ui , U j (again, summations over repeated indices are
+assumed):
+                                                                                     
+   ∂C      ∂C ∂ si       ∂C ∂ s j       1                    1               ∂ si   ∂sj
+        =              +          =σ      (1 − Si j ) −                           −
+  ∂ wk     ∂ si ∂ wk ∂ s j ∂ wk         2               1 + eσ (si −s j )    ∂ wk ∂ wk
+                             
+                  ∂ si    ∂sj
+        = λi j          −
+                 ∂ wk ∂ wk
+
+where we have defined
+                                                                                  
+                       ∂C(si − s j )            1                    1
+                λi j ≡               =σ           (1 − Si j ) −                        (3)
+                          ∂ si                  2               1 + e (si −s j )
+                                                                     σ
+
+
+Let I denote the set of pairs of indices {i, j}, for which we desire Ui to be ranked
+differently from U j (for a given query). I must include each pair just once, so it is
+convenient to adopt the convention that I contains pairs of indices {i, j} for which
+Ui B U j , so that Si j = 1 (which simplifies the notation considerably, and we will
+assume this from now on). Note that since RankNet learns from probabilities and
+outputs probabilities, it does not require that the urls be labeled; it just needs the
+set I, which could also be determined by gathering pairwise preferences (which is
+much more general, since it can be inconsistent: for example a confused judge may
+have decided that for a given query, U1 BU2 , U2 BU3 , and U3 BU1 ). Now summing
+all the contributions to the update of weight wk gives
+                                                      
+                                      ∂ si        ∂sj              ∂ si
+               δ wk = −η ∑ λi j            − λi j        ≡ −η ∑ λi
+                           {i, j}∈I
+                                      ∂ wk        ∂ wk        i    ∂ wk
+
+where we have introduced the λi (one λi for each url: note that the λ ’s with one
+subscript are sums of the λ ’s with two). To compute λi (for url Ui ), we find all j for
+which {i, j} ∈ I and all k for which {k, i} ∈ I. For the former, we increment λi by
+λi j , and for the latter, we decrement λi by λki . For example, if there were just one
+pair with U1 BU2 , then I = {{1, 2}}, and λ1 = λ12 = −λ2 . In general, we have:
+
+                            λi =     ∑ λi j − ∑ λi j                                   (4)
+                                   j:{i, j}∈I        j:{ j,i}∈I
+
+As we will see below, you can think of the λ ’s as little arrows (or forces), one
+attached to each (sorted) url, the direction of which indicates the direction we’d like
+the url to move (to increase relevance), the length of which indicates by how much,
+and where the λ for a given url is computed from all the pairs in which that url is
+a member. When we first implemented RankNet, we used true stochastic gradient
+descent: the weights were updated after each pair of urls (with different labels) were
+examined. The above shows that instead, we can accumulate the λ ’s for each url,
+From RankNet to LambdaRank to LambdaMART: An Overview                                 5
+
+summing its contributions from all pairs of urls (where a pair consists of two urls
+with different labels), and then do the update. This is mini-batch learning, where
+all the weight updates are first computed for a given query, and then applied, but
+the speedup results from the way the problem factorizes, not from using mini-batch
+alone. This led to a very significant speedup in RankNet training (since a weight
+update is expensive, since e.g. for a neural net model, it requires a backprop). In fact
+training time dropped from close to quadratic in the number of urls per query, to
+close to linear. It also laid the groundwork for LambdaRank, but before we discuss
+that, let’s review the information retrieval measures we wish to learn.
+
+
+
+3 Information Retrieval Measures
+
+Information retrieval researchers use ranking quality measures such as Mean Re-
+ciprocal Rank (MRR), Mean Average Precision (MAP), Expected Reciprocal Rank
+(ERR), and Normalized Discounted Cumulative Gain (NDCG). NDCG [9] and ERR
+[6] have the advantage that they handle multiple levels of relevance (whereas MRR
+and MAP are designed for binary relevance levels), and that the measure includes a
+position dependence for results shown to the user (that gives higher ranked results
+more weight), which is particularly appropriate for web search. All of these mea-
+sures, however, have the unfortunate property that viewed as functions of the model
+scores, they are everywhere either discontinuous or flat, so gradient descent appears
+to be problematic, since the gradient is everywhere either zero or not defined. For
+example, NDCG is defined as follows. The DCG (Discounted Cumulative Gain) for
+a given set of search results (for a given query) is
+                                            T
+                                                 2li − 1
+                             DCG@T ≡ ∑                                              (5)
+                                           i=1 log(1 + i)
+
+where T is the truncation level (for example, if we only care about the first page of
+returned results, we might take T = 10), and li is the label of the ith listed URL. We
+typically use five levels of relevance: li ∈ {0, 1, 2, 3, 4}. The NDCG is the normalized
+version of this:
+                                             DCG@T
+                            NDCG@T ≡
+                                            maxDCG@T
+where the denominator is the maximum DCG@T attainable for that query, so that
+NDCG@T ∈ [0, 1].
+   ERR was introduced more recently [6] and is inspired by cascade models, where
+a user is assumed to read down the list of returned urls until they find one they like.
+ERR is defined as
+                                  n        r−1
+                                       1
+                                 ∑ r Rr ∏(1 − Ri )
+                                 r=1       i=1
+6                Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+where, if lm is the maximum label value,
+
+                                                2li − 1
+                                         Ri =
+                                                  2lm
+Ri models the probability that the user finds the document at rank position i rel-
+evant. Naively one might expect that the cost of computing ∆ERR (the change in
+ERR resulting from swapping two document’s ranks while leaving all other ranks
+unchanged) would be cubic in the number of documents for a given query, since the
+documents whose ranks lie between the two ranks considered contribute to ∆ERR ,
+and since this contribution must be computed for every pair of documents. How-
+ever the computation has quadratic cost (where the quadratic cost arises from the
+need to compute ∆ERR for every pair of documents with different labels), since it
+can be ordered as follows. Let ∆ denote ∆ERR . Letting Ti ≡ 1 − Ri , create an array A
+whose ith component is the ERR computed only to level i. (Computing A has linear
+complexity). Then:
+
+1. Compute πi ≡ ∏in=1 Tn for i > 0, and set π0 = 1.
+2. Set ∆ = πi−1 (Ri − R j )/ri .
+3. Increment ∆ by
+                                                                        
+                           Ri+1 Ti+1 Ri+2         Ti+1 . . . T j−2 R j−1
+             (Ti − T j )         +        +...+                            πi−1
+                           ri+1      ri+2                 r j−1
+                                       
+                             A j−1 − Ai
+             ≡ (Ti − T j )
+                                 Ti
+
+4. Further increment ∆ by
+                                                                                         
+                πi−1                                            π j−1            T j Ri
+                     Ti+1 Ti+2 . . . T j−1 (Ti R j − T j Ri ) =             Rj −              .
+                 rj                                              rj               Ti
+
+   Note that unlike NDCG, the change in ERR induced by swapping two urls Ui
+and U j , keeping all other urls fixed (with the same rank), depends on the labels and
+ranks of the urls with ranks between those of Ui and U j . As a result, the curious
+reader might wonder if ERR is consistent: if Ui BU j , and the two rank positions are
+swapped, does ERR necessarily decrease? It’s easy to see that it must by showing
+that the above ∆ is nonnegative when Ri > R j . Collecting terms, we have that
+                                                                                           
+      πi (Ri − R j ) 1 Ri+1 Ti+1 Ri+2               Ti+1 . . . T j−2 R j−1 Ti+1 . . . T j−1
+∆=                      −       −           −...−                         −
+           Ti         ri ri+1        ri+2                   r j−1                rj
+
+Since ri+1 > ri , this is certainly nonnegative if
+
+            Ri+1 + Ti+1 Ri+2 + · · · + Ti+1 · · · T j−2 R j−1 + Ti+1 · · · T j−1 ≤ 1.
+
+But since Ri + Ti = 1, the left hand side just collapses to 1.
+From RankNet to LambdaRank to LambdaMART: An Overview                                                 7
+
+
+
+
+Fig. 1 A set of urls ordered for a given query using a binary relevance measure. The light gray
+bars represent urls that are not relevant to the query, while the dark blue bars represent urls that are
+relevant to the query. Left: the total number of pairwise errors is thirteen. Right: by moving the top
+url down three rank levels, and the bottom relevant url up five, the total number of pairwise errors
+has been reduced to eleven. However for IR measures like NDCG and ERR that emphasize the top
+few results, this is not what we want. The (black) arrows on the left denote the RankNet gradients
+(which increase with the number of pairwise errors), whereas what we’d really like are the (red)
+arrows on the right.
+
+
+
+4 LambdaRank
+
+Although RankNet can be made to work quite well with the above measures by
+simply using the measure as a stopping criterion on a validation set, we can do
+better. RankNet is optimizing for (a smooth, convex approximation to) the number
+of pairwise errors, which is fine if that is the desired cost, but it does not match well
+with some other information retrieval measures. Figure 1 is a schematic depicting
+the problem. The idea of writing down the desired gradients directly (shown as
+arrows in the Figure), rather than deriving them from a cost, is one of the ideas
+underlying LambdaRank [4]: it allows us to bypass the difficulties introduced by
+the sort in most IR measures. Note that this does not mean that the gradients are not
+gradients of a cost. In this section, for concreteness we assume that we are designing
+a model to learn NDCG.
+8                 Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+4.1 From RankNet to LambdaRank
+
+The key observation of LambdaRank is thus that in order to train a model, we don’t
+need the costs themselves: we only need the gradients (of the costs with respect to
+the model scores). The arrows (λ ’s) mentioned above are exactly those gradients.
+The λ ’s for a given URL U1 get contributions from all other URLs for the same
+query that have different labels. The λ ’s can also be interpreted as forces (which are
+gradients of a potential function, when the forces are conservative): if U2 is more
+relevant than U1 , then U1 will get a push downwards of size |λ | (and U2 , an equal
+and opposite push upwards); if U2 is less relevant than U1 , then U1 will get a push
+upwards of size |λ | (and U2 , an equal and opposite push downwards).
+   Experiments have shown that modifying Eq. (3) by simply multiplying by the
+size of the change in NDCG (|∆NDCG |) given by swapping the rank positions of
+U1 and U2 (while leaving the rank positions of all other urls unchanged) gives very
+good results [4]. Hence in LambdaRank we imagine that there is a utility C such
+that2
+                             ∂C(si − s j )       −σ
+                      λi j =               =                   |∆NDCG |             (6)
+                                 ∂ si        1 + eσ (si −s j )
+Since here we want to maximize C, equation (2) (for the contribution to the kth
+weight) is replaced by
+
+                                                    ∂C
+                                      wk → wk + η
+                                                    ∂ wk
+so that
+                                                           2
+                                 ∂C                  ∂C
+                            δC =      δ wk = η                   >0                     (7)
+                                 ∂ wk                ∂ wk
+
+Thus although Information Retrieval measures, viewed as functions of the model
+scores, are either flat or discontinuous everywhere, the LambdaRank idea bypasses
+this problem by computing the gradients after the urls have been sorted by their
+scores. We have shown empirically that, intriguingly, such a model actually opti-
+mizes NDCG directly [12, 7]. In fact we have further shown that if you want to
+optimize some other information retrieval measure, such as MRR or MAP, then
+LambdaRank can be trivially modified to accomplish this: the only change is that
+|∆NDCG | above is replaced by the corresponding change in the chosen IR measure
+[7].
+   For a given pair, a λ is computed, and the λ ’s for U1 and U2 are incremented
+by that λ , where the sign is chosen so that s2 − s1 becomes more negative, so that
+U1 tends to move up the list of sorted urls while U2 tends to move down. Again,
+given more than one pair of urls, if each url Ui has a score si , then for any particular
+pair {Ui ,U j } (recall we assume that Ui is more relevant than U j ), we separate the
+
+2 We have switched from cost to utility here since NDCG is a measure of goodness (which we
+
+want to maximize). Recall also that Si j = 1.
+From RankNet to LambdaRank to LambdaMART: An Overview                                9
+
+calculation:
+                                                       
+                          ∂ si        ∂ si         ∂ si
+                     δ si =    δ wk =        −ηλ          <0
+                          ∂ wk        ∂ wk        ∂ wk
+                                                    
+                          ∂sj         ∂sj       ∂sj
+                    δsj =      δ wk =        ηλ         >0
+                          ∂ wk        ∂ wk      ∂ wk
+
+Thus, every pair generates an equal and opposite λ , and for a given url, all the
+lambdas are incremented (from contributions from all pairs in which is it a member,
+where the other member of the pair has a different label). This accumulation is
+done for every url for a given query; when that calculation is done, the weights are
+adjusted based on the computed lambdas using a small (stochastic gradient) step.
+
+
+
+
+   4.2 LambdaRank: Empirical Optimization of NDCG (or other
+   IR Measures)
+
+   Here we briefly describe how we showed empirically that LambdaRank di-
+   rectly optimizes NDCG [12, 7]. Suppose that we have trained a model and that
+   its (learned) parameter values are w∗k . We can estimate a smoothed version of
+   the gradient empirically by fixing all weights but one (call it wi ), computing
+   how the NDCG (averaged over a large number of training queries) varies, and
+   forming the ratio
+
+                                 δM     M − M∗
+                                      =
+                                 δ wi   wi − w∗i
+
+   where for n queries
+
+                                     1 n
+                               M≡      ∑ NDCG(i)                               (8)
+                                     n i=1
+
+   and where the ith query has NDCG equal to NDCG(i). Now suppose we plot
+   M as a function of wi for each i. If we observe that M is a maximum at
+   wi = w∗i for every i, then we know that the function has vanishing gradient
+   at the learned values of the weights, w = w∗ . (Of course, if we zoom in on the
+   graph with sufficient magnification, we’ll find that the curves are little step
+   functions; we are considering the gradient at a scale at which the curves are
+   smooth). This is necessary but not sufficient to show that the NDCG is a max-
+   imum at w = w∗ : it could be a saddle point. We could attempt to show that the
+   point is a maximum by showing that the Hessian is negative definite, but that
+   is in several respects computationally challenging. However we can obtain an
+10                    Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+
+
+     arbitrarily tight bound by applying a one-sided Monte Carlo test: choose suf-
+     ficiently many random directions in weight space, move the weights a little
+     along each such direction, and check that M always decreases as we move
+     away from w∗ . Specifically, we choose directions uniformly at random by
+     sampling from a spherical Gaussian. Let p be the fraction of directions that
+     result in M increasing. Then
+
+                 P(We miss an ascent direction despite n trials) = (1 − p)n
+
+     Let’s call 1 − P our confidence. If we require a confidence of 99% (i.e. we
+     choose δ = 0.01 and require P ≤ δ ), how large must n be, in order that p ≤ p0 ,
+     where we choose p0 = 0.01? We have
+
+                                                                     log δ
+                                 (1 − p0 )n ≤ δ → n ≥                                                        (9)
+                                                                  log(1 − p0 )
+
+     which gives n ≥ 459 (i.e. choose 459 random directions and always find that
+     M decreases along those directions; note that larger value of p0 would require
+     fewer tests). In general we have confidence at least 1 − δ that p ≤ p0 provided
+                                 log δ
+     we perform at least n = log(1−p   ) tests. 0
+
+
+
+
+     4.3 When are the Lambdas Actually a Gradient?
+
+     Suppose you write down some arbitrary λ ’s. Does there necessarily exist a
+     cost for which those λ ’s are the gradients? Are there general conditions un-
+     der which such a cost exists? It’s easy to write down expressions for which
+     no function exists for which those expressions are the partial derivatives: for
+     example, there is no F(x, y) for which
+
+                                     ∂ F(x, y)               ∂ F(x, y)
+                                               = 1,                    =x
+                                        ∂x                      ∂y
+     It turns out that the necessary and sufficient conditions under which func-
+     tions f1 (x1 , . . . , xn ), f2 (x1 , . . . , xn ), . . . , fn (x1 , . . . , xn ) are the partial derivatives
+     of some function F, so that
+                                                    ∂F
+                                                         = fi
+                                                    ∂ xi
+From RankNet to LambdaRank to LambdaMART: An Overview                                     11
+
+
+
+   are that
+                                         ∂ fi   ∂ fj
+                                              =                                    (10)
+                                         ∂xj    ∂ xi
+
+   under the condition that the domain D of F be open and star-shaped (in other
+   words, if x ∈ D, then all points joining x with the origin are also in D) (see for
+   example [10]). This result is known as the Poincaré lemma. In our case, for
+   a given pair, for any particular values for the model parameters (that is, for a
+   particular sorting of the urls by current model scores), it is easy to write down
+   such a cost: it is the RankNet cost multiplied by ∆NDCG . However the general
+   expression depends in a complicated way on the model parameters, since the
+   model generates the score by which the urls are sorted, and since the λ ’s are
+   computed after the sort.
+
+
+
+
+5 MART
+
+LambdaMART combines MART [8] and LambdaRank. To understand LambdaMART
+we first review MART. Since MART is a boosted tree model in which the output of
+the model is a linear combination of the outputs of a set of regression trees, we first
+briefly review regression trees. Suppose we are given a data set {xi , yi }, i = 1, . . . , m
+where xi ∈ Rd and the labels yi ∈ R. For a given vector xi we index its feature values
+by xi j , j = 1, . . . , d. Consider first a regression stump, consisting of a root node and
+two leaf nodes, where directed arcs connect the root to each leaf. We think of all
+the data as residing on the root node, and for a given feature, we loop through all
+samples and find the threshold t such that, if all samples with xi j ≤ t fall to the left
+child node, and the rest fall to the right child node, then the sum
+
+                            S j ≡ ∑ (yi − µL )2 + ∑ (yi − µR )2                       (11)
+                                  i∈L               i∈R
+
+is minimized. Here L (R) is the sets of indices of samples that fall to the left (right),
+and µL (µR ) is the mean of the values of the labels of the set of samples that fall to
+the left (right). (The dependence on j in the sum appears in L, R and in µL , µR ).
+S j is then computed for all choices of feature j and all choices of threshold for that
+feature, and the split (the choice of a particular feature j and threshold t) is chosen
+that gives the overall minimal S j . That split is then attached to the root node. For the
+two leaf nodes of our stump, a value γl , l = 1, 2 is computed, which is just the mean
+of the y’s of the samples that fall there. In a general regression tree, this process is
+continued L − 1 times to form a tree with L leaves3 .
+
+3 We are overloading notation (the meaning of L) in just this paragraph.
+12               Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+   MART is a class of boosting algorithms that may be viewed as performing gra-
+dient descent in function space, using regression trees. The final model again maps
+an input feature vector x ∈ Rd to a score F(x) ∈ R. MART is a class of algorithms,
+rather than a single algorithm, because it can be trained to minimize general costs (to
+solve, for example, classification, regression or ranking problems). Note, however,
+that the underlying model upon which MART is built is the least squares regression
+tree, whatever problem MART is solving. MART’s output F(x) can be written as
+                                              N
+                                   FN (x) = ∑ αi fi (x)
+                                             i=1
+
+where each fi (x) ∈ R is a function modeled by a single regression tree and the αi ∈ R
+is the weight associated with the ith regression tree. Both the fi and the αi are learned
+during training. A given tree fi maps a given x to a real value by passing x down the
+tree, where the path (left or right) at a given node in the tree is determined by the
+value of a particular feature x j , j = 1, . . . , d and where the output of the tree is taken
+to be a fixed value associated with each leaf, γkn , k = 1, . . . , L, n = 1, . . . , N, where
+L is the number of leaves and N the number of trees. Given training and validation
+sets, the user-chosen parameters of the training algorithm are N, a fixed learning rate
+η (that multiplies every γkn for every tree), and L. (One could also choose different
+L for different trees). The γkn are also learned during training.
+    Given that, say, n trees have been trained, how should the next tree be trained?
+MART uses gradient descent to decrease the loss: specifically, the next regression
+tree models the m derivatives of the cost with respect to the current model score
+evaluated at each training point: ∂∂C Fn (xi ), i = 1, . . . , m. Thus:
+
+                                           ∂C(Fn )
+                                    δC ≈           δF                                    (12)
+                                            ∂ Fn
+
+and so δC < 0 if we take δ F = −η ∂∂C    Fn . Thus each tree models the gradient of the
+cost with respect to the model score, and the new tree is added to the ensemble with
+a step size ηγkn . The step sizes γkn can be computed exactly in some cases, or using
+Newton’s approximation in others. The role of η as an overall learning rate is similar
+to that in other stochastic gradient descent algorithms: taking a step that is smaller
+than the optimal step size (i.e. the step size that maximally reduces the cost) acts as
+a form of regularization for the model that can significantly improve test accuracy.
+   Clearly, since MART models derivatives, and since LambdaRank works by spec-
+ifying the derivatives at any point during training, the two algorithms are well
+matched: LambdaMART is the marriage of the two [11].
+   To understand MART, let’s next examine how it works in detail, for perhaps the
+simplest supervised learning task: binary classification.
+From RankNet to LambdaRank to LambdaMART: An Overview                                   13
+
+6 MART for Two Class Classification
+
+We follow [8], although we give a somewhat different emphasis here; in particular,
+we allow a general sigmoid parameter σ (although it turns out that choice of σ does
+not make affect the model, it’s instructive to see why).
+   We choose labels yi ∈ {±1} (this has the advantage that y2i = 1, which will be
+used later). The model score for sample x ∈ R n is denoted F(x). To keep notation
+brief, denote the modeled conditional probabilities by P+ ≡ P(y = 1|x) and P− ≡
+P(y = −1|x), and define indicators I+ (xi ) = 1 if yi = 1, 0 otherwise, and I− (xi ) = 1 if
+yi = −1, 0 otherwise. We use the cross-entropy loss function (the negative binomial
+log-likelihood):
+
+                            L(y, F) = −I+ log P+ − I− log P−
+
+(Note the similarity to the RankNet loss). Logistic regression models the log odds.
+So if FN (x) is the model output, we choose (the factor of 12 here is included to match
+[8]):
+                                                 1     P+
+                                      FN (x) =     log( )                             (13)
+                                                 2     P−
+or
+                                1                              1
+                 P+ =                     , P− = 1 − P+ =
+                          1 + e−2σ FN (x)                 1 + e2σ FN (x)
+which gives
+
+                               L(y, FN ) = log(1 + e−2yσ FN )                         (14)
+
+The gradients of the cost with respect to the model scores (called pseudoresponses
+in [8]) are:
+                                       
+                        ∂ L(yi , F(xi )                       2yi σ
+              ȳi = −                                  =
+                           ∂ F(xi )      F(x)=Fm−1 (x)   1 + e i σ Fm−1 (x)
+                                                              2y
+
+
+These are the exact analogs of the Lambda gradients in LambdaRank (and in fact
+are the gradients in LambdaMART). They are the values that the regression tree is
+modeling. Denoting the set of samples that land in the jth leaf node of the mth tree
+by R jm , we want to find an approximately optimal step for each leaf, that is, the
+values that minimize the loss:
+                                                        
+          γ jm = arg min ∑ log 1 + e−2yi σ (Fm−1 (xi )+γ) ≡ arg min g(γ)
+                      γ                                                γ
+                           xi ∈R jm
+
+The Newton approximation is used to find γ: for a function g(γ), a Newton-Raphson
+step towards the extremum of g is
+14              Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+                                                                 g0 (γn )
+                                             γn+1 = γn −
+                                                                 g00 (γn )
+
+Here we start from γ = 0 and take just one step. Again let’s simplify the expressions
+by collapsing notation: define Si (γ) ≡ 1 + e−2vi ≡ 1 + e−2yi σ (Fm−1 (x)+γ) . We want to
+compute
+
+                         arg min g(γ) ≡ arg min                      ∑ log Si (γ)
+                                    γ                        γ
+                                                                  xi ∈R jm
+
+Now
+                                        1
+                 g0 =      ∑ Si (−2yi σ e−2vi )
+                         xi ∈R jm
+                                 −1                     2yi σ
+                g00 =      ∑       2
+                                     (−2yi σ e−2vi )2 −       (−2yi σ )e−2vi
+                                 S
+                         xi ∈R jm i                      S i
+
+                                        4
+                    =      ∑ S2 y2i σ 2 e−2vi
+                         xi ∈R jm        i
+
+But
+                           2yi σ                   2yi σ
+                 ȳi ≡              ⇒ g0 = ∑ − 2v = ∑ −ȳi
+                         1 + e2yi F       xi ∈R jm e iS
+                                                        i xi ∈R jm
+
+Also
+                                                            4y2 σ 2
+                                        g00 =     ∑ (1 +ie2vi )2 e2vi
+                                                xi ∈R jm
+
+
+Since y2i = 1 we have
+
+                                                             2σ
+                                                |ȳi | =
+                                                           1 + e2vi
+so
+                                                                  4σ 2 e2vi
+                                |ȳi |(2σ − |ȳi |) =
+                                                                 (1 + e2vi )2
+
+giving simply
+
+                                  g0            ∑xi ∈R jm ȳi
+                          γ jm = − 00 =
+                                  g     ∑xi ∈R jm |ȳi |(2σ − |ȳi |)
+
+(This corresponds to Algorithm 5 in [8]). Note that this step combines both the
+estimate of the gradient (the numerator) and the usual gradient descent step size (in
+From RankNet to LambdaRank to LambdaMART: An Overview                                       15
+
+this case, 1/g00 ). To include a learning rate r, we just multiply each leaf value γ jm by
+r.
+   It’s interesting that for this algorithm, the value of σ makes no difference. The
+Newton step γ jm is proportional to 1/σ . Since Fm (x) = Fm−1 (x) + γ, and since F
+appears with an overall factor of σ in the loss, the σ ’s just cancel in the loss function.
+
+
+
+
+   6.1 Extending to Unbalanced Data Sets
+
+   For completeness we include a discussion on how to extend the algorithm to
+   cases where the data is very unbalanced (e.g. far more positive examples than
+   negative).
+      If n+ (n− ) is the total number of positive (negative) examples, for unbal-
+   anced data a useful way to count errors is:
+                          number false positives number false negatives
+           error rate =                         +
+                                  2n−                    2n+
+   The factor of two in the denominator is just to scale so that the maximum error
+   rate is one. We still use logistic regression (model the log odds) but instead
+   use the balanced loss:
+                                                           
+                     I+           I−              I+    I−
+       LB (y, F) = − log P+ −         log P− =       +        log (1 + e−2yσ F )
+                    n+            n−              n+ n−
+
+   The equations are similar to before. The gradients yi are replaced by
+                                                                      
+                       ∂ LB (yi , F(xi ))                        I+   I−
+             z̄i = −                                     = ȳi      +
+                           ∂ F(xi )        F(x)=Fm−1 (x)         n+ n−
+
+   and the Newton step becomes
+                                                                       
+                                                              I+   I−
+                            g0            ∑xi ∈R jm ȳi       n+ + n−
+                  γ Bjm = − 00 =                                                   (15)
+                           g                                           I+   I−
+                                 ∑  xi ∈R jm |ȳi |(2σ − |ȳi |)       n+ + n−
+
+   (Note that this is not the same as the previous Newton step with ȳi replaced
+   by z̄i .)
+16                Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+7 LambdaMART
+
+To implement LambdaMART we just use MART, specifying appropriate gradients
+and the Newton step. The gradients ȳi are easy: they are just the λi . As always in
+MART, least squares is used to compute the splits. In LambdaMART, each tree
+models the λi for the entire dataset (not just for a single query). To compute the
+Newton step, we collect some results from above: for any given pair of urls Ui and
+U j such that Ui B U j , then after the urls have been sorted by score, the λi j ’s are
+defined as (see Eq. (4))
+
+                                                      −σ |∆ Zi j |
+                                         λi j =                          ,
+                                                    1 + eσ (si −s j )
+where we write the utility difference generated by swapping the rank positions of Ui
+and U j as Zi j (for example, Z might be NDCG). We also have
+
+                                λi =           ∑ λi j − ∑ λi j
+                                          j:{i, j}∈I              j:{ j,i}∈I
+
+To simplify notation, let’s denote the above sum operation as follows:
+
+                             ∑ λi j ≡ ∑ λi j − ∑ λi j
+                           {i, j}   I             j:{i, j}∈I           j:{ j,i}∈I
+
+Thus, for any given state of the model (i.e. for any particular set of scores), and for a
+particular url Ui , we can write down a utility function for which λi is the derivative
+of that utility4
+                                                              
+                        C = ∑ |∆ Zi j | log 1 + e−σ (si −s j )
+                                {i, j}    I
+
+so that
+                    ∂C           −σ |∆ Zi j |
+                        =                         ≡ ∑ −σ |∆ Zi j |ρi j
+                    ∂ si {i,∑
+                            j} I + e
+                                1    σ (si −s j )
+                                                   {i, j} I
+
+where we’ve defined
+                                                     1                 −λi j
+                                ρi j ≡                             =
+                                              1 + eσ (si −s j )        σ |Zi j |
+
+Then
+                            ∂ 2C
+                                  = ∑ σ 2 |∆ Zi j |ρi j (1 − ρi j )
+                            ∂ s2i  {i, j} I
+
+
+4 We switch back to utilities here but use C to match previous notation.
+From RankNet to LambdaRank to LambdaMART: An Overview                                           17
+
+          e x           1
+                                      1
+(using (1+e x )2 = 1 − 1+ex           1+ex ) and the Newton step size for the kth leaf of the
+mth tree is
+
+                        ∑xi ∈Rkm ∂∂Csi             − ∑xi ∈Rkm ∑{i, j} I |∆ Zi j |ρi j
+                γkm =              2      =
+                        ∑xi ∈Rkm ∂∂ sC2       ∑xi ∈Rkm ∑{i, j} I |∆ Zi j |σ ρi j (1 − ρi j )
+                                      i
+
+(note the change in sign since here we are maximizing). In an implementation it is
+convenient to simply compute ρi j for each sample xi ; then computing γkm for any
+particular leaf node just involves performing the sums and dividing. Note that, just
+as for logistic regression, for a given learning rate η, the choice of σ will make no
+difference to the training, since the γkm ’s scale as 1/σ , the model score is always
+incremented by ηγkm , and the scores always appear multiplied by σ .
+   We summarize the LambdaMART algorithm schematically below. As pointed
+out in [11], one can easily perform model adaptation by starting with the scores
+given by an initial base model.
+
+Algorithm: LambdaMART
+set number of trees N, number of training samples m, number of leaves per tree L,
+learning rate η
+for i = 0 to m do
+   F0 (xi ) = BaseModel(xi ) //If BaseModel is empty, set F0 (xi ) = 0
+end for
+for k = 1 to N do
+   for i = 0 to m do
+       yi = λi
+       wi = ∂ F ∂ yi(xi )
+               k−1
+   end for
+   {Rlk }Ll=1 // Create L leaf tree on {xi , yi }m
+                                                 i=1
+          ∑x ∈Rlk yi
+   γlk = ∑ i              // Assign leaf values based on Newton step.
+           xi ∈Rlk wi
+  Fk (xi ) = Fk−1 (xi ) + η ∑l γlk I(xi ∈ Rlk )            // Take step with learning rate η.
+end for
+
+    Finally it’s useful to compare how LambdaRank and LambdaMART update their
+parameters. LambdaRank updates all the weights after each query is examined. The
+decisions (splits at the nodes) in LambdaMART, on the other hand, are computed
+using all the data that falls to that node, and so LambdaMART updates only a few
+parameters at a time (namely, the split values for the current leaf nodes), but using
+all the data (since every xi lands in some leaf). This means in particular that Lamb-
+daMART is able to choose splits and leaf values that may decrease the utility for
+some queries, as long as the overall utility increases.
+18                Christopher J.C. Burges Microsoft Research Technical Report MSR-TR-2010-82
+
+
+
+
+     7.1 A Final Note: How to Optimally Combine Rankers
+
+     We end with the following note: [11] contains a relatively simple method for
+     linearly combining two rankers such that out of all possible linear combina-
+     tions, the resulting ranker gets the highest possible NDCG (in fact this can
+     be done for any IR measure). The key trick is to note that if s1i are the out-
+     puts of the first ranker (for a given query), and s2i those of the second, then
+     the output of the combined ranker can be written αs1i + (1 − α)s2i , and as α
+     sweeps through its values (say, from 0 to 1), then the NDCG will only change
+     a finite number of times. We can simply (and quite efficiently) keep track
+     of each change and keep the α that gives the best combined NDCG. How-
+     ever it should also be noted that one can achieve a similar goal (without the
+     guarantee of optimality, however) by simply training a linear (or nonlinear)
+     LambdaRank model using the previous model scores as inputs. This usually
+     gives equally good results and is easier to extend to several models.
+
+
+
+Acknowledgements The work described here has been influenced by many people. Apart from
+the co-authors listed in the references, I’d like to additionally thank Qiang Wu, Krysta Svore, Ofer
+Dekel, Pinar Donmez, Yisong Yue, and Galen Andrew.
+
+
+
+
+References
+
+[1] E.B. Baum and F. Wilczek. Supervised Learning of Probability Distributions by Neural Net-
+    works. Neural Information Processing Systems, American Institute of Physics, 1988.
+[2] C.J.C. Burges, T. Shaked, E. Renshaw, A. Lazier, M. Deeds, N. Hamilton and G. Hullender.
+    Learning to Rank using Gradient Descent. Proceedings of the Twenty Second International
+    Conference on Machine Learning, 2005.
+[3] C.J.C. Burges. Ranking as Learning Structured Outputs. Neural Information Processing
+    Systems workshop on Learning to Rank, Eds. S. Agerwal, C. Cortes and R. Herbrich, 2005.
+[4] C.J.C. Burges, R. Ragno and Q.V. Le. Learning to Rank with Non-Smooth Cost Functions.
+    Advances in Neural Information Processing Systems, 2006.
+[5] O. Chapelle, Y. Chang and T-Y Liu.            The Yahoo! Learning to Rank Challenge.
+    http://learningtorankchallenge.yahoo.com, 2010.
+[6] O. Chapelle, D. Metzler, Y. Zhang and P. Grinspan. Expected Reciprocal Rank for Graded
+    Relevance Measures. International Conference on Information and Knowledge Management
+    (CIKM), 2009.
+[7] P. Donmez, K. Svore and C.J.C. Burges. On the Local Optimality of LambdaRank. Special
+    Interest Group on Information Retrieval (SIGIR), 2009.
+[8] J.H. Friedman. Greedy function approximation: A gradient boosting machine. Technical
+    Report, IMS Reitz Lecture, Stanford, 1999; see also Annals of Statistics, 2001.
+From RankNet to LambdaRank to LambdaMART: An Overview                                          19
+
+[9] K. Jarvelin and J. Kekalainen. IR evaluation methods for retrieving highly relevant documents.
+    Special Interest Group on Information Retrieval (SIGIR), 2000.
+[10] M. Spivak. Calculus on Manifolds. Addison-Wesley, 1965.
+[11] Q. Wu, C.J.C. Burges, K. Svore and J. Gao. Adapting Boosting for Information Retrieval
+    Measures. Journal of Information Retrieval, 2007.
+[12] Y. Yue and C.J.C. Burges. , On Using Simultaneous Perturbation Stochastic Approximation
+    for Learning to Rank, and the Empirical Optimality of LambdaRank. Microsoft Research
+    Technical Report MSR-TR-2007-115, 2007.
+

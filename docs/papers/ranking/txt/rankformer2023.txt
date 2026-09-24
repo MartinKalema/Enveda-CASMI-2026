@@ -1,0 +1,760 @@
+                                            RankFormer: Listwise Learning-to-Rank Using Listwide Labels
+                                                             Maarten Buyl                                                    Paul Missault                           Pierre-Antoine Sondag
+                                                             Amazon                                                         Amazon                                           Amazon
+                                                     Luxembourg, Luxembourg                                         Luxembourg, Luxembourg                           Luxembourg, Luxembourg
+                                                         Ghent University                                            pmissaul@amazon.com                              pierreas@amazon.com
+                                                         Ghent, Belgium
+                                                      maarten.buyl@ugent.be
+
+                                        ABSTRACT                                                                                        search engines [11], which show the most relevant URLs to a query.
+                                        Web applications where users are presented with a limited selec-                                Similarly, e-commerce websites want to show products that cus-
+                                        tion of items have long employed ranking models to put the most                                 tomers want to buy [40] and streaming services show content that
+
+
+
+
+arXiv:2306.05808v1 [cs.IR] 9 Jun 2023
+                                        relevant results first. Any feedback received from users is typically                           they want to watch [14]. The user wants to find the item that offers
+                                        assumed to reflect a relative judgement on the utility of items, e.g.                           the most utility, as quickly as possible. The selection is thus shown
+                                        a user clicking on an item only implies it is better than items not                             in an ordering, e.g. a list, where the ‘best’ items are shown first.
+                                        clicked in the same ranked list. Hence, the objectives optimized in                                The field of Learning-to-Rank (LTR) is well-established in ma-
+                                        Learning-to-Rank (LTR) tend to be pairwise or listwise.                                         chine learning as a way to form these rankings based on user feed-
+                                           Yet, by only viewing feedback as relative, we neglect the user’s                             back on previous lists [7, 10, 25]. In many real-world applications,
+                                        absolute feedback on the list’s overall quality, e.g. when no items                             this feedback is implicit: it is collected indirectly from user behavior.
+                                        in the selection are clicked. We thus reconsider the standard LTR                               For example, if users often purchase a certain product when shown
+                                        paradigm and argue the benefits of learning from this listwide signal.                          in response to a certain query, then that product should probably
+                                        To this end, we propose the RankFormer as an architecture that,                                 be ranked highly in future responses to that query.
+                                        with a Transformer at its core, can jointly optimize a novel listwide                              Traditionally, the models behind LTR are simple regressors, such
+                                        assessment objective and a traditional listwise LTR objective.                                  as Gradient-Boosted Decision Trees (GBDTs) [13] or neural net-
+                                           We simulate implicit feedback on public datasets and observe                                 works [9], that compute a pointwise score, i.e. a score that is inde-
+                                        that the RankFormer succeeds in benefitting from listwide signals.                              pendently determined for every item in a list. Yet it is a fundamental
+                                        Additionally, we conduct experiments in e-commerce on Amazon                                    aspect of LTR that any feedback about particular items should be
+                                        Search data and find the RankFormer to be superior to all baselines                             seen in relation to feedback to other items in the list, since user
+                                        offline. An online experiment shows that knowledge distillation                                 feedback tends to reflect relative utility judgments rather than ab-
+                                        can be used to find immediate practical use for the RankFormer.                                 solute judgments [19]. Hence, it is misleading to make pointwise
+                                                                                                                                        comparisons between a ranking model’s score for an item and its
+                                        CCS CONCEPTS                                                                                    feedback label. Rather, pairwise [7] objectives are used that com-
+                                                                                                                                        pare pairs of scores to pairs of labels, or listwise [10] objectives that
+                                        • Information systems → Learning to rank; • Computing
+                                                                                                                                        jointly compare scores to labels for the entire list.
+                                        methodologies → Learning from implicit feedback.
+                                                                                                                                           However, a critical shortcoming of pairwise and listwise ap-
+                                        KEYWORDS                                                                                        proaches is that they only consider user feedback as a relative
+                                                                                                                                        judgement. In particular, lists that did not receive any feedback
+                                        learning-to-rank, transformer, listwise ranking, listwide, attention                            tend to be ignored. Yet this absolute judgement of lists should not
+                                        ACM Reference Format:                                                                           be disregarded. In e-commerce, lists that resulted in many purchases
+                                        Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag. 2023. RankFormer:                       are likely to have an overall better selection than lists without any
+                                        Listwise Learning-to-Rank Using Listwide Labels. In Proceedings of the 29th                     user interaction. In the latter case, the overall selection may be
+                                        ACM SIGKDD Conference on Knowledge Discovery and Data Mining (KDD
+                                                                                                                                        poor for many reasons: because the user gave a bad search query,
+                                        ’23), August 6–10, 2023, Long Beach, CA, USA. ACM, New York, NY, USA,
+                                                                                                                                        because the selection of products is too expensive, or because the
+                                        12 pages. https://doi.org/10.1145/3580305.3599892
+                                                                                                                                        user is looking for new items that have seen little interaction so far.
+                                        1     INTRODUCTION
+                                        Ranking problems naturally arise in applications where a limited                                   Contributions.
+                                        selection of items is presented to a user. A classic example is web
+                                                                                                                                           (1) We make the case for learning from listwide labels, i.e. ab-
+                                        Permission to make digital or hard copies of all or part of this work for personal or
+                                        classroom use is granted without fee provided that copies are not made or distributed                  solute judgments of a list’s overall quality, and formalize an
+                                        for profit or commercial advantage and that copies bear this notice and the full citation              approach to derive them as the list’s top individual label.
+                                        on the first page. Copyrights for components of this work owned by others than the                 (2) We propose the RankFormer architecture, illustrated in Fig. 1.
+                                        author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+                                        republish, to post on servers or to redistribute to lists, requires prior specific permission          At its core, the RankFormer utilizes the listwise Transformer
+                                        and/or a fee. Request permissions from permissions@acm.org.                                            [38] architecture that was recently applied to perform list-
+                                        KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                        wise ranking [30, 34, 37]. It combines this listwise LTR objec-
+                                        © 2023 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+                                        ACM ISBN 979-8-4007-0103-0/23/08. . . $15.00                                                           tive with a listwide objective that performs an overall quality
+                                        https://doi.org/10.1145/3580305.3599892                                                                assessment of the list and compares it to the listwide labels.
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                 Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+
+
+                                                                                ℎ
+                                                                                ℎ
+                                                                                ℎ                                 𝐿
+                                                                                ℎ
+                            Transformer (TF)
+                                                                                ℎ
+     𝑿                                                         𝒁                                𝒔(𝑿 )                               𝒚
+                                                                                                                                           max 𝒚𝑰
+                                                                               𝒉                                  𝐿
+     𝒙                                                         𝒛                                𝒅(𝑿 )                               𝑡
+
+Figure 1: The RankFormer architecture. Features 𝑿 𝐼 of selection 𝐼 , accompanied by the [CLS] token vector 𝒙 [CLS] , are sent
+through the listwise Transformer TF. The returned features 𝒁𝐼 each correspond with an item 𝑖 ∈ 𝐼 , whereas the returned 𝒛 [CLS]
+vector models the overall list quality. The transformed vectors 𝒛𝑖 of individual items 𝑖 ∈ 𝐼 are each concatenated with 𝒛 [CLS] and
+sent through a shared scoring head ℎ𝑠 to obtain scores 𝒔 (𝑿 𝐼 ), which are optimized with a listwise LTR loss 𝐿𝑦 based on the item
+feedback labels 𝒚𝐼 . Additionally, 𝒛 [CLS] is sent through a separate head 𝒉𝑑 to generate the list quality prediction 𝒅 (𝑿 𝐼 ), which
+should match the 𝑡𝐼 , i.e. the highest item label in the list, and is optimized with a listwide loss 𝐿𝑡 .
+
+
+        Thus, the RankFormer explicitly models the overall list qual-   loss functions. Yet the actual utility of items may depend on the
+        ity and generates individual item ranking scores relative to    rest of the list, e.g. an item may be much more desireable if it is the
+        that overall quality.                                           cheapest in the selection. Methods have therefore been proposed
+    (3) A key use case for learning from listwide objectives is to      to compute listwise scores directly, i.e. scores that depend on the
+        learn from lists that were presented to users but received no   features of all items in the list. To this end, Ai et al. [1] proposed
+        implicit feedback. Yet, such feedback is not provided in the    the Deep Listwise Context Model, which uses a recurrent neural
+        publicly available datasets that are popular in LTR bench-      network to take other inputs into account when reranking the
+        marks, where only explicit feedback is given. We therefore      top documents in information retrieval. This approach was further
+        simulate implicit feedback on public datasets and observe       formalized to general multivariate scoring functions [3].
+        that the RankFormer successfully leverages its listwide ob-         A list of items can be seen as a sequence, hence many approaches
+        jective to improve upon other neural ranking methods.           from Natural Language Processing (NLP) can readily be applied to
+    (4) We conduct experiments on data collected from Amazon            ranking. Most notably, the Transformer [38] architecture has been
+        Search in both an offline and online setting. Offline, the      used to learn from listwise ranking contexts using self-attention,
+        RankFormer is superior to all baselines. Online, this advan-    which we refer to as listwise Transformers [24, 30–32, 34, 37, 42].
+        tage can be maintained when distilling the RankFormer to a      As a sequence-to-sequence architecture, the Transformer here con-
+        simple GBDT model. Despite its complexity, the RankFormer       siders sequences of items instead of words. This form of listwise
+        is thus readily put into practice.                              attention is thus orthogonal to any usage Transformers that may
+                                                                        be used to compute the feature vectors of individual items.
+                                                                            Particular to our approach, the RankFormer, is that we use the
+2    RELATED WORK
+                                                                        listwise Transformer to combine the listwise LTR objective with a
+Learning-to-Rank (LTR) provides tools, e.g. objective functions, to     listwide objective, for which the overall quality of the list is explicitly
+learn from feedback labels such that a ranking model is improved.       modelled. The Deep Listwise Context Model proposed by Ai et al.
+To this end, neural ranking uses neural networks as the model.          [1] also models the list context with a recurrent neural network,
+   A distinction is made with (neural) Information Retrieval [17],      yet this model is not used to actually predict listwide signals. The
+which often applies (neural) ranking to obtain information related      most related work to ours is the Personalized Re-ranking with
+to a query from a single collection of information resources. Though    Contextualized Transformer for Recommendation (PEAR), recently
+that field aims to find the most relevant resources, it has less of a   proposed by Li et al. [24]. In the personalized recommendation
+focus on the LTR objectives themselves and more so on the rele-         setting, the PEAR model combines a pointwise ranking objective,
+vance of individual information resources. Instead, we assume that      i.e. predicting whether the item is clicked, with a listwide objective
+a limited selection of relevant items has already been made, and        where it should be predicted whether any item is clicked. Our work
+our model should now put the most relevant of these on top.             formalizes the listwide objective as an ordinal loss and combines it
+   Traditional LTR [25] employs a pointwise scoring function, i.e.      with a listwise ranking objective in the general LTR context.
+one that computes an individual score for each item independently,
+and only then compares those scores in pairwise [7] or listwise [10]
+RankFormer: Listwise Learning-to-Rank Using Listwide Labels                                                   KDD ’23, August 6–10, 2023, Long Beach, CA, USA
+
+
+   In recent work on score calibration in LTR, Yan et al. [41] aim to        pointwise, i.e. each score 𝒔 (𝑿 𝐼 )𝑖 = 𝑠 (𝒙𝑖 ) is computed individually
+predict scores that are calibrated to the item labels, as their scores       per feature vector 𝒙𝑖 .
+are both used for ranking and for downstream tasks. Though our                  In Neural LTR approaches, 𝒔 is a parameterized neural network
+proposed model does not require scores to be calibrated, we leverage         for which a loss function is optimized that compares scores 𝒔 (𝑿 𝐼 )
+their observation that popular pair- and listwise loss functions are         to labels 𝒚𝐼 . This comparison is either made pointwise [23] (i.e.
+invariant to the absolute scale of scores, which causes them to miss         𝒔 (𝑿 𝐼 )𝑖 with 𝑦𝑖 ), pairwise [8, 9] (i.e. (𝒔 (𝑿 𝐼 )𝑖 , 𝒔 (𝑿 𝐼 ) 𝑗 ) with (𝑦𝑖 , 𝑦 𝑗 )
+an important signal during training.                                         for 𝑖, 𝑗 ∈ 𝐼 ), or listwise (i.e. 𝒔 (𝑿 𝐼 ) with 𝒚𝐼 ). In particular, we use the
+   Finally, note that much of the recent LTR literature has been             ListNet [10] or Softmax loss. The Softmax loss 𝐿𝑦 is defined as
+interested in unbiased LTR [20], which considers the bias in clicking
+behavior depending on the order in which items are shown to the                                  𝐿𝑦 (𝒔 (𝑿 𝐼 ), 𝒚𝐼 ) = −𝒚𝐼⊤ log 𝝈 (𝒔 (𝑿 𝐼 ))                   (1)
+user. We will not consider this bias in our proposed model to reduce
+                                                                             which is simply the dot-product of the label vector 𝒚𝐼 and the
+its complexity, i.e. our proposed model is permutation-invariant                                                               exp(a𝑖 )
+with respect to the list ordering. A study on how the overall quality        elementwise log of the softmax function 𝝈 (a)𝑖 = Í exp(a   ) for   𝑗 ∈𝐼      𝑗
+of the list (and thus also the listwide label) may depend on the list        𝑖 ∈ 𝐼 , applied to the scores 𝒔 (𝑿 𝐼 ).
+ordering is left to future work.                                                If the ranking is done according to a specific stochastic model (i.e.
+                                                                             ranking permutations are randomly sampled from a distribution
+3     BACKGROUND                                                             that is influenced by the scores 𝑠 (𝑿 )) and if the label domain is bi-
+Our contributions are aimed at the ranking problem, which we                 nary (i.e. ∀𝑖 : 𝑦𝑖 ∈ {0, 1}), then Softmax loss indicates the likelihood
+formalize in Sec. 3.1. In Sec. 3.2, we briefly review how such prob-         of item 𝑖 to be ranked first [6, 10]. Though we do not constrain the
+lems are typically solved through Learning-to-Rank. A particular             label domain to be binary, we have found the Softmax loss to show
+ranking model that is core to our proposed method is the listwise            strong empirical results while being simple and efficient. This is
+Transformer, which we discuss in Sec. 3.3.                                   aligned with recent findings in similar work [34, 37].
+
+3.1     Ranking                                                              3.3     The Listwise Transformer
+We use 𝒙𝑖 ∈ R𝑑𝑥 to denote the real-valued, 𝑑𝑥 -dimensional feature           Though scoring functions 𝒔 usually compute pointwise scores, i.e.
+vector corresponding with the occurrence item 𝑖 ∈ 𝐼 in a selection           independently per item, it may be beneficial to make the score of an
+list 𝐼 . For example in search engines, these features may be solely         item 𝑖 dependant on other items { 𝑗 | 𝑗 ∈ 𝐼 ∧ 𝑗 ≠ 𝑖} in the selection
+based on the item itself or also dependant on a search query and             𝐼 . E.g. in e-commerce, if a product 𝑖 is much cheaper than the other
+other contextual information. Based on the response to the selection,        products that will be shown, then price-related features in 𝒙𝑖 may
+feedback values 𝑦𝑖 ∈ Y = {0, ..., 𝑦max } are gathered for each item          be more important than when all products have the same price.
+𝑖 ∈ 𝐼 . The feedback values are assumed to be ordinal, where higher               A listwise scoring function 𝒔 can be constructed by having a
+values indicate that the user had a stronger preference for the item.        computation step that transforms the feature matrix 𝑿 𝐼 in each list
+In this work, we focus on implicit feedback, e.g. in the form of clicks      𝐼 such that information is shared between items 𝑖 ∈ 𝐼 . This kind of
+and purchases, which is inferred from a user’s overall interaction           transformation can be learned end-to-end by applying an attention
+with the selection. This is opposed to explicit feedback, where the          mechanism over 𝑿 𝐼 , e.g. through the use of the Transformer [38]
+user directly assign scores to items. A key difference is that implicit      architecture that has seen tremendous success in Natural Language
+labels often make no distinction between ‘negative’ and ‘missing’            Processing (NLP) and has recently also been applied to ranking
+feedback. For example, 𝑦𝑖 = 0 may indicate that item 𝑖 was bad, or           problems [24, 30, 34, 37].
+that item 𝑖 was ignored and thus never explicitly considered.                     The core component of the Transformer architecture is the Self-
+    Let 𝑿 𝐼 = (𝒙𝑖⊤ )𝑖 ∈𝐼 denote the matrix of all feature vectors in list    Attention (SA) layer. Here, each feature vector 𝒙𝑖 ∈ R𝑑𝑥 in the
+𝐼 and 𝒚𝐼 = (𝑦𝑖 )𝑖 ∈𝐼 the vector of all its labels. The ranking dataset       feature matrix 𝑿 𝐼 ∈ R |𝐼 | ×𝑑𝑥 is independently sent through a shared
+D = {(𝑿 𝐼 , 𝒚𝐼 ) | 𝐼 ∈ I} then gathers all lists in the superset I.          query function 𝒒 : R𝑑𝑥 → R𝑑att , key function 𝒌 : R𝑑𝑥 → R𝑑att ,
+Note that in realistic search engine settings, it is likely that the         and value function 𝒗 : R𝑑val → R𝑑val , with 𝑑 att = 𝑑 val = 𝑑𝑥 in our
+same item shows up in many lists. As such, when we refer to                  implementation. For each input vector 𝒙𝑖 , the output value of the SA
+item 𝑖, we mean the occurrence of an item in list 𝐼 where it had             layer is then the listwise sum of value matrix 𝒗 (𝑿 𝐼 ) = (𝒗 (𝒙𝑖 ) ⊤ )𝑖 ∈𝐼 ,
+features 𝒙𝑖 and label 𝑦𝑖 . Moreover, our experiments allow for the           weighted by the softmax 𝝈 of the dot-product between its query
+case where the same selection with the same features shows up in             vector 𝒒(𝒙𝑖 ) and the matrix of key vectors 𝒌 (𝑿 𝐼 ) = (𝒌 (𝒙𝑖 ) ⊤ )𝑖 ∈𝐼 .
+lists 𝐴 and 𝐵, though the collected user feedback may be different:          The SA operation is thus defined as
+𝑿 𝐴 = 𝑿 𝐵 ̸=⇒ 𝒚𝐴 = 𝒚𝐵 .                                                                                                                
+                                                                                                                         𝒌 (𝑿 𝐼 )𝒒(𝒙𝑖 )
+                                                                                              SA(𝑿 𝐼 )𝑖 = 𝒗 (𝑿 𝐼 ) ⊤ 𝝈      √             .          (2)
+3.2     Learning-to-Rank                                                                                                       𝑑 att
+The goal of Learning-to-Rank (LTR) [25] is to produce rankings that             A typical Transformer encoder layer is made up of an SA block
+lead to a high utility. Typically, this is done using a scoring function     followed by a shared Feed-Forward (FF) network that processes each
+𝒔 : R |𝐼 | ×𝑑𝑥 → R |𝐼 | that produces a vector of scores 𝒔 (𝑿 𝐼 ) for list   vector in the sequence independently. Furthermore, the SA and FF
+𝐼 with features 𝑿 𝐼 . The individual items 𝑖 are then ranked in the          blocks often contain residual, Dropout and LayerNorm layers. For a
+descending order of 𝒔 (𝑿 𝐼 )𝑖 scores. Traditional scoring functions are      full discussion, we refer to the original work [38] and comparative
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                     Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+technical overviews [33]. Details on our exact implementation can              A straightforward solution could therefore be to exclusively use
+be found in Appendix B.                                                     pointwise LTR loss functions for those lists. Yet, this approach still
+   We define TF : R |𝐼 | ×𝑑𝑥 → R |𝐼 | ×𝑑𝑥 as the full Transformer en-       misses that the constant quality of label vectors such as 𝒚𝐼 = 0 may,
+coder that, given feature matrix 𝑿 𝐼 as input, returns the list-aware       in part, be influenced by the overall quality of 𝐼 . As concluded in
+feature matrix 𝒁𝐼 = TF(𝑿 𝐼 ). The transformed feature vectors 𝒛𝑖            the user study by Joachims et al. [19]: "clickthrough data does not
+correspond with items 𝑖, but were computed knowing the context              convey absolute relevance judgments, but partial relative relevance
+of other items in list 𝐼 . To finally construct the listwise scoring        judgments for the links the user evaluated".
+function 𝒔, we therefore apply a pointwise, shared scoring head                Going one step further, we suggest that it may not suffice to
+ℎ𝑠 : R𝑑𝑥 → R to each 𝑧𝑖 :                                                   treat lists with 𝒚𝐼 = 0 as a combination of items that individually
+                                                                            had the same poor quality, but rather as a set of items that together
+                          𝒔 (𝑿 𝐼 )𝑖 = ℎ𝑠 (TF(𝑿 𝐼 )𝑖 )                (3)    received no feedback. Hence, we propose to learn from this signal
+where ℎ𝑠 is a learnable, feed-forward network.                              at the list level, as opposed to decomposing it over the item level.
+
+4     LISTWIDE LABELS                                                       4.2    Deriving Listwide Labels
+                                                                            We introduce the notation 𝑡𝐼 ∈ T to refer to the overall quality of
+In contrast to the listwise LTR defined in Sec. 3.2, we now discuss
+                                                                            the list 𝐼 , i.e. the listwide label. To generate informative listwide
+listwide labels. These quantify the overall quality of the list.
+                                                                            labels, in particular for 𝒚𝐼 = 0, we derive 𝑡𝐿 from the item labels. In
+    A key use case of listwide labels is the ability to learn from lists
+                                                                            our case, we set 𝑡𝐼 as the maximal implicit feedback label:
+where all labels are zero, which we motivate in Sec. 4.1. We then
+formulate a precise definition of listwide labels in Sec. 4.2 and a                                        𝑡𝐼 = max 𝑦𝑖                                 (4)
+                                                                                                                  𝑖 ∈𝐼
+strategy to learn from them in Sec. 4.3.
+                                                                            where it is practical that 𝑡𝐼 = 0 ⇐⇒ 𝒚𝐼 = 0 with item labels
+                                                                            𝑦𝑖 ∈ Y = {0, ..., 𝑦max }. Also, note that the domain of the item labels
+4.1     Lists without Relevancy Labels
+                                                                            is inherited by the listwide labels 𝑡𝐼 ∈ T = Y.
+Performing listwise LTR can deliver strong results because it jointly           This formulation for 𝑡𝐼 is motivated by the observation that
+evaluates the scoring function 𝒔 (𝑿 𝐼 ) over all items 𝑖 ∈ 𝐼 with           in most ranking contexts, users are typically looking for a single
+respect to the user feedback labels 𝒚𝐼 . Yet, listwise (and pairwise)       ‘thing’. Overall user satisfaction, which is a long-term goal in web
+LTR loss functions only consider the values of scores and labels            and e-commerce search, can thus be approximated by observing
+at separate, relative scales per list. For example, if a label 𝑦𝑖 is low,   whether the user’s overall goal was reached. For example, that goal
+then it will only be considered low in that list by pair- and listwise      might be "finding a relevant document" during a web search or
+loss functions if there are other labels 𝑦 𝑗 > 𝑦𝑖 in the same list.         "buying a suitable product" in e-commerce.
+Many such loss functions are even completely invariant to global
+translations of the scores vector 𝒔 (𝑿 𝐼 ), which means scores are not      4.3    Learning from Listwide Labels
+necessarily calibrated to the labels they try to align with [41].
+                                                                            To learn from listwide labels, we define 𝑑 : R |𝐼 | ×𝑑𝑥 → T as the
+    Hence, constant lists with value 𝑐, i.e. ∀𝑖 ∈ 𝐼 : 𝑦𝑖 = 𝑐, provide no
+                                                                            function that estimates the listwide quality 𝑡𝐼 . For a parameterized 𝑑,
+useful information to a pair- or listwise loss function [39]. Indeed,
+                                                                            we can then optimize the listwide loss function 𝐿𝑡 (𝑑 (𝑿 𝐼 ), 𝑡𝐼 ) for list
+for constant lists with 𝑐 ≠ 0 the 𝐿𝑦 loss in Eq. 1 will push all
+                                                                            𝐼 . As the values 𝑑 (𝑿 𝐼 ) and 𝑡𝐼 are singletons with a domain inherited
+scores 𝒔 (𝑿 𝐼 ) to simply be constant, regardless of whether 𝑐 is high
+                                                                            from the item labels (through Eq. 4), any pointwise loss function
+or low. In the particular case of lists without relevancy labels, i.e.
+                                                                            for the item labels in LTR is also applicable for the definition of 𝐿𝑡 .
+∀𝑖 ∈ 𝐼 : 𝑦𝑖 = 0, we even have the Softmax loss 𝐿𝑦 (·, 0) = 0. Though
+                                                                                Considering that T = Y = {0, ..., 𝑦max } is ordinal, we make use
+pointwise loss functions do consider the absolute scale of individual
+                                                                            of the Ordinal loss function [29] as applied to ranking [34]. To this
+labels 𝑦𝑖 , they are otherwise empirically inferior to the best pair-
+                                                                            end, we use 𝝎 : T → {0, 1} 𝑦max as the function that converts the
+and listwise loss functions in LTR benchmarks [36, 37].
+                                                                            listwide labels 𝑡𝐼 into their ordinal, one-hot encoding 𝝎 (𝑡𝐼 ), i.e.
+    In practice, lists without relevancy labels therefore tend to be                                             (
+ignored during optimization. This either happens implicitly because                                                1 if 𝑡𝐼 ≥ 𝑘
+pair- or listwise loss functions are typically zero or constant with                                  𝝎 (𝑡𝐼 )𝑘 =                                    (5)
+                                                                                                                   0 else
+respect to the scores, or explicitly because they are filtered out
+during preprocessing [6, 34, 39].                                           with 𝑘 ∈ {1, ..., 𝑦max }.
+    However, lists without relevancy labels are actually common in             For example with T = {0, 1, 2}, we would have vectors 𝝎 (0) =
+real-world implicit feedback, since users often do not interact with        (0, 0), 𝝎 (1) = (1, 0) and 𝝎 (2) = (1, 1).
+lists. We argue such lists should not be ignored, as this could be             Furthermore, we now change the listwide predictor such that it
+an important signal about the quality of the ranking. For example           is also vector-valued, i.e. 𝒅 : R |𝐼 | ×𝑑𝑥 → [0, 1] 𝑦max The Ordinal loss
+in the e-commerce setting, 𝒚𝐼 = 0 could mean that none of the               function 𝐿𝑡 is then defined as
+products in 𝐼 where desirable, so the user may have tried a different                                          𝑦∑︁
+                                                                                                                 max
+
+query or store. Indeed, internal data at Amazon Search shows that                         𝐿𝑡 (𝒅 (𝑿 𝐼 ), 𝑡𝐼 ) =       BCE (𝒅 (𝑿 𝐼 )𝑘 , 𝝎 (𝑡𝐼 )𝑘 )   (6)
+many queries do not result in any user feedback. To better capture                                          𝑘=1
+this signal, we propose that the score function 𝒔 should learn that         which is the sum of the Binary Cross-Entropy (BCE) losses for each
+the products in the selection all had the same (poor) quality.              non-zero 𝑘 ∈ T . The ordinality of 𝐿𝑡 results from the fact that if
+RankFormer: Listwise Learning-to-Rank Using Listwide Labels                                              KDD ’23, August 6–10, 2023, Long Beach, CA, USA
+
+
+𝒅 (𝑿 𝐼 )𝑘 is high, then the estimated likelihood of 𝒅 (𝑿 𝐼 )𝑙 for 𝑙 < 𝑘         Ending our discussion of the RankFormer, we note that it does
+should also be high. For example in e-commerce, if 𝑡𝐼 = 1 implies           not use the positional embeddings that are popular in the appli-
+that the user clicked something and 𝑡𝐼 = 2 implies they purchased           cation of Transformers in NLP [38]. The listwise LTR scores are
+something, then 𝒅 should only predict that a purchase was made if           thus permutation-equivariant [30] with respect to 𝑿 , whereas the
+it is also predicting a click.                                              listwide quality predictions are permutation-invariant. Here, the
+    Finally, note that the benefit of listwide assessments not only         use of positional embeddings is not necessary because we assume
+results from being able to learn from lists with constant feedback          the selection 𝐼 to be unordered with no prior ranking. We refer to
+(e.g. 𝒚𝐼 = 0). It also has the practical advantage that it allows us to     related work [34] for a study on the impact of this assumption.
+make a quality assessment about selections that is easy to aggregate
+over large sets of selections. For example in e-commerce, predicting        6     EXPERIMENTS ON PUBLIC DATASETS
+𝑡𝐼 allows us to judge whether new selections 𝐼 will be successful or        We performed experiments on three public datasets: MSLR-WEB30k
+not, before they are shown to customers.                                    [35], Istella-S [27] and Set 1 of the Yahoo [11] dataset. All consist
+                                                                            of web search data, where humans were asked to assign an explicit
+5    RANKFORMER                                                             relevance label to each URL in the selection.
+Learning from the listwide labels discussed in Sec. 4 allows us to             However, our focus is on learning from implicit labels, which are
+fill in the gaps where listwise LTR, as discussed in Sec. 3.2, is not       far more abundant in realistic applications. As is done in Unbiased
+possible (e.g. when 𝒚𝐼 = 0). We therefore propose the RankFormer            LTR literature [20], we therefore simulate implicit labels in a manner
+architecture, illustrated in Fig. 1, which is an extension of the list-     that aligns with realistic user behavior seen in industry. This is
+wise Transformer architecture discussed in Sec. 3.3 that performs           discussed in Sec. 6.1.
+both listwise ranking and listwide quality predictions. By explicitly          We further detail our evaluation setup in Sec. 6.2 and finally
+assessing the overall quality of a selection 𝐼 , the individual scores      report our results in Sec. 6.3.
+for items 𝑖 ∈ 𝐼 can be computed in the context of that overall quality.
+    To make predictions about the entire lists, we follow the standard      6.1     Simulating Implicit Feedback
+NLP approach by adding a shared [CLS] token to each list. Since all         Let 𝑟𝑖 ∈ {0, ..., 𝑟 max } denote the explicit relevance label assigned to
+tokens in listwise Transformers are expected to be feature vectors,         item 𝑖 ∈ 𝐼 . It so happens that all our datasets have 𝑟 max = 4. For
+we also define the learnable parameter vector 𝒙 [CLS] that is the           example in Yahoo, gradings 𝑟𝑖 correspond with
+same for every list. The items in the appended list 𝐼 ∗ = 𝐼 ∪ [CLS],                      {bad, fair, good, excellent, perfect}.
+with feature matrix 𝑿 𝐼 ∗ , are then provided as input to the Trans-
+former operation TF as normal. From the transformed features                   Recall that implicit relevance labels 𝑦𝑖 ∈ {0, ..., 𝑦max } are inferred
+𝒁𝐼 ∗ = TF(𝑿 𝐼 ∗ ) returned as output, we extract the 𝒛 [CLS] vector that    from user behavior. In what follows, we explicitly set 𝑦max = 2 and
+should reflect the information in 𝑿 𝐼 that was particularly relevant        interpret the domain of 𝑦𝑖 as
+to judge the overall quality of 𝐼 .                                                              {seen, click, conversion}.
+    The actual listwide prediction 𝒅 is made by applying a separate
+                                                                              Assumption 1. Implicit labels 𝑦𝑖 are positively correlated with
+feed-forward network block 𝒉𝑑 : R𝑑𝑥 → [0, 1] 𝑦max to 𝒛 [CLS] :
+                                                                            explicit labels 𝑟𝑖 .
+                         𝒅 (𝑿 𝐼 ) = 𝒉𝑑 (TF(𝑿 𝐼 ∗ )[CLS] )             (7)      To put Assumption 1 into practice, we use the function 𝜌, which
+where we recall that 𝒉𝑑 is vector-valued such that the Ordinal loss         maps the relevance grades 𝑟𝑖 to a probability of relevance [2, 12]:
+can be computed.                                                                                                2𝑟𝑖 − 1
+                                                                                                      𝜌 (𝑟𝑖 ) = 𝑟        .                  (10)
+   The listwise scores 𝒔 (𝑿 𝐼 ) could be computed as normal. However,                                          2 max − 1
+we can make sure that the individual scores assigned to transformed            In an effort to align the exact relationship between 𝑟𝑖 and 𝑦𝑖
+feature vectors 𝒛𝑖 for 𝑖 ∈ 𝐼 are benefitting from the overall list          with experiences from industry, we perform our simulation in three
+quality information 𝒛 [CLS] by concatenating the latter with each of        stages: Selection where subsets of lists are sampled, Intent where
+the 𝒛𝑖 vectors. The listwise LTR scores 𝒔 (𝑿 𝐼 ) are thus computed as       an overall list assessment is made, and Interaction where the actual
+                                                                            implicit label 𝑦𝑖 is generated.
+           ∀𝑖 ∈ 𝐼 : 𝒔 (𝑿 𝐼 )𝑖 = ℎ𝑠 (TF(𝑿 𝐼 ∗ )𝑖 ∥ TF(𝑿 𝐼 ∗ )[CLS] )   (8)
+                                                                            6.1.1 Selection. A common effect in LTR applications is selection
+with ∥ the concatenation operator and with the shared scoring head          bias [18], i.e. though a selection 𝐽 ∈ I was gathered, users often
+now ℎ𝑠 : R2𝑑𝑥 → R.                                                          only examine a subset of the selection 𝐼 ⊂ 𝐽 with a maximal length
+    The RankFormer, with its learnable parameters in 𝒙 [CLS] , TF,          𝑁𝑠 .
+ℎ𝑠 and 𝒉𝑑 , thus contains all the necessary components to perform
+listwise LTR while making listwide predictions. A straightforward               Assumption 2. The actual selections 𝐼 seen by users are small.
+way to optimize these parameters is through the minimization of                For example, Assumption 2 holds when only 𝑁𝑠 items are shown
+the sum of the listwise loss 𝐿𝑦 and the listwide loss 𝐿𝑡 :                  on a single webpage and users do not navigate to later pages. A
+                       ∑︁                                                   practical way to generate such lists is to randomly sample up to 𝑁𝑠
+              min          𝐿𝑦 (𝑠 (𝑿 𝐼 ), 𝒚𝐼 ) + 𝛼𝐿𝑡 (𝒅 (𝑿 𝐼 ), 𝑡𝐼 ). (9)    items without replacement.
+          𝒙 [CLS] ,TF,ℎ𝑠 ,𝒉𝑑
+                               𝐼 ∈I
+                                                                               However, this step leads to many sampled lists 𝐼 that exclusively
+where the hyperparameter 𝛼 controls the strength of 𝐿𝑡 .                    contain items with low 𝑟𝑖 values. In practice, it is indeed realistic that
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                   Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+many selections have an overall low relevance, e.g. because users          for 𝑦𝑖 = 2. Moreover, following our definition of the list intent 𝑇𝐼 ,
+gave an uninformative query. Yet, it may be too difficult to achieve       we clarify that ∀𝑘 : 𝑃 (𝑦𝑖 = 𝑘 | 𝑇𝐼 < 𝑘) = 0.
+meaningful validation and test set performance on public datasets             In experiments, we set 𝜖 = 0.1 as was previously done in work
+because many items in the original training set will be removed.           on unbiased LTR [2]. However, in contrast to unbiased LTR settings
+For each of the original lists 𝐽 , we therefore perform bootstrapping      [2, 20], we do not assume that the likelihood of clicks is dependant
+by sampling 𝑁𝑏 selections 𝐼 . This also mimics a scenario where not        on the item’s position in the shown list.
+all users see exactly the same list for the same query
+    In our experiments, we set 𝑁𝑠 = 16 and 𝑁𝑏 = 10.                        6.2     Evaluation Setup
+6.1.2 Intent. Our aim is to explicitly simulate the intent of the user
+                                                                           Table 1: Statistics of the public datasets. The selection stage
+in interacting with the list, e.g. whether the user wants to only view
+                                                                           in the simulation keeps at most 𝑁𝑠 = 16 items per list. Each
+the selection, or whether they want to invest more time and also
+                                                                           query is sampled 𝑁𝑏 = 10 times per original list. For WEB30k,
+click and buy things [28]. To this end, we take inspiration from the
+                                                                           the statistics are computed for Fold 1.
+user study by Liu et al. [26] where it is observed that users first
+skim many of the items in the list, before giving any of them serious
+consideration. We assume that the overall relevancy 𝒓 𝐼 = (𝑟𝑖 )𝑖 ∈𝐼                                            WEB30k        Istella      Yahoo
+observed during this skimming step affects the user intent.                               # features             136            220         700
+                                                                                                   train        18,919        19,245      19,944
+  Assumption 3. Users intend stronger interactions with lists 𝐼 that             # original lists valid         6,306          7,211       2,994
+have an overall higher relevance 𝒓 𝐼 .                                                             test         6,306          6,562       6,983
+   Let 𝑇𝐼 denote the intent of the user for list 𝐼 , which we consider                             original     119.6          103.2        23.7
+                                                                                   avg. length
+as the maximal action that the user is willing take. Thus 𝑇𝐼 ∈ Y,                                  sampled       15.7           16.0        12.7
+since we measure user behavior as implicit feedback. To model
+Assumption 3, we echo the definition of listwide labels in Eq. 4 and          Each configuration is run for five random seeds. For the WEB30k
+consider the overall list quality as the highest explicit label:           dataset, each seed indexes a different fold out of five different pre-
+                                                                           defined dataset splits. For Istella and Yahoo there is only a single
+                               
+                               
+                                0 1 − 𝜌 (max𝑖 ∈𝐼 𝑟𝑖 )                     pre-defined fold, so we re-use the same train/validation/test split
+                               
+                               
+                𝑃 (𝑇𝐼 | 𝒓 𝐼 ) = 1 (1 − 𝜅)𝜌 (max𝑖 ∈𝐼 𝑟𝑖 )           (11)    for each seed. The implicit labels generated per random seed and
+                               
+                                2 𝜅𝜌 (max𝑖 ∈𝐼 𝑟𝑖 )
+                                                                          dataset are the same for each method evaluation. Overall statis-
+                               
+                                                                           tics on the datasets are given in Tab. 1. The distributions of these
+with 𝜅 ∈ [0, 1] a hyperparameter that controls how often clicks            simulated labels are given in Fig. 2. They largely correspond with
+result in conversions. It is common that 𝜅 ≪ 0.5 in e-commerce             statistics on internal datasets at Amazon Search.
+settings, since users mostly only want to browse [28].                        For WEB30k and Istella, we use a quantile transform, trained
+   The pragmatic benefit of Eq. 11 is that it allows us to simulate all-   on each training data split, with a normal output distribution. The
+zero lists, as they are guaranteed for intent 𝑇𝐼 = 0. Some simulations     Yahoo data already provides quantile features, so we just apply a
+of implicit feedback in prior work, such as by Jagerman et al. [18],       standard transformation to also make them normally distributed.
+were also capable of generating all-zero lists. However, they do not
+do so by simulating the overall intent of users and do not assume a        6.2.1 Methods. In Sec.5, we proposed the RankFormer architecture.
+dependency on the overall quality of the list.                             To validate the benefit of the listwide loss, we evaluate the Rank-
+   In our experiments, we set 𝜅 = 0.1.                                     Former for 𝛼 ∈ {0, 0.25, 1}, where 𝛼 = 0 implies that no listwide
+                                                                           loss is used. The architecture then mostly reverts to the listwise
+6.1.3 Interaction. Finally, given the intent 𝑇𝐼 for the observed list      Transformer discussed in Sec. 3.3, which has been evaluated using
+𝐼 , we sample individual implicit labels 𝑦𝑖 .                              explicit labels in prior work [30, 34, 37].
+                                                                              We evaluate the benefit of listwise attention by comparing these
+   Assumption 4. Higher implicit labels 𝑦𝑖 are less noisy.
+                                                                           methods to a simple Multi-Layer Perceptron (MLP) as a baseline.
+   We also motivate Assumption 4 from the e-commerce setting,              Moreover, as it is known that neural LTR methods often struggle to
+where conversions are more robust than clicks [21]. For example,           compete with tree-based models [37], we train a Gradient-Boosted
+this is because higher 𝑦𝑖 labels involve a higher (financial) cost, so     Decision Tree (GBDT) [13] using the LightGBM [22] framework with
+more thought is put into the action.                                       the LambdaRank [7] objective. We noticed a substantial benefit from
+   For 𝑦𝑖 ∈ {0, 1, 2}, we first decide conversions (𝑦𝑖 = 2) and then       using GBDTs with more trees than previous benchmarks. Therefore,
+clicks (𝑦𝑖 = 1) for all items that did not have a conversion, i.e.         we report results with both 1,000 (as in [37]) and 10,000 trees.
+𝑦𝑖 < 2. Given the overall list intent 𝑇𝐼 , we sample these decisions          All methods optimize an LTR loss (Softmax for the MLP and
+with likelihoods                                                           RankFormer, LambdaRank [7] for the GBDT) over the implicit la-
+           𝑃 (𝑦𝑖 = 2 | 𝑟𝑖 ,𝑇𝐼 = 2) = 𝜌 (𝑟𝑖 )                               bels for all training set lists 𝐼 where 𝑡𝐼 > 0 (i.e. ∃𝑖 ∈ 𝐼 : 𝑦𝑖 > 0).
+                                                                  (12)     Only the RankFormer with 𝛼 > 0 also trains on lists with 𝑡𝐼 = 0.
+           𝑃 (𝑦𝑖 = 1 | 𝑟𝑖 ,𝑇𝐼 ≥ 1, 𝑦𝑖 < 2) = 𝜖 + (1 − 𝜖)𝜌 (𝑟𝑖 ).
+                                                                           A hyperparameter search was done for the most important hy-
+  Here, 𝜖 ∈ [0, 1] is a parameter that represents the noise in click       perparameters of each method, with the validation NDCG𝑦 as the
+behavior [2]. Following Assumption 4, no explicit noise is simulated       objective. We refer to Appendix D for further details.
+RankFormer: Listwise Learning-to-Rank Using Listwide Labels                                                                          KDD ’23, August 6–10, 2023, Long Beach, CA, USA
+
+
+
+                                                WEB30k                                   Istella                                     Yahoo
+
+
+
+
+  frequency in all lists I
+                             0.6
+
+
+                             0.4
+
+
+                             0.2
+
+
+                             0.0
+                                         0           1            2              0           1              2              0             1            2
+                                             top list label tI                       top list label tI                           top list label tI
+
+
+
+
+  frequency in all items i
+                             0.8                                                                                                                                 explicit label ri
+                                                                                                                                                                            0
+                             0.6
+                                                                                                                                                                            1
+                             0.4                                                                                                                                            2
+                                                                                                                                                                            3
+                             0.2                                                                                                                                            4
+
+                             0.0
+                                         0           1            2              0           1              2              0             1            2
+                                             implicit label yi                       implicit label yi                           implicit label yi
+
+
+
+Figure 2: The simulated distribution of the lists’ top implicit labels 𝑡𝐼 = max𝑖 ∈𝐼 𝑦𝑖 and the distributions of the individual explicit
+labels 𝑟𝑖 per simulated implicit label 𝑦𝑖 .
+
+Table 2: NDCG@10 on the WEB30k, Istella and Yahoo datasets. NDCG𝑦 refers to NDCG as measured on simulated, implicit
+labels. NDCG𝑟 is computed over the original, explicit labels. Each result is the mean out of five runs, ± the standard error. The
+GBDT with 104 trees is superior in almost all cases, so we show the two configurations with the best results in bold.
+
+                                                                               WEB30k                          Istella                             Yahoo
+                                                                        NDCG𝑦        NDCG𝑟             NDCG𝑦          NDCG𝑟               NDCG𝑦          NDCG𝑟
+                                                  # trees = 103       51.17 ± 0.17 63.01 ± 0.09      67.50 ± 0.05 86.99 ± 0.02          66.30 ± 0.02 79.35 ± 0.03
+                                   GBDT
+                                                  # trees = 104       51.53 ± 0.14 63.52 ± 0.09      68.42 ± 0.04 88.75 ± 0.01          66.82 ± 0.04 80.71 ± 0.02
+                                   MLP                                50.74 ± 0.10 63.13 ± 0.07      67.63 ± 0.06 87.38 ± 0.04          65.94 ± 0.08 79.59 ± 0.03
+                                                  𝛼 =0                51.19 ± 0.08 63.78 ± 0.10      67.83 ± 0.08 87.75 ± 0.03          65.82 ± 0.03 79.27 ± 0.15
+                                   RankFormer     𝛼 = 0.25            51.32 ± 0.12 63.97 ± 0.13      67.95 ± 0.07 87.88 ± 0.04          65.95 ± 0.09 79.51 ± 0.11
+                                                  𝛼 =1                51.19 ± 0.09 63.84 ± 0.08      67.85 ± 0.06 87.82 ± 0.02          65.23 ± 0.10 78.22 ± 0.27
+
+
+6.2.2 Metrics. The test set predictions in each experiment run                                           6.3    Results
+are evaluated with the NDCG@10 metric, multiplied by 100. In                                             We report our results in Tab. 2. They largely confirm the common
+our results, we report both NDCG𝑦 , i.e. the NDCG with respect                                           finding that strong GBDTs are superior to neural methods (e.g. the
+to the simulated implicit labels 𝑦𝑖 (see Sec. 6.1), and the NDCG𝑟 ,                                      MLP and RankFormer) on tabular data [16]. Indeed, the strongest
+i.e. the NDCG with respect to the original explicit labels 𝑟𝑖 . Lists                                    neural ranking methods already struggle to outperform a GBDT
+with constant label vectors 𝒚𝐼 or 𝒓 𝐼 respectively are not taken into                                    with 1,000 trees in recent benchmarks [30, 37]. We now allow GB-
+account for the mean aggregation of the implicit or explicit NDCG.                                       DTs an even higher complexity (i.e. 10,000 trees) and find that the
+    Importantly, these metrics are only computed on the sampled                                          advantage of GBDTs is even more distinctive: a GBDT model scores
+lists according to Sec. 6.1.1. This means that the NDCG computed                                         best on two (Istella and Yahoo) out of three datasets.
+on explicit labels is not comparable to other benchmarks, where the                                         Yet despite the fact that GBDTs remain state-of-the-art on purely
+full selection (with better and worse items) is used instead. Note                                       tabular data, neural methods may still hold more potential, e.g.
+that the scores would anyhow not be comparable, since all methods                                        because they integrate well with other data formats such as raw
+are trained on simulated, implicit labels. To anyhow validate our ex-                                    text and images. When only considering the neural methods, we see
+periment pipeline, we also report experiment results on the original                                     that the RankFormer with 𝛼 = 0.25 clearly benefits from learning
+WEB30k dataset in Appendix A, where the same hyperparameters                                             with listwide labels. This confirms our hypothesis that there is value
+were used as for the simulated experiments.
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                 Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+in learning from lists with no labels. However, the choice of 𝛼 is       the latency constraints required for online inference. An important
+important, as a larger focus on the listwide loss leads to a smaller     factor contributing to this superiority of neural methods is that a
+focus on the listwise LTR objective. This can ultimately lead to         richer set of features is available in the Amazon Search data than
+worse NDCG scores (e.g. for 𝛼 = 1).                                      in the public dataset. For example, neural models can directly learn
+   Finally, we note that there is no advantage for the RankFormer        from raw text and image features, or from dense feature vectors
+over the MLP baseline on the Yahoo dataset. The fact that Transformer-   generated by upstream neural models.
+based methods appear to perform poorly on Yahoo is also aligned
+with previous benchmarks [30, 37].                                       7.2    Online Experiments
+   Overall, we conclude that the RankFormer is superior to the state-
+                                                                         The superiority of the RankFormer method in offline experiments
+of-the-art in neural LTR when listwide labels are provided. This
+                                                                         may not translate to an advantage in practice. This can only be fully
+advantage is seen both in the NDCG as measured on the simulated,
+                                                                         validated through online experiments. Yet, though the RankFormer
+implicit labels and the original, explicit labels.
+                                                                         benefits from the high parallelizability of the Transformer, its im-
+                                                                         plementation demands significant changes to our internal pipeline,
+7     EXPERIMENTS ON AMAZON SEARCH
+                                                                         in particular because it performs listwise scoring as opposed to
+Much of the motivation for our proposed RankFormer method and            the pointwise scoring done by the GBDT and MLP. Therefore, we
+our simulation of implicit labels has come from the application of       employ knowledge distillation [15] by training a GBDT with 2,000
+LTR to e-commerce product search. In this section, we report results     trees on the scores given by either the MLP or RankFormer (with
+on Amazon Search data, which is collected from users interacting         𝛼 = 0.25) that performed best in Tab. 3 as teacher models.
+with Amazon websites. This results in implicit feedback, e.g. clicks         These two models (i.e. the GBDT with the MLP teacher and
+and purchases.                                                           the GBDT with the RankFormer teacher) were then compared in
+  We run both offline and online experiments.                            an interleaving experiment as described in [5]. Interleaving has a
+                                                                         much greater statistical power than A/B tests, because the same
+7.1     Offline Experiments                                              customer is presented with a mix of the rankings of both models.
+                                                                         The comparison between methods is quantified as the credit lift,
+Table 3: NDCG𝑦 @10 on an e-commerce dataset at Amazon                    i.e. the extent to which the user’s actions are attributed to either
+Search, computed over organic implicit labels. We report                 model. It was empirically shown in [5] that this interleaving credit
+the overall NDCG𝑦 and the NDCG𝑦 specifically for queries                 is strongly correlated with corresponding A/B metrics.
+that resulted in a purchase (i.e. 𝑡𝐼 = 2).                                   Our interleaving experiment ran for two weeks. Overall, the
+                                                                         GBDT with the RankFormer teacher was credited with 13.7% lift in
+                                         Amazon Search (offline)         revenue attributed to product search. The actual gain that would
+                                         NDCG𝑦 NDCG𝑦 (𝑡𝐼 = 2)            be seen in an A/B test is likely far smaller, yet the experiment
+                      # trees = 103       35.11      50.00               shows that the GBDT with the RankFormer teacher is superior with
+      GBDT                                                               𝒑 = 0.02. Thus, we conclude that the listwise ranking performed by
+                      # trees = 104       37.07      53.70
+      MLP                                 36.54      53.98               the RankFormer can be successfully translated to practical results,
+                      𝛼 =0                37.05      54.26               even when only distilling its listwise ranking scores to a pointwise
+      RankFormer      𝛼 = 0.25            37.33      55.20               GBDT scoring function. Though pointwise models lack the full list
+                      𝛼 =1                37.18      54.36               context, we hypothesize that powerful listwise rankers can help
+                                                                         ‘fill in’ implicit labels that are missing or noisy in the original data.
+                                                                         Moreover, listwise models may favor features that lead to more
+   The training set consists of 500k queries sampled from a month
+                                                                         diverse rankings.
+of customer interactions. Additionally, we gathered 139k validation
+set queries and 294k test set queries, both collected over one week.
+Between each set, there is a span of two weeks where no data is used     8     CONCLUSION
+to prevent leakage. In contrast to the public dataset experiments,       We formalized the problem of learning from listwide labels in the
+we use organically collected implicit values without simulation.         context of listwise LTR as a method to learn from both relative user
+Our evaluation setup was similar to Sec. 6.2, though no explicit         feedback on individual items and the absolute user feedback on the
+labels are available for evaluation.                                     overall list. Our proposed RankFormer architecture combines both
+   We report the results in Tab. 3. Here, the RankFormer model           objectives by jointly modelling both the overall quality of a ranking
+clearly outperforms the baseline methods, especially on the NDCG𝑦        list and the individual utility of its items.
+measured over queries that resulted in a purchase (i.e. 𝑡𝐼 = 2). It          To conduct experiments on popular, public datasets, we simu-
+sees a further benefit for 𝛼 > 0, indicating that the RankFormer         lated implicit feedback derived from the explicit feedback provided
+is successful in learning from listwide labels. Since many queries       in those datasets. These experiments indicate that the RankFormer
+have no individual product interactions (𝒚𝐼 = 0), listwide labels can    is indeed able to learn from listwide labels in a way that helps per-
+indeed be a useful signal.                                               formance in LTR, thereby improving upon the state-of-the-art in
+   Compared to experiments on public datasets in Tab. 2, it is no-       neural ranking. However, in this tabular data setting, our results
+ticeable that the neural methods outperform the most powerful            also show that strong GBDT models can be too powerful to be
+GBDTs. In fact, a GBDT with 10,000 trees is far too complex to meet      outclassed by neural methods.
+RankFormer: Listwise Learning-to-Rank Using Listwide Labels                                                                 KDD ’23, August 6–10, 2023, Long Beach, CA, USA
+
+
+   On internal data at Amazon Search, where a richer set of features                           Information Systems 6, 4 (Dec. 2016), 13:1–13:19. https://doi.org/10.1145/2843948
+is available, the RankFormer achieves better performance offline                          [15] Jianping Gou, Baosheng Yu, Stephen J. Maybank, and Dacheng Tao. 2021. Knowl-
+                                                                                               edge Distillation: A Survey. International Journal of Computer Vision 129, 6 (June
+than any of the other methods, including strong GBDT models. In                                2021), 1789–1819. https://doi.org/10.1007/s11263-021-01453-z
+an online experiment, we distill the RankFormer to a practically                          [16] Léo Grinsztajn, Edouard Oyallon, and Gaël Varoquaux. 2022. Why Do Tree-Based
+                                                                                               Models Still Outperform Deep Learning on Tabular Data? arXiv:2207.08815 [cs,
+viable GBDT and observe that this advantage is maintained over a                               stat]
+complex MLP distilled to a similar GBDT.                                                  [17] Jiafeng Guo, Yixing Fan, Liang Pang, Liu Yang, Qingyao Ai, Hamed Zamani, Chen
+   Our findings encourage future work in learning from listwide la-                            Wu, W. Bruce Croft, and Xueqi Cheng. 2020. A Deep Look into Neural Ranking
+                                                                                               Models for Information Retrieval. Information Processing & Management 57, 6
+bels. The user’s perspective is central to ranking problems, and this                          (Nov. 2020), 102067. https://doi.org/10.1016/j.ipm.2019.102067
+particular signal of user feedback appears ripe for further research.                     [18] Rolf Jagerman, Harrie Oosterhuis, and Maarten de Rijke. 2019. To Model or to
+                                                                                               Intervene: A Comparison of Counterfactual and Online Learning to Rank from
+                                                                                               User Interactions. In Proceedings of the 42nd International ACM SIGIR Conference
+ACKNOWLEDGMENTS                                                                                on Research and Development in Information Retrieval. 15–24. https://doi.org/10.
+This research was supported by the TEN Search team at Amazon,                                  1145/3331184.3331269 arXiv:1907.06412 [cs]
+                                                                                          [19] Thorsten Joachims, Laura Granka, Bing Pan, Helene Hembrooke, and Geri Gay.
+the ERC under the EU’s 7th Framework and H2020 Programmes                                      2005. Accurately Interpreting Clickthrough Data as Implicit Feedback. In Pro-
+(ERC Grant Agreement no. 615517 and 963924), the Flemish Gov-                                  ceedings of the 28th Annual International ACM SIGIR Conference on Research and
+                                                                                               Development in Information Retrieval (SIGIR ’05). Association for Computing Ma-
+ernment (AI Research Program), the BOF of Ghent University (PhD                                chinery, New York, NY, USA, 154–161. https://doi.org/10.1145/1076034.1076063
+scholarship BOF20/DOC/144), and the FWO (project no. G0F9816N,                            [20] Thorsten Joachims, Adith Swaminathan, and Tobias Schnabel. 2017. Unbiased
+3G042220).                                                                                     Learning-to-Rank with Biased Feedback. In Proceedings of the Tenth ACM Inter-
+                                                                                               national Conference on Web Search and Data Mining (WSDM ’17). Association for
+                                                                                               Computing Machinery, New York, NY, USA, 781–789. https://doi.org/10.1145/
+REFERENCES                                                                                     3018661.3018699
+ [1] Qingyao Ai, Keping Bi, Jiafeng Guo, and W. Bruce Croft. 2018. Learning a Deep        [21] Shubhra Kanti Karmaker Santu, Parikshit Sondhi, and ChengXiang Zhai. 2017.
+     Listwise Context Model for Ranking Refinement. In The 41st International ACM              On Application of Learning to Rank for E-Commerce Search. In Proceedings of
+     SIGIR Conference on Research & Development in Information Retrieval (SIGIR ’18).          the 40th International ACM SIGIR Conference on Research and Development in
+     Association for Computing Machinery, New York, NY, USA, 135–144. https:                   Information Retrieval (SIGIR ’17). Association for Computing Machinery, New
+     //doi.org/10.1145/3209978.3209985                                                         York, NY, USA, 475–484. https://doi.org/10.1145/3077136.3080838
+ [2] Qingyao Ai, Keping Bi, Cheng Luo, Jiafeng Guo, and W. Bruce Croft. 2018. Unbi-       [22] Guolin Ke, Qi Meng, Thomas Finley, Taifeng Wang, Wei Chen, Weidong Ma,
+     ased Learning to Rank with Unbiased Propensity Estimation. In The 41st Interna-           Qiwei Ye, and Tie-Yan Liu. 2017. LightGBM: A Highly Efficient Gradient Boosting
+     tional ACM SIGIR Conference on Research & Development in Information Retrieval.           Decision Tree. In Advances in Neural Information Processing Systems, Vol. 30.
+     385–394. https://doi.org/10.1145/3209978.3209986 arXiv:1804.05938 [cs]                    Curran Associates, Inc.
+ [3] Qingyao Ai, Xuanhui Wang, Sebastian Bruch, Nadav Golbandi, Michael Ben-              [23] Ping Li, Qiang Wu, and Christopher Burges. 2007. McRank: Learning to Rank
+     dersky, and Marc Najork. 2019. Learning Groupwise Multivariate Scoring                    Using Multiple Classification and Gradient Boosting. In Advances in Neural
+     Functions Using Deep Neural Networks. In Proceedings of the 2019 ACM SI-                  Information Processing Systems, Vol. 20. Curran Associates, Inc.
+     GIR International Conference on Theory of Information Retrieval (ICTIR ’19).         [24] Yi Li, Jieming Zhu, Weiwen Liu, Liangcai Su, Guohao Cai, Qi Zhang, Ruiming
+     Association for Computing Machinery, New York, NY, USA, 85–92. https:                     Tang, Xi Xiao, and Xiuqiang He. 2022. PEAR: Personalized Re-ranking with
+     //doi.org/10.1145/3341981.3344218                                                         Contextualized Transformer for Recommendation. In Companion Proceedings
+ [4] Jimmy Lei Ba, Jamie Ryan Kiros, and Geoffrey E. Hinton. 2016. Layer Normaliza-            of the Web Conference 2022. ACM, Virtual Event, Lyon France, 62–66. https:
+     tion. arXiv:1607.06450 [cs, stat]                                                         //doi.org/10.1145/3487553.3524208
+ [5] Nan Bi, Pablo Castells, Daniel Gilbert, Slava Galperin, Patrick Tardif, and Sachin   [25] Tie-Yan Liu. 2009. Learning to Rank for Information Retrieval. Foundations and
+     Ahuja. 2022. Debiased Balanced Interleaving at Amazon Search. In Proceedings of           Trends in Information Retrieval 3, 3 (March 2009), 225–331. https://doi.org/10.
+     the 31st ACM International Conference on Information & Knowledge Management.              1561/1500000016
+     ACM, Atlanta GA USA, 2913–2922. https://doi.org/10.1145/3511808.3557123              [26] Yiqun Liu, Chao Wang, Ke Zhou, Jianyun Nie, Min Zhang, and Shaoping Ma.
+ [6] Sebastian Bruch, Xuanhui Wang, Michael Bendersky, and Marc Najork. 2019. An               2014. From Skimming to Reading: A Two-stage Examination Model for Web
+     Analysis of the Softmax Cross Entropy Loss for Learning-to-Rank with Binary               Search. In Proceedings of the 23rd ACM International Conference on Conference
+     Relevance. In Proceedings of the 2019 ACM SIGIR International Conference on               on Information and Knowledge Management. ACM, Shanghai China, 849–858.
+     Theory of Information Retrieval. ACM, Santa Clara CA USA, 75–78. https://doi.             https://doi.org/10.1145/2661829.2661907
+     org/10.1145/3341981.3344221                                                          [27] Claudio Lucchese, Franco Maria Nardini, Salvatore Orlando, Raffaele Perego,
+ [7] Christopher Burges. 2010. From Ranknet to Lambdarank to Lambdamart: An                    Fabrizio Silvestri, and Salvatore Trani. 2016. Post-Learning Optimization of
+     Overview. Learning 11 (Jan. 2010).                                                        Tree Ensembles for Efficient Ranking. In Proceedings of the 39th International
+ [8] Christopher Burges, Robert Ragno, and Quoc Le. 2006. Learning to Rank with                ACM SIGIR Conference on Research and Development in Information Retrieval
+     Nonsmooth Cost Functions. In Advances in Neural Information Processing Systems,           (SIGIR ’16). Association for Computing Machinery, New York, NY, USA, 949–952.
+     Vol. 19. MIT Press.                                                                       https://doi.org/10.1145/2911451.2914763
+ [9] Chris Burges, Tal Shaked, Erin Renshaw, Ari Lazier, Matt Deeds, Nicole Hamil-        [28] Wendy W. Moe. 2003. Buying, Searching, or Browsing: Differentiating Between
+     ton, and Greg Hullender. 2005. Learning to Rank Using Gradient Descent. In                Online Shoppers Using In-Store Navigational Clickstream. Journal of Consumer
+     Proceedings of the 22nd International Conference on Machine Learning (ICML                Psychology 13, 1 (Jan. 2003), 29–39. https://doi.org/10.1207/S15327663JCP13-
+     ’05). Association for Computing Machinery, New York, NY, USA, 89–96. https:               1&2_03
+     //doi.org/10.1145/1102351.1102363                                                    [29] Zhenxing Niu, Mo Zhou, Le Wang, Xinbo Gao, and Gang Hua. 2016. Ordinal
+[10] Zhe Cao, Tao Qin, Tie-Yan Liu, Ming-Feng Tsai, and Hang Li. 2007. Learning                Regression with Multiple Output CNN for Age Estimation. In 2016 IEEE Conference
+     to Rank: From Pairwise Approach to Listwise Approach. In Proceedings of the               on Computer Vision and Pattern Recognition (CVPR). IEEE, Las Vegas, NV, USA,
+     24th International Conference on Machine Learning (ICML ’07). Association for             4920–4928. https://doi.org/10.1109/CVPR.2016.532
+     Computing Machinery, New York, NY, USA, 129–136. https://doi.org/10.1145/            [30] Liang Pang, Jun Xu, Qingyao Ai, Yanyan Lan, Xueqi Cheng, and Jirong Wen.
+     1273496.1273513                                                                           2020. SetRank: Learning a Permutation-Invariant Ranking Model for Infor-
+[11] Olivier Chapelle and Yi Chang. 2011. Yahoo! Learning to Rank Challenge                    mation Retrieval. In Proceedings of the 43rd International ACM SIGIR Confer-
+     Overview. In Proceedings of the Learning to Rank Challenge. PMLR, 1–24.                   ence on Research and Development in Information Retrieval (SIGIR ’20). As-
+[12] Olivier Chapelle, Donald Metlzer, Ya Zhang, and Pierre Grinspan. 2009. Expected           sociation for Computing Machinery, New York, NY, USA, 499–508. https:
+     Reciprocal Rank for Graded Relevance. In Proceedings of the 18th ACM Conference           //doi.org/10.1145/3397271.3401104
+     on Information and Knowledge Management (CIKM ’09). Association for Comput-          [31] Rama Kumar Pasumarthi, Honglei Zhuang, Xuanhui Wang, Michael Bendersky,
+     ing Machinery, New York, NY, USA, 621–630. https://doi.org/10.1145/1645953.               and Marc Najork. 2020. Permutation Equivariant Document Interaction Network
+     1646033                                                                                   for Neural Learning to Rank. In Proceedings of the 2020 ACM SIGIR on International
+[13] Jerome H. Friedman. 2001. Greedy Function Approximation: A Gradient Boosting              Conference on Theory of Information Retrieval. ACM, Virtual Event Norway, 145–
+     Machine. The Annals of Statistics 29, 5 (2001), 1189–1232. jstor:2699986                  148. https://doi.org/10.1145/3409256.3409819
+[14] Carlos A. Gomez-Uribe and Neil Hunt. 2016. The Netflix Recommender System:
+     Algorithms, Business Value, and Innovation. ACM Transactions on Management
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                                      Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+[32] Changhua Pei, Yi Zhang, Yongfeng Zhang, Fei Sun, Xiao Lin, Hanxiao Sun, Jian             Associates, Inc.
+     Wu, Peng Jiang, and Wenwu Ou. 2019. Personalized Re-ranking for Recommen-           [39] Xuanhui Wang, Michael Bendersky, Donald Metzler, and Marc Najork. 2016.
+     dation. arXiv:1904.06813 [cs]                                                            Learning to Rank with Selection Bias in Personal Search. In Proceedings of the 39th
+[33] Mary Phuong and Marcus Hutter. 2022. Formal Algorithms for Transformers.                 International ACM SIGIR Conference on Research and Development in Information
+     https://doi.org/10.48550/arXiv.2207.09238 arXiv:2207.09238 [cs]                          Retrieval (SIGIR ’16). Association for Computing Machinery, New York, NY, USA,
+[34] Przemysław Pobrotyn, Tomasz Bartczak, Mikołaj Synowiec, Radosław Biało-                  115–124. https://doi.org/10.1145/2911451.2911537
+     brzeski, and Jarosław Bojar. 2021. Context-Aware Learning to Rank with Self-        [40] Liang Wu, Diane Hu, Liangjie Hong, and Huan Liu. 2018. Turning Clicks into
+     Attention. arXiv:2005.10084 [cs]                                                         Purchases: Revenue Optimization for Product Search in E-Commerce. In The 41st
+[35] Tao Qin and Tie-Yan Liu. 2013. Introducing LETOR 4.0 Datasets. https://doi.              International ACM SIGIR Conference on Research & Development in Information
+     org/10.48550/arXiv.1306.2597 arXiv:1306.2597 [cs]                                        Retrieval. ACM, Ann Arbor MI USA, 365–374. https://doi.org/10.1145/3209978.
+[36] Tao Qin, Tie-Yan Liu, Jun Xu, and Hang Li. 2010. LETOR: A Benchmark Collection           3209993
+     for Research on Learning to Rank for Information Retrieval. Information Retrieval   [41] Le Yan, Zhen Qin, Xuanhui Wang, Michael Bendersky, and Marc Najork. 2022.
+     13, 4 (Aug. 2010), 346–374. https://doi.org/10.1007/s10791-009-9123-y                    Scale Calibration of Deep Ranking Models. In Proceedings of the 28th ACM SIGKDD
+[37] Zhen Qin, Le Yan, Honglei Zhuang, Yi Tay, Rama Kumar Pasumarthi, Xuanhui                 Conference on Knowledge Discovery and Data Mining (KDD ’22). Association for
+     Wang, Michael Bendersky, and Marc Najork. 2021. ARE NEURAL RANKERS                       Computing Machinery, New York, NY, USA, 4300–4309. https://doi.org/10.1145/
+     STILL OUTPERFORMED BY GRADIENT BOOSTED DECISION TREES? (2021),                           3534678.3539072
+     16.                                                                                 [42] Honglei Zhuang, Zhen Qin, Xuanhui Wang, Michael Bendersky, Xinyu Qian, Po
+[38] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,                 Hu, and Dan Chary Chen. 2021. Cross-Positional Attention for Debiasing Clicks.
+     Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention Is All               In Proceedings of the Web Conference 2021. ACM, Ljubljana Slovenia, 788–797.
+     You Need. In Advances in Neural Information Processing Systems, Vol. 30. Curran          https://doi.org/10.1145/3442381.3450098
+RankFormer: Listwise Learning-to-Rank Using Listwide Labels                                                     KDD ’23, August 6–10, 2023, Long Beach, CA, USA
+
+
+A     RESULTS ON THE ORIGINAL WEB30K                                                 Note that for the intent 𝑇𝐼 , we directly sample from its distri-
+                                                                                  bution as given by Eq. 11. However, the actual implicit label 𝑦𝑖 is
+Table 4: NDCG@10 on the WEB30k, computed over the orig-                           sampled according to a cascade of probability distributions defined
+inal, explicit labels and without subsampled lists. Each result                   in Eq. 12.
+is the mean out of five runs, ± the standard error.
+                                                                                      Data: Explicit labels 𝑟𝑖 ∈ {1, ..., 𝑟 max } for item 𝑖 ∈ 𝐽 for a
+                                                      WEB30k                                superset of original lists 𝐽 ∈ J
+                                                      NDCG𝑟                           Parameters: maximum list length 𝑁𝑠
+                                # trees = 103       47.42 ± 0.12                                      bootstrapping amount 𝑁𝑏
+             GBDT
+                                # trees = 104       51.05 ± 0.10                                      relevance grade map 𝜌 : {1, ..., 𝑟 max } → [0, 1]
+             MLP                                    49.30 ± 0.10                                      conversion frequency 𝜅
+                                𝛼 =0                52.24 ± 0.08                                      click noise 𝜖
+             RankFormer
+                                𝛼 = 0.25            49.75 ± 0.16                      Result: Implicit labels 𝑦𝑖 ∈ {0, 1, 2} for item 𝑖 ∈ 𝐼 for a
+                                                                                               superset of sampled lists 𝐼 ∈ I.
+   Our results on the public datasets reported in Tab. 2 were on the                  I←∅
+subsampled lists. This subsampling step was necessary to simulate                     for 𝐽 ∈ J do
+realistic implicit feedback. To make these models more comparable                        /* 1. Selection                                               */
+to related work, we therefore run all our methods again on the                            for 𝑛 = 1 to 𝑁𝑏 do
+original WEB30k without any of the simulation steps described in                              if |𝐽 | > 𝑁𝑠 then
+Sec. 6.1, yet with the same hyperparameters (as in Appendix D).                                    𝐼 ←∅
+These results are reported in Tab. 4.                                                             while |𝐼 | < 𝑁𝑠 do
+   In contrast to our experiments on simulated data, we now ob-                                        𝐼 ← 𝐼 ∪ U (𝐽 )
+serve that the RankFormer with 𝛼 = 0.25 achieves far worse results                            else
+than with 𝛼 = 0. The listwide loss may be less informative here,                                   𝐼←𝐽
+because the explicit labels were assigned independently per item
+by human annotators. The listwide quality effect is then far less
+                                                                                          /* 2. Intent                                                  */
+important, which means smaller 𝛼 values should be used.
+                                                                                          𝑡 ← U ([0, 1])
+B     ARCHITECTURE DETAILS OF THE                                                         𝑟 ← max𝑖 ∈𝐼 𝑟𝑖
+      LISTWISE TRANSFORMER                                                                     
+                                                                                               
+                                                                                                0 𝑡 < 1 − 𝜌 (𝑟 )
+                                                                                               
+                                                                                               
+The Transformer (TF) architecture that was used as a basis for                            𝑇𝐼 ← 1 𝑡 ∈ [1 − 𝜌 (𝑟 ), (1 − 𝜅)𝜌 (𝑟 )]
+                                                                                               
+the RankFormer, was implemented using the TransformerEncoder-                                   2 𝑡 > (1 − 𝜅)𝜌 (𝑟 )
+                                                                                               
+                                                                                               
+Layer1 of the PyTorch framework. This implementation has an
+output dimensionality 𝑑 val and an attention dimensionality 𝑑 att                       /* 3. Interaction                                        */
+that equals the input dimensionality 𝑑 x = 𝑑 att = 𝑑 val . It uses a                    for 𝑖 ∈ 𝐼 do
+LayerNorm[4] (LN) transformation that is applied on the input of                            if 𝑇𝐼 = 2 and 𝜌 (𝑟𝑖 ) > U ([0, 1]) then
+both the Self-Attention (SA) and Feed-Forward (FF) blocks in our                                𝑦𝑖 ← 2
+configuration. Moreover, it uses residual connections for each block.                       else if 𝑇𝐼 ≥ 1 and 𝜖 + (1 − 𝜖)𝜌 (𝑟𝑖 ) > U ([0, 1]) then
+The output of a single TransformerEncoderLayer TF𝑙 is thus given                                𝑦𝑖 ← 1
+by                                                                                          else
+                                                                                              𝑦𝑖 ← 0
+                TF𝑙 (𝑿 𝐼 ) = 𝑿 𝐼 + FF      f (𝑿 𝐼 )
+                                   e 𝑿 𝐼 + SA                    (13)                   I ← I ∪𝐼
+with SA(·)
+      f      = SA(LN(·)) and FF(·)  e      = FF(LN(·)). The SA and FF              Algorithm 1: Implicit label simualtion as described in Sec. 6.1.
+blocks also contain Dropout layers and the FF uses a GELU acti-                    The U (𝑆) operator randomly returns a value sampled from set
+vation. The Transformer TF is then simplya composition of 𝑁𝑙                     𝑆 with a uniform probability distribution.
+Transformer layers: TF = TF𝑁𝑙 ... TF1 (𝑿 𝐼 ) .
+   Typically, the parameters of TF are optimized by computing the
+loss for a batch of lists. If the lists in a batch do not share the same          D     HYPERPARAMETERS
+lengththen all lists are concatenated with feature vectors of zeros               Our hyperparameter optimizations (HPOs) were performed sepa-
+        𝑑𝑥
+0 = (0)𝑖=0  until all lists have the same length as the longest list in           rately for the public dataset experiments in Sec. 6 and the Amazon
+the batch.                                                                        Search experiments in Sec. 7. For the public datasets, we only per-
+1 https://pytorch.org/docs/1.13/generated/torch.nn.TransformerEncoderLayer.html   formed HPOs on Fold 1 of the WEB30k dataset with simulated
+                                                                                  implicit labels. The hyperparameters with the best NDCG𝑦 on the
+C     LABEL SIMULATION DETAILS                                                    validation set were then used for the other Folds and for the Istella
+In Sec. 6.1, we discuss our simulation of implicit labels on public
+datasets in three stages: selection, intent and interaction. To en-
+sure reproducibility, we write out the pseudocode of the complete
+process in Alg. 1.
+KDD ’23, August 6–10, 2023, Long Beach, CA, USA                                                      Maarten Buyl, Paul Missault, and Pierre-Antoine Sondag
+
+
+Table 5: Hyperparameter selections and ranges for the public dataset experiments. For GBDT, the HPO was later performed
+separately with 103 and 104 trees.
+
+                                                                          Best                       Range
+                                                  num_iterations       103   104                   [102, 104 ]
+                                                  min_data_in_leaf     255   376                    [10, 500]
+                                 GBDT             num_leaves           507   271                   [128, 512]
+                                                  learning_rate       0.46   0.32                  [0.01, 0.5]
+                                                  cegb_tradeoff       0.13   1.65                   [0.1, 10]
+                                                  lr                     10 −3                  {10 −4, 10 −3, 10 −2 }
+                                                  weight_decay           10 −1                   {0, 10 −2, 10 −1, 1}
+                                  MLP
+                                                  dropout                 0.25                  {0.1, 0.25, 0.4, 0.5}
+                                                  hidden_dims        [512, 256, 128]   [1, 5] layers with size [128, 1024]
+                                                  nhead                     1                         {1, 2, 4}
+                                                  dim_feedforward          512                    {128, 256, 512}
+                             RankFormer
+                                                  dropout                 0.25                  {0.1, 0.25, 0.4, 0.5}
+                                                  𝑁𝑙                        3                         {2, 3, 4}
+
+
+and Yahoo datasets. We report all optimized values and their ranges           lr and weight_decay that starts decaying with an inverse square
+in Tab. 5.                                                                    root schedule after 20 epochs. Additionally, we used dropout for
+   As the hyperparameter space is relatively limited for GBDTs,               the MLP and hidden layer sizes hidden_dims.
+we conducted a full Bayesian Optimization there, separately for                  For the RankFormer, we used the convergence and setting of the
+1,000 and 10,000 trees. We use LightGBM [22] to implement the                 MLP. For each layer of its Transformer TF𝑙 (discussed in Appen-
+GBDTs, so we directly list the parameter names as they occur in               dix B), the nhead, dim_feedforward and dropout were optimized
+that framework.                                                               in the PyTorch implementation. The full Transformer component
+   The convergence parameters were first optimized for the MLP,               consists of 𝑁𝑙 of such layers. To reduce further complexity, we
+after which they were also used for the RankFormer. In total, we              directly choose the ℎ𝑠 and 𝒉𝑑 scoring heads to be feed-forward
+train for 200 epochs and used the Adam optimizer with parameters              networks with a single 128-dimensional layer.
+

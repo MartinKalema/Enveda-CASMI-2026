@@ -1,0 +1,1675 @@
+Generating Molecular Fragmentation Graphs
+with Autoregressive Neural Networks
+Samuel Goldman,† Janet Li,‡ and Connor W. Coley∗,¶,§
+†Computational and Systems Biology, Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, USA
+‡Harvard College, Harvard University, Cambridge, Massachusetts 02138, USA
+¶Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, USA
+§Department of Electrical Engineering and Computer Science, Massachusetts Institute of
+Technology, Cambridge, Massachusetts 02139, USA
+E-mail: *ccoley@mit.edu
+Abstract
+The accurate prediction of tandem mass spectra from molecular structures has
+the potential to unlock new metabolomic discoveries by augmenting the community’s
+libraries of experimental reference standards. Cheminformatic spectrum prediction
+strategies use a “bond-breaking” framework to iteratively simulate mass spectrum frag-
+mentations, but these methods are (a) slow, due to the need to exhaustively and com-
+binatorially break molecules and (b) inaccurate, as they often rely upon heuristics
+to predict the intensity of each resulting fragment; neural network alternatives mit-
+igate computational cost but are black-box and not inherently more accurate. We
+introduce a physically-grounded neural approach that learns to predict each breakage
+event and score the most relevant subset of molecular fragments quickly and accurately.
+1
+arXiv:2304.13136v2  [q-bio.QM]  8 Jan 2024
+We evaluate our model by predicting spectra from both public and private standard
+libraries, demonstrating that our hybrid approach offers state of the art prediction ac-
+curacy, improved metabolite identification from a database of candidates, and higher
+interpretability when compared to previous breakage methods and black box neural
+networks. The grounding of our approach in physical fragmentation events shows es-
+pecially high promise for elucidating natural product molecules with more complex
+scaffolds.
+Keywords: mass spectrometry, machine learning, metabolomics, graph neural networks,
+fragmentation, generative
+Introduction
+Identifying unknown molecules in complex metabolomic or environmental samples is of crit-
+ical importance to biologists,1 forensic scientists,2 and ecologists alike.3 Tandem mass spec-
+trometry, MS/MS, is the standard analytical chemistry method for analyzing such samples,
+favored for its speed and sensitivity.4 In brief, MS/MS metabolomics experiments isolate,
+ionize, and fragment small molecules, resulting in a characteristic spectrum for each where
+peaks correspond to molecular sub-fragments (Figure 1A). Importantly, these experiments
+are high throughput, leading to thousands of detected spectra per single experiment for
+complex samples such as human serum.
+The most straightforward way to identify an unknown molecule from its fragmentation
+spectrum is to compare the spectrum to a library of known standards.5 However, spectral
+libraries only contain on the order of104 compounds—a drop in the bucket compared to the
+vast size of biologically-relevant chemical space, oft cited as large as1060.6 Of the many tan-
+dem spectra deposited into a large community library, 87% still cannot be annotated.5 The
+accurate prediction of mass spectra from molecular structures would enable these libraries
+to be augmented with hypothetical compounds and significantly advance the utility of mass
+spectrometry for structural elucidation. This paradigm of comparing unknown spectra to
+2
+ Collision cell
+Experimental 
+measurement
+Precursor 
+molecule
+Intensity
+M/Z
+Heuristic 
+scoring
+Intensity
+M/Z
+A
+B
+Benzocaine
+O
+O
+H2N
+O
+O
+H2N
+CCombinatorial 
+simulation
+O
+O
+H2N
+O
+O
+O
+O
+O
+H2N
+Intensity
+M/Z
+ICEBERG 
+simulation
+Learned 
+scoring
+O
+O
+H2N
+Figure 1: ICEBERG enables the prediction of tandem mass spectra by efficiently navigat-
+ing the space of possible fragmentation events.A. Example experimental mass spectrum.
+An input molecule, benzocaine, is depicted entering a mass spectrometer collision cell and
+fragmenting. The observation of the resulting charged fragments results in a characteristic
+spectrum. B. A combinatorial mass spectrum simulation. The root molecule, benzocaine, is
+iteratively fragmented by removing atoms or breaking bonds, resulting in a large fragmenta-
+tion tree. Heuristic rules score nodes in the tree to predict intensities.C. ICEBERG spectrum
+simulation. ICEBERG learns to generate only the most relevant substructures. After generat-
+ing fragments, a neural network module scores the resulting fragments to predict intensities.
+3
+putative spectra is well established in the adjacent field of proteomics due to the ease of
+predicting protein fragmentations.7
+Because tandem mass spectrometry experiments physically break covalent bonds in a
+process known as “collision-induced-dissociation” (CID) to create fragments, simulating such
+fragmentation events computationally is a natural strategy for prediction. Tools from the
+last decade includingMetFrag,8 MAGMa,9 and CFM-ID10,11 use fragmentation rules (based on
+removing atoms or bonds) and local scoring methods to (a) enumerate molecular fragmen-
+tation trees and (b) estimate the intensity at each node in the tree with a mix of heuristic
+rules and statistical learning (Figure 1B).
+However, these combinatorial methods are computationally demanding and often make
+inaccurate predictions byoverestimating the possible fragments (Figure 1B, bottom). We re-
+cently foundCFM-ID to be far less accurate than black-box neural networks,12 an observation
+separately confirmed by Murphy et al.13 Further, current learned fragmentation models are
+not easily adapted or scaled to new datasets; Murphy et al. estimate it would take the lead-
+ing fragmentation approach,CFM-ID,10 approximately three months on a 64-core machine to
+train on an approximately 300,000 spectrum dataset.
+Alternative strategies that utilize black box neural networks to predict MS/MS spectra
+have been attempted. They encode an input molecule (e.g., as a fingerprint, graph, or 3D
+structure) and predict either a 1D binned representation of the spectrum,14–17 or a set of
+output formulae corresponding to peaks in the spectrum.12,13,18 While we have demonstrated
+that predicting chemical formulae provides a fast, accurate, and interpretable alternative
+to binned representation approaches,12 the improved accuracy surprisingly did not directly
+translate to better database retrieval for complex natural product molecules contained within
+theGlobalNaturalProductsSocial(GNPS)database. 19 Wehypothesizedthatcombiningthe
+flexibility of neural networks to learn from experimental MS/MS data in reference libraries
+with the structural-bias of combinatorial fragmentation approaches could lead to increased
+prediction performance on complex natural product molecules.
+4
+Herein, we introduce a hybrid strategy for simulating molecular fragmentation graphs us-
+ing neural networks,Inferring Collision-induced-dissociation by Estimating Breakage Events
+and Reconstructing their Graphs (ICEBERG). ICEBERG is a two-part model that simulates
+probable breakage events (Generate) and scores the resulting fragments using a Transformer
+architecture (Score) (Figure 1C; details in Figure 2). Our core computational contribution
+is to leverage previous exhaustive cheminformatics methods for the same task, specifically
+MAGMa,9 in order to build a training dataset, from which our model learns to make fast
+estimates prioritizing only likely bond breakages. In doing so, we liftMAGMa and previous
+bond-breaking approaches into a neural network space with demonstrable benefits in perfor-
+mance.
+We evaluate ICEBERG on two datasets: NPLIB1 (GNPS data 19 as used to train the
+CANOPUS model20) and NIST20,21 which test the model’s ability to predict both complex
+natural products and small organic standard molecules, respectively. We find thatICEBERG
+increases cosine similarity of predicted spectra by 10% (0.63 vs. 0.57) compared to a recent
+stateoftheartmethodonNPLIB1data. Whenusedtoidentifymoleculesinretrospectivere-
+trieval studies,ICEBERG leads to a 46% relative improvement (29% vs. 20%) in top 1 retrieval
+accuracy on a challenging natural product dataset compared to the next best model tested.
+ICEBERG is fully open-sourced with pretrained weights alongside other existing prediction
+baseline methods available on GitHub athttps://github.com/samgoldman97/ms-pred.
+Methods
+Datasets
+We train our models on the two datasets, NIST2021 as generated by the National Institute
+of Standards and NPLIB1 extracted from the GNPS database19 and prepared previously by
+Dührkop et al.20 and Goldman et al.22 For each spectrum in the dataset, we first merge
+all scans at various collision energies, combine peaks that are within10−4 m/z tolerance
+5
+from each other, renormalize the resulting spectrum by dividing by the maximum observed
+intensity, and take the square-root of each intensity. We subset the resulting spectrum to
+keep the top 50 peaks with intensity above0.003. This normalization process is identical
+to our previous work12 and emphasizes (a) removing peaks that are likely noise and (b)
+combining various collision energies. We refer the reader to our previous work12 for exact
+details on dataset extraction.
+To further normalize the dataset, for each spectrum, we subtract the mass of the adduct
+ion from each resulting MS2 peak. Concretely, the precursor molecule is ionized with an
+adduct ion, for instance, H+. In this case, the mass of each peak in the spectrum is shifted
+by the mass of H+ before proceeding further. In doing so, we normalize against different
+ionizations. While adduct switching is possible, this assumption allows us to make pre-
+dictions in a more constrained model output space (i.e., models do not need to predict all
+combinations of potential adduct masses at each predicted fragment) and allows our models
+to share output representations across different input adduct types (i.e., potentially learning
+how to predict rarer fragments more accurately). Further, as described below, our models are
+capable of predicting various hydrogen-shifted peak intensities that can serve to regularize
+and correct wrongly annotated adduct switching patterns in a small number of cases (e.g.,
+[M+H]+ [M]+).We defer more complete incorporation of adduct switching into modeling
+as a potential direction for future work. We make the simplifying assumption that all peaks
+are singly charged and use mass and m/z interchangeably. Ultimately, each spectrumY can
+be considered a set of mass, intensity tuples,Y ={(m0,y 0), (m1,y 1),... (m|Y|,y|Y|)}.
+Canonical DAG construction
+We build a custom re-implementation of theMAGMa algorithm9 to help create explanatory
+directed acyclic grpahs (DAGs) for each normalized and adduct-shifted spectrum.
+Given an input moleculeM, MAGMa iteratively breaks each molecule by removing atoms.
+Each time an atom is removed, multiple fragments may form, from which we keep all frag-
+6
+ments of > 2 heavy (non-hydrogen) atoms. To prevent combinatorial explosion of DAG
+nodes, we use a Weisfeiler-Lehman isomorphism test23 to generate a unique hash ID of each
+generated fragment and reject new fragments with hash IDs already observed. When con-
+ducting this test, to remain insensitive tohow this fragment originated, we hash only the
+atom identities and bonds in the fragment graph,not the number of hydrogen atoms . For
+instance, consider an ethane fragment in which the terminal carbon was originally double-
+bonded to a single neighboring atom in the precursor molecule compared to an ethane frag-
+ment in which the terminal carbon was single-bonded to two adjacent atoms in the original
+precursor— our approach applies the same hash ID to both fragments. The chemical formula
+and hydrogen status for the fragment is randomly selected from the fragments that required
+the minimal number of atom removals. Each fragment corresponds to multiple potential
+m/z observations due to the allowance for hydrogen shifts equal to the number of broken
+bonds.
+After creating the fragmentation graph forM, a subset of the fragments are selected to
+explain each peak inY, using mass differences of under 20 parts-per-million as the primary
+filter and the minimalMAGMa heuristic score as a secondary filter. We include nodes along all
+paths back to the root molecule for each selected fragment. To prune the DAG to select only
+the most likely paths to each fragment, we design a greedy heuristic. Starting from the lowest
+level of the DAG, we iteratively select the parent nodes for inclusion into the final DAG that
+“cover” the highest number of peak-explaining nodes. Finally, the “neutral loss” fragments
+are added into the DAG, as they provide useful training signals forICEBERG Generate to
+learn when to stop fragmenting each molecule. By using these heuristics, it is likely that
+we select incorrect fragment annotations for a subset of peaks in our training dataset. Our
+intuition is that a deep learning model trained on this data will still be able to make accurate
+and generalizable predictions to aid in small molecule structure elucidation, even if the level
+of abstraction is not always true or exactly matched to how an expert chemist may annotate
+certain MS2 peaks; empirical results demonstrate that this is the case.
+7
+Model details
+We introduceICEBERG to predict spectra from input molecules. At a high level, our model is
+split into two components where the first model generates molecular substructure (fragment)
+candidates and the second model predicts intensities and hydrogen rearrangements for each
+generated fragment. In doing so, we simplify the complexity of both models: the first model
+outputs a set of likely substructures without needing to handle rearrangements and the
+second model predicts potential rearrangement peak shifts and intensities for the constrained
+set of potential fragments. We describe the methodology for both models separately below.
+DAG generation prediction We train a model to recursively select the atoms around
+which to break bonds. The model begins by making predictions on the input molecule. We
+cheminformatically generate the resulting substructures and iteratively apply our model to
+each. To train this model, we utilize the “ground truth DAG” as described above and train
+ICEBERG Generate to reconstruct the DAG from an input molecule and input adduct type.
+We define the root fragment in the DAG as the input moleculeS (0). We can generally define
+the predicted fragmentation probability for the bonds around thejth atom node in theith
+generated fragment in the DAG,S (i):
+p
+(
+F [S (i)
+j ]|S (i),M,C
+)
+=gGenerate
+ (M,S (i),C )j (1)
+As can be seen in this equation, predictions are mode atom-wise (i.e., at every single atom
+for each fragment in the DAG). To make this atom-wise prediction, we encode information
+about the root molecule, fragment molecule, their difference, their respective chemical for-
+mulae, the adduct, and the number of bonds that were broken between the root molecule
+and fragment. To embed the root molecule, we utilize a gated graph neural network,24
+GNN(M), where either average or weighted summations are used to pool embeddings across
+atoms (specified by a hyperparameter). We utilize the same network to learn representa-
+tions of the fragment,GNN(S (i)) and define GNN(S (i))j as the graph neural network-derived
+8
+embedding of fragmenti at thejth atom prior to pooling operation. For all graph neural net-
+works, a one-hot encoding of the adduct type is also added as atom-wise features alongside
+the bond types and atom types. We define the chemical formulaf for each DAG fragment
+and specify an encoding,Enc, using the Fourier feature scheme defined in.12 We encode the
+root andith node of the fragmentation DAG asEnc(f0) and Enc(fi), respectively. Lastly, we
+define a one hot vector for the number of bonds broken,b.
+All the encodings described above are concatenated together and a shallow multilayer
+perceptron (MLP) ending with a sigmoid function is utilized to predict binary probabilities
+of fragmentation at each atom.
+p
+(
+F [S (i)
+j ]|S (i),M,C
+)
+= MLP
+(
+[GNN(M), GNN(M)− GNN(S (i)),
+GNN(S (i))j, Onehot(b), Enc(fi), Enc(f0−fi)
+]) (2)
+The model is trained to maximize the probability of generating the DAG by minimizing
+the binary cross entropy loss over each atom for every fragment in an observed spectrum.
+DAG intensity prediction The trained Generate module is used to generate DAGs for
+each input molecule in the training set by iteratively fragmenting the input molecule, with
+the probability of each fragment computed autoregressively. Once this fragment DAG is
+created, the ICEBERG Score module learns to predict intensities at each fragment. Because
+we deferred rearrangement predictions withinICEBERG Generate, we designICEBERG Score
+to simultaneously predict intensities at each generated fragment massand at a range of
+masses representing potential hydrogen additions or removals.
+We define the node indices for an ordering from each fragmentS (i) back to the root node
+through its highest likelihood path[i], where[i,j ] defines thejth node on this factorization
+path.
+9
+p(S (i)|M,C ) = p(S (i)|S (([i,1]),M,C )
+|[i]|∏
+j=1
+p(S ([i,j])|S ([i,j+1]),M,C ) (3)
+Ateachstep, wemaintainonlythetop 100mostlikelyfragmentsintheDAGasapractical
+consideration until reaching the maximum possible fragmentation depth. To further reduce
+complexity in the inference step, we maintain the highest scoring isomer from the DAG. This
+resulting set of fragments is featurized and passed to a Set Transformer module to generate
+output values at each fragment. Following the notation from the generative model, we
+featurize each individual fragment with a shallow MLP to generate hidden representations,
+hi:
+hi = MLP
+(
+[GNN(M), GNN(M)− GNN(S (i)), GNN(S (i)),
+Onehot(b), Enc(fi), Enc(f0−fi)
+]) (4)
+These are subsequently jointly embedded with a Transformer module and used to predict
+unnormalized intensity weights at each possible hydrogen shift  alongside an attention
+weight to determine how heavily to weight each prediction for its specified hydrogen shift.
+To compute the attention weight, we take a softmax over all prediction indices that fall into
+the same intensity bin (0.1 resolution),M (i, ):
+y(i)
+ = MLPinten
+(
+Transformer(h0,h 1,h 2,...,h |T| )i
+)
+
+, (5)
+(i)
+ = Softmaxk∈M (i,)
+(
+MLPattn
+(
+Transformer(h0,h 1,h 2,...,h |T| )k
+))
+i, (6)
+The final intensity prediction for the bin at massm is then a then a weighted sum over
+all predictions that fall within this mass bin followed by a sigmoid activation function:
+10
+ym =
+(∑
+i
+∑
+
+(i)
+ y(i)
+ I[M (i, ) = m]
+)
+(7)
+The model is trained to maximize the cosine similarity between the predicted spectrum
+and ground truth spectrum. WhileICEBERG Generate is trained to generate the annotated
+molecular DAG without any binning assumptions, ICEBERG Score is trained to directly
+maximize similarity to a vectorized, binned version of the original spectrum to utilize the
+same loss function as our baseline methods as described below.
+Model training All models are implemented and trained using Pytorch Lightning,25 the
+Adam optimizer,26 and the DGL library.27 Ray28 is used to complete hyperparameter opti-
+mizations over all models and baselines. Models are trained on a single RTX A5000 NVIDIA
+GPU (CUDA Version 11.6) in under3 hours for each module. A complete list of hyperpa-
+rameters and their definition can be found in the Supporting Information.
+Baselines
+A key component of this work is to extend our robust comparison to previous and contem-
+porary methods.12 To conduct this benchmarking and specifically emphasize methodological
+differences rather than data differences, we port and modify code from a number of previous
+methods including NEIMS,14 NEIMS with a graph neural network15 3DMolMS,17 SCARF,12
+a modified version ofGRAFF-MS we refer to asFixedVocab,13 MassFormer,16 and CFM-ID11
+into a single GitHub repository.
+Following our previous approach in,12 we emphasize conditioning on the same experimen-
+tal settings of adduct typeacross methods for fair comparison, excluding collision energies
+and instrument types as extensions for future work. We rigorously hyperparameter optimize
+each method for our data regime and train each model on data splits with the exception of
+CFM-ID for which retraining is not feasible.12,13,16
+All model predictions are transformed into binned representations for fair evaluation at a
+11
+bin resolution of0.1 from mass0 to 1, 500 Da. Further details are included in the Supporting
+Information.
+Spectral similarity evaluations
+Both ICEBERG and the presented baseline models are trained to maximize the spectral sim-
+ilarity between each predicted spectrum and the true spectrum, as this is well aligned with
+the retrieval settings and has been used in previous studies. While there are many different
+variants of cosine similarity calculations,29–31 we specifically compute a vectorized cosine
+similarity for any predicted spectrum,Y and true spectrum, Y. We denote each vectorized
+spectrum and predicted spectrum ass and s respectively, in which all intensities are binned
+into ranges of 0.1 Da from 0 to 1,500 Da (amax aggregation function is used to resolve any
+peaks within the same bin). The vectorized cosine similarity is then defined as:
+sim(s, s) = s⊤ s
+∥s∥2∥s∥2
+=
+∑|s|
+i=1sisi√∑|s|
+j=1s2
+j
+√∑|s|
+j=1 s2
+j
+(8)
+While this distance metric forces a conversion of exact mass fragment predictions into
+binned values forICEBERGpredictions, it ensures that we avoid unfairly penalizing the binned
+spectrum models to which we compare our model. Such baseline models are incapable of
+predicting exact mass spectra outputs and can only be trained on this variant of the cosine
+similarity.14–17
+Results
+ICEBERG is trained as a two-stage generative and scoring model
+Learning to generate likely substructures. ICEBERG simulates a mass spectrum by
+generating the substructure fragments from an initial molecule that are most likely to be
+generated by collision induced dissociation and subsequently measured in the mass spec-
+12
+A B
+O
+O
+H2N
+O
+O
+H2N
+O
+O
+H2N
+H2N
+O
+O
+H2N
+O
+H2N
+O
+O
+H2N
+O
+O
+H2N
+O
+O
+H2N
+O
+O
+H2N
+O
+O
+O
+O
+H2N
+O
+O
+H2N
+ICEBERG Generate Single step generation
+Prob. fragment
+Example 
+disconnection
+Set 
+Transformer
+Generated 
+fragments 
+from (A)
+Predicted intensities 
+Each intensity is 
+assigned to its 
+fragment mass
+Simulated 
+spectrum
+ICEBERG ScoreC
+a1
+a1 0.6
+a2
+,
+,{ {,
+,{ {,
+,{ {,
+,{ {,
+,{ {,
+a2 0.7,{ {,
+a9 0.1,{ {,
+a3
+a4
+a5
+a6a7
+a8a9
+Intensity
+M/Z
+Figure 2: Overview ofICEBERG. A. The target fragmentation directed acyclic graph (DAG)
+for an example moleculeM, benzocaine. Fragments are colored in black with missing sub-
+structures in gray.B. Example illustration for the generative process at a single step in the
+DAG generation predicting subfragments ofS (2). The root moleculeM, fragment of interest
+S (2), and context vectorC are encoded and used to predict fragment probabilities at each
+atom of the fragment of interest. A sample disconnection is shown at atoma2, resulting in
+fragmentS (7). C. ICEBERG Score module. Fragments generated fromA are encoded along-
+side the root molecule. A Set Transformer module predicts intensities for each fragment,
+allowing mass changes corresponding to the loss or gain of hydrogen atoms, resulting in the
+final predicted mass spectrum.
+trometer. We define an input moleculeM (benzocaine example shown in Figure 2A) and its
+observed spectrumY, which is a set of intensities at various mass-to-charge values (m/z),
+termed peaks. Each peak represents one or more observed molecular fragment.
+A core question is thenhow to generate the set of potential fragments . These fragments
+can be sampled from the many possible substructure options,S (i)∈ (N (i),E (i))⊆M , where
+the set of nodes and edges in substructures are subsets of the atoms and bonds in the original
+molecule,M∈ (N,E ). Most often, this sampling is accomplished by iteratively and exhaus-
+tively removing edges or atoms from the molecular graph, creating a fragmentation graph
+T ∈(S,E), where all the nodes in this graph are themselves substructures of the original
+13
+moleculeS ={S (0),S (1),... S (|T| )}8–10 (Figure 1b). However, such a combinatorial approach
+leads tothousands of molecular fragments, making this procedure slow and complicating the
+second step of estimating intensity values for all enumerated fragments.
+We eschew combinatorial generation and instead leverage a graph neural network to
+parameterize breakage events of the molecule, defining theGenerate module of ICEBERG
+(Figure 2A,B). Generate predicts the fragmentation graph iteratively, beginning with just
+the root of the graphS (0) =M, borrowing ideas from autoregressive tree generation.32,33 At
+each step in iterative expansion, the modelgGenerate
+ assigns a probability of fragmentation
+to each atomj in the current substructure fragmentS (i), p(F [S (i)
+j ]). Learned atom embed-
+dings are concatenated alongside embeddings of the root molecule and a context vectorC
+containing metadata such as the ionization adduct type in order to make this prediction.
+An illustrative example can be seen for fragmentS (2) in Figure 2B. Atoma2 has the highest
+predicted probability, so this atom is then removed from the graph, leading to the subsequent
+child nodeS (7) (Figure 2B). Importantly, the number of child fragments is determined by
+how many disjoint molecular graphs form upon removal of thejth node from the molecular
+graph; in this example, fragmentsS (1) andS (4) originate from the same fragmentation event
+ofS (0) (Figure 2A).
+In this way,ICEBERGpredicts breakages at the level of eachatom, following the convention
+of MAGMa9 rather than each bond as is the convention withCFM-ID.10 We strategically use
+this abstraction to ensure that all fragmentation events lead to changes in heavy-atom com-
+position. We acknowledge that this formulation does not currently allow for the prediction of
+skeletal rearrangements and recombinations, which might further improve the model’s ability
+to explain fragmentation spectra. We refer the reader to Model details for a full description
+of the modelgGenerate
+ (M,S (i),C )j, graph neural network architectures, and context vector
+inputs.
+While this defines a neural network for generation, we must also specify an algorithm
+for how totrain this network. Spectral library datasets contain only molecule and spectrum
+14
+pairs, but not the directed acyclic graph (DAG)T of the molecule’s substructures that gen-
+erated the spectrum. We infer an explanatory substructure identity of each peak for model
+training by leveraging previous combinatorial enumeration methods, specificallyMAGMa.9 For
+each training molecule and spectrum pair,(M,Y), we modifyMAGMa to enumerate all sub-
+structures ofM up to a depth of3 sequential fragmentation events. We filter enumerated
+structures to include only those with m/z values appearing in the final spectrum, thereby
+defining a dataset suitable for trainingICEBERG Generate (see Canonical DAG construc-
+tion). As a result, each paired example(M,Y), in the training dataset is labeled with an
+estimated fragmentation DAG.Generate learns from these DAGs to generate only the most
+relevant and probable substructures for a molecule of interest (see Model details).
+Predicting substructure intensities. After generating a set of potential substructure
+fragments, we employ a second module,ICEBERG Score, to predict their intensities (Figure
+2C). Importantly, this design decision enables our models to consider two important physical
+phenomena: (i) neutral losses and (ii) mass shifts due to hydrogen rearrangements and
+isotope effects.
+Because we elect to fragment molecules at the level of atoms (see Model details), multiple
+substructures can result from a single fragmentation event. In physical experiments, not all
+of these substructure fragments will be observed; when fragmentation events occur in the
+collision cell, one fragment often retains the charge of the parent while the other is uncharged
+and therefore undetected, termed a “neutral loss”. By deferring prediction of intensities to a
+second module, Generate needs not predict or track whether structures are ionized, greatly
+reducing the complexity of the fragmentation DAG.
+In addition to the occurrence of neutral losses, molecules often undergo complex rear-
+rangementsinthecollisioncell, leadingtobondorderpromotionsorreductions(e.g., spurious
+formation of double bonds when a single bond breaks to maintain valence), the most classic
+of which is the McLafferty rearrangement.34,35 While other approaches attempt to model
+15
+and estimate where these rearrangements occur using hand-crafted rules,10 we instead adopt
+the framework of Ridder et al.9 to consider hydrogen tolerances. That is, for each gener-
+ated molecular substructureS (i) we consider the possibility that this fragment is observed
+not only at its mass, but also at masses shifted by discrete hydrogen masses,±H. This
+design choice also simplifiesGenerate by deferring specification of hydrogen counts to the
+second model. In addition to accounting for a mass shift of 1 hydrogen, such flexibility also
+allows the model to predict the common M+1 isotopes for carbon- and nitrogen- containing
+compounds.
+Mathematically, we define a neural network,gScore
+ that predicts multiple intensities for
+each fragment y(i)
+ corresponding to different hydrogen shifts,:
+y(i)
+ =gScore
+ (M,S (i),T,C ) (9)
+In practice, we predict up to13 intensities at each fragment (i.e.,{+0H,±1H,..., ±6H}).
+For each individual subfragment, the tolerance is further restricted to the number of bonds
+broken, most often less than6. We then take the masses of all fragments, perturb them by
+the corresponding hydrogen or isotope shifts, and aggregate them into a set of unique m/z
+peaks by summing the intensities of perturbed fragments with the same m/z value.
+To consider all fragments simultaneously in a permutation-invariant manner,gScore
+ is
+parameterized as a Set Transformer network.36,37 We train this second module to maximize
+the cosine similarity between the ground truth spectrum and the predicted spectrum after
+converting the set of substructures and intensities to m/z peaks.
+At test time, we generate the top 100 most likely fragments fromICEBERG Generate
+and predict intensities for these fragments and their possible hydrogen shifts usingICEBERG
+Score. We find this tree size allows our model to consider sufficiently many potential frag-
+ments while maintaining a speed advantage over previous fragmentation approaches.
+16
+A B C D
+2 4 6 8
+SA score
+0.0
+0.2
+0.4
+Frequency
+NPLIB1
+NIST20
+500 1000 1500
+Mol. weight
+0.000
+0.001
+0.002
+0.003
+0.004
+NPLIB1
+NIST20
+CFM-ID
+3DMolMS
+FixedVocab
+NEIMS (FFN)
+NEIMS (GNN)
+MassFormer
+SCARF
+ICEBERG
+0.0
+0.2
+0.4
+0.6Cosine sim.
+NPLIB1
+CFM-ID
+3DMolMS
+FixedVocab
+NEIMS (FFN)
+NEIMS (GNN)
+MassFormer
+SCARF
+ICEBERG
+NIST20
+CFM-ID
+3DMolMS
+FixedVocab
+NEIMS (FFN)
+NEIMS (GNN)
+MassFormer
+SCARF
+ICEBERG
+101
+102
+103
+Time (s)
+Figure 3: ICEBERG predictions are highly accurate. A. Cosine similarities to true spectra
+on NPLIB1 (left) and NIST20 respectively (right) forCFM-ID,10 3DMolMS,17 FixedVocab,13
+NEIMS (FFN) ,14 NEIMS (GNN) ,15 MassFormer,16 SCARF,12 and ICEBERG. Error bars are com-
+puted as 1.96 times the standard error of the mean across three random seeds on a single
+test set split.B. Time required to predict spectra for 100 molecules randomly sampled from
+NIST20 on a single CPU, including the time to load models into memory.C,D. Compar-
+ison of NPLIB1 and NIST20 molecules in terms of synthetic accessibility (SA) score38 and
+molecular weight (Mol. weight).
+ICEBERG enables highly accurate spectrum prediction
+17
+A
+B
+C
+N
+HOH
+HO
+HON
+HOH
+HO
+HO
+N
+HOH
+HO
+HO
+N
+HOH
+HO
+HO N
+HOH
+HO
+HO
+O
+HO
+Cl
+N
+OH
+O OO
+O
+HO
+Cl
+N
+OH
+O OO
+O
+HO
+Cl
+N
+OH
+O OO
+O
+HO
+Cl
+N
+OH
+O OO
+100 150 200 250 300 350 400 450
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+80 100 120 140 160 180 200
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+100 150 200 250 300 350
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+N
+N
+NN
+Cl
+N
+N
+NN
+Cl
+N
+N
+NN
+Cl
+N
+HOH
+HO
+HO
+N
+N
+NN
+Cl
+O
+HO
+Cl
+N
+OH
+O OO
+Figure 4: Examples of predicted spectra fromICEBERG. Predictions are shown as generated
+by ICEBERG trained on NPLIB1 for select test set examplesGNPS:CCMSLIB00003137969 (A),
+MoNA:001659 (B), and GNPS:CCMSLIB00000080524 (C). The input molecular structures are
+shown (left); fragmentation spectra are plotted (right) with predictions (top, blue) and
+ground truth spectra (bottom, red). Molecular fragments are shown inset. Spectra are
+plotted with m/z shifted by the mass of the precursor adduct. All examples shown were not
+included in the model training set.
+18
+We evaluateICEBERG on its ability to accurately simulate positive ion mode mass spectra
+for both natural product like molecules and smaller organic molecules under 1,500 Da. Using
+the data cleaning pipeline from,12 we compile a public natural products dataset NPLIB1
+with 10,709 spectra (8,553 unique structures)19,20,22 as well as a gold standard chemical
+library NIST20 with 35,129 spectra (24,403 unique structures).21 We note that NPLIB1
+was previously named ‘CANOPUS’, renamed here to disambiguate the data from the tool
+CANOPUS.20 Both datasets are split into structurally disjoint 90%/10% train-test splits,
+with 10% of the training data reserved for model validation (see Datasets). We compare
+ICEBERG against an expansive suite of contemporary and competitive methods;10,12–17 all
+methods excluding CFM-ID are reimplemented, hyperparameter optimized, and trained on
+equivalent data splits, further described in the Supporting Information.
+To measure performance, we calculate the average cosine similarity between each pre-
+dicted spectrum and the true spectrum, as cosine similarity is widely used to cluster mass
+spectra in molecular networking.39 We find that ICEBERG outperforms the next method
+MassFormer on the natural product focused dataset (Figure 3A).ICEBERG achieves an aver-
+age cosine similarity of 0.627, compared toMassFormer and FixedVocab which each achieved
+a cosine similarity of 0.568—a 10% improvement.
+Surprisingly, however, this boost in performance extends only marginally to the gold
+standard dataset, NIST20. ICEBERG, while still outperforming binned spectrum prediction
+approaches (i.e., NEIMS14) on this dataset, is nearly equivalent toSCARF (0.727 v. 0.726).12
+Still, our model performs substantially better thanCFM-ID and uses only a fraction of the
+computational resources (Figure 3B). Unlike previous physically inspired models, because
+ICEBERG only samples the most relevant fragments from chemical space, it requires just over
+1 CPU second per spectrum.
+We hypothesize that the discrepancy in performance improvement between NPLIB1 and
+NIST20 may be partially explained by differences in the chemical spaces they cover. Many
+molecules within NPLIB1 are natural products with more complicated chemical scaffolds.
+19
+To characterize this, we analyzed the distributions for both the synthetic accessibility (SA)
+score38,40 (Figure 3C) and molecular weight (Figure 3D), both proxies for molecular com-
+plexity. In concordance with our hypothesis, we find that SA scores and molecular weight
+are substantially higher on NPLIB1 than NIST20: NPLIB1 has an average SA score of 3.75,
+compared to 3.01 for NIST20; the datasets have average molecular weights of 413 Da and
+317 Da respectively.
+Model explanations of observed peaks are consistent with chemistry
+intuition
+A B
+0 5 10
+Top k
+0.0
+0.2
+0.4
+0.6
+0.8
+Accuracy
+NPLIB1
+Random
+3DMolMS
+FixedVocab
+NEIMS (FFN)
+NEIMS (GNN)
+MassFormer
+SCARF
+ICEBERG
+0 5 10
+Top k
+0.0
+0.2
+0.4
+0.6
+0.8
+NIST20
+Figure 5: ICEBERG enables improved spectrum retrieval over other methods on both NPLIB1
+(A) and NIST20 (B) compared to other spectrum prediction models. Topk retrieval accu-
+racy is computed by ranking a list of 49 additional candidates by putative cosine similarity
+as predicted by the model and determining the fraction of times that the true molecule is
+within the firstk entries. A region around each line is shaded using an upper and lower
+bound of 1.96 times the standard error of the mean across training seeds.
+In addition to accurate predictions, a key benefit of simulating fragmentation events is
+that predictions are interpretable, even for highly complex molecules. Each predicted peak
+from ICEBERG is directly attributed to a fragment of the predicted molecule.
+By inspecting certain patterns and examples, we find expected broken bonds. Weaker
+bonds such as carbon-oxygen and carbon-nitrogen bonds tend to more reliably break, com-
+pared to carbon-carbon bonds and more complex ring breakages (Figure 4A). A second
+20
+strength of using fragmentation-based models can be seen in Figure 4B, where despite the
+heteroaromatic ring structures, our model is still able to correctly predict peak intensities
+by predicting a small number of carbon-nitrogen breakages.
+Further alignment can be seen within the intensity prediction module. BecauseICEBERG
+predicts multiple intensities for each substructure corresponding to hydrogen shifts, 2 peaks
+can be present when a single bond breaks. In fragmentation example of Figure 4A, the most
+intense peak is estimated at the mass shift of−1H from the original fragment, indicating
+that ICEBERG correctly recognizes the hydroxyl group will likely leave as neutral H2O and
+result in a hydrogen rearrangement. We include additional, randomly selected prediction
+examples in the Supporting Information.
+Fragmentation simulations lead to improved structural elucidation
+Wenextdemonstratethat ICEBERGimprovesthestructuralelucidationofunknownmolecules
+using reference libraries of model-predicted spectra. We design a retrospective evaluation
+using our labeled data to resemble the prospective task of spectrum lookup within libraries.
+Foreachtestspectrum, weextractupto 49“decoy” isomersfromPubChem 41 withthehighest
+Tanimoto similarity to the true molecular structure. The consideration of up to 50 isomers
+mimics the realistic elucidation setting, as an unknown spectrum can yield clues regarding
+certain properties of its source molecule (e.g., computed using MIST,22 CSI:FingerID,42
+or molecular networking39), which narrows the chemical space of possible molecules to a
+smaller, more relevant set. We predict the fragmentation spectrum for each isomer and, for
+each model, we rank these possible matches by their spectral similarity to the spectrum of
+interest and compute how often the true molecule is found within the topk ranked isomers
+for different values ofk.
+We find thatICEBERG improves upon the next best model by a margin of 9% accuracy (a
+nearly 46% relative improvement) intop 1 retrieval accuracy for the NPLIB1 dataset (Figure
+5A). Previous models with high spectrum prediction accuracies have struggled on this task
+21
+due to their poor ability to differentiate structurally similar isomers.12 Our structure-based
+model appears to excel in retrieval and may have out-of-domain robustness beneficial to this
+task.
+Whiletheeffectfor top1 retrieval accuracyonthe NIST20dataset isnot pronounced(i.e.,
+tied with MassFormer), ICEBERG outperforms the next best model by an absolute margin
+of over 5% (a 7.5% relative improvement) at top 10 accuracy (Figure 5B). These results
+underscore the real world utility ofICEBERG to identify unknown molecules of interest.
+To additionally evaluate the robustness of our model on the retrieval task in the real
+world, we further examine the accuracy of the highest performing methods to identify the
+correct molecule on the positive mode spectra from the recent Critical Assessment of Small
+Molecule Identification 2022 (CASMI22) competition.43 Because CASMI22 is a natural prod-
+ucts identification challenge, we test models trained on NPLIB1 and test the four models
+with the highest top 1 retrieval accuracy on NPLIB1:ICEBERG, MassFormer, NEIMS (FFN) ,
+and FixedVocab. We find, once again, thatICEBERG outperforms the other models tested on
+the retrieval task with 12.9% accuracy compared to the next bestNEIMS (FFN) method that
+achieves a top 1 accuracy of 8.6%. Absolute performance is low, but this is expected because:
+(1) we utilize a challenging PubChem44 retrieval library and (2) the retrieval accuracy for all
+entrants was relatively low; the entries submitted by the state of the art forward prediction
+model, CFM-ID,11 only correctly predicted 2D structures for 26 of the 303 entries (8.6%).
+Full results and comparison interpretations are discussed in the Supporting Information.
+Challenging, non-random data splits better explain retrieval perfor-
+mance
+The strong performance on the retrieval task, particularly for increasing values of k on
+NIST20, suggests that ICEBERG is able to generalize well to decoys not appearing in the
+training set and to account for how structural changes should affect fragmentation patterns.
+While encouraging, we observed only minor increases in cosine similarity accuracy when
+22
+Table 1: Comparing the accuracy of spectrum prediction on NIST20 using random (easier)
+or scaffold (harder) split.
+NIST20 Cosine sim.
+Random split Scaffold split
+CFM-ID 0.412 0.411
+3DMolMS 0.510 0.466
+FixedVocab 0.704 0.658
+NEIMS (FFN) 0.617 0.546
+NEIMS (GNN) 0.694 0.643
+MassFormer 0.721 0.682
+SCARF 0.726 0.669
+ICEBERG 0.727 0.699
+predicting spectra using NIST20 (Figure 3).
+To try to explain this apparent discrepancy, we reevaluate prediction accuracy on a more
+challenging dataset split. We retrain all models on the NIST20 utilizing a Murcko scaffold
+split of the data45 with smaller scaffold clusters (i.e., more unique compounds) placed in
+the test set. This split enforces that molecules in the test set will be more distant and less
+similar to the training set, probing the ability of each model to generalize in a more stringent
+setting than our previous random split.
+In the strict scaffold split evaluation, the improved accuracy ofICEBERG over existing
+models is more apparent (Table 1). We find that ICEBERG outperforms MassFormer and
+SCARF by 0.017 and 0.03– 2% and 4% improvements respectively. These results suggest that,
+particularly for standard libraries with more homogeneous molecules, more challenging scaf-
+fold split evaluations may yield performance metrics that better correlate with performance
+on the structural elucidation problem (retrieval).
+Discussion
+Wehaveproposedaphysically-groundedmassspectrumpredictionstrategyweterm ICEBERG.
+From a computational perspective, this integration of neural networks into fragmentation
+23
+prediction is enabled by (a) bootstrappingMAGMa to construct fragmentation trees on which
+our model is trained, (b) posing the tree generation step as a sequential prediction over
+atoms, and (c) predicting multiple intensities at each generated fragment with a second
+module in order to account for hydrogen rearrangements and isotopic peaks. By learning to
+generate fragmentation events,ICEBERG is able to accurately predict mass spectra, yielding
+especially strong improvements for natural product molecules under evaluation settings of
+both spectrum prediction and retrieval.
+ICEBERG establishes new state of the art performance for these tasks, yet there are some
+caveats we wish to highlight. First, while we learn to generate molecular substructures to
+explain each peak, there are no guarantees that they are the correct physical explanations
+given the number of potential equivalent-mass atom and bond rearrangements that could
+occur and our decision to trainICEBERG Score to maximize a vectorized cosine similarity.
+Second, while we achieve increased accuracy, this comes at a higher computational cost of
+roughly 1 CPU second per molecule, nearly an order of magnitude more than other neural
+approacheslike SCARF.12 Futureworkwillconsidermoreexplicitlyhowtosynergizefragment-
+and formula- prediction approaches to achieve higher accuracy and speed. In addition to
+modelarchitecturemodifications, weanticipatemodelaccuracyimprovementsfrommodeling
+other covariates such as collision energy, adduct switching, instrument type, and even jointly
+modeling MS/MS with other analytical chemistry measurements such as FTIR.46
+The discovery of unknown metabolites and molecules is rapidly expanding our knowledge
+of potential medical targets,47 the effects of environmental toxins,48 and the diversity of
+biosynthetically accessible chemical space.49 We envision exciting possibilities to apply our
+new model to expand the discovery of novel chemical matter from complex mixtures.
+24
+Data and Software A vailability
+All code to replicate experiments, train new models, and load pretrained models is avail-
+able at https://github.com/samgoldman97/ms-pred. Pretrained models are available for
+download or as workflows through the GNPS2 platform19 with an up-to-date link provided
+within the README file of our released GitHub code.
+Funding
+This work was supported by the Machine Learning for Pharmaceutical Discovery and Syn-
+thesis consortium. S.G. was additionally supported by the MIT-Takeda Fellowship program.
+Authors’ contributions
+S.G. and J.L. jointly wrote the software. S.G. conducted experiments. S.G. and C.W.C.
+conceptualized the project and wrote the manuscript. C.W.C supervised the work.
+Acknowledgement
+We thank John Bradshaw, Priyanka Raghavan, David Graff, Fanwang Meng, other members
+of the Coley Research Group, and Michael Murphy for helpful discussions, as well as Lucas
+Janson for feedback on earlier iterations of this idea. We thank Mingxun Wang for feedback
+and helpful suggestions regarding both the method and manuscript.
+Supporting Information A vailable
+The Supporting Information provides an extended description of results, including exact
+values in tables, an additional evaluation on the CASMI22 dataset, additional spectrum
+25
+prediction examples, further elaboration on the baselines we utilized, and hyperpameters
+tested.
+References
+(1) Wishart, D. S. Metabolomics for Investigating Physiological and Pathophysiological
+Processes. Physiol. Rev. 2019, 99, 1819–1875.
+(2) Szeremeta, M.; Pietrowska, K.; Niemcunowicz-Janica, A.; Kretowski, A.; Ci-
+borowski, M. Applications of Metabolomics in Forensic Toxicology and Forensic
+Medicine. Int. J. Mol. Sci. 2021, 22, 3010.
+(3) Bundy, J.G.; Davey, M.P.; Viant,M. R. Environmental metabolomics: a criticalreview
+and future perspectives.Metabolomics 2009, 5, 3–21.
+(4) Neumann, S.; Böcker, S. Computational mass spectrometry for metabolomics: identifi-
+cation of metabolites and small molecules.Anal. Bioanal. Chem. 2010, 398, 2779–2788.
+(5) Bittremieux, W.; Wang, M.; Dorrestein, P. C. The critical role that spectral libraries
+play in capturing the metabolomics community knowledge.Metabolomics 2022, 18, 94.
+(6) Kirkpatrick, P.; Ellis, C. Chemical space.Nature 2004, 432, 823–824.
+(7) Frewen, B. E.; Merrihew, G. E.; Wu, C. C.; Noble, W. S.; MacCoss, M. J. Analysis
+of Peptide MS/MS Spectra from Large-Scale Proteomics Experiments Using Spectrum
+Libraries. Anal. Chem. 2006, 78, 5678–5684.
+(8) Wolf, S.; Schmidt, S.; Müller-Hannemann, M.; Neumann, S. In silico fragmentation for
+computer assisted identification of metabolite mass spectra.BMC Bioinform. 2010,
+11, 148.
+(9) Ridder, L.; van der Hooft, J. J.; Verhoeven, S. Automatic compound annotation from
+mass spectrometry data using MAGMa.Mass Spectrom. 2014, 3, S0033.
+26
+(10) Allen, F.; Greiner, R.; Wishart, D. Competitive fragmentation modeling of ESI-MS/MS
+spectra for putative metabolite identification.Metabolomics 2015, 11, 98–110.
+(11) Wang, F.; Liigand, J.; Tian, S.; Arndt, D.; Greiner, R.; Wishart, D. S. CFM-ID 4.0:
+More Accurate ESI-MS/MS Spectral Prediction and Compound Identification.Anal.
+Chem. 2021, 93, 11692–11700.
+(12) Goldman, S.; Bradshaw, J.; Xin, J.; Coley, C. W. Prefix-Tree Decoding for Predicting
+Mass Spectra from Molecules. Advances in Neural Information Processing Systems 37.
+2023.
+(13) Murphy, M.; Jegelka, S.; Fraenkel, E.; Kind, T.; Healey, D.; Butler, T. Efficiently
+predicting high resolution mass spectra with graph neural networks. Proceedings of the
+40th International Conference on Machine Learning. 2023.
+(14) Wei, J. N.; Belanger, D.; Adams, R. P.; Sculley, D. Rapid Prediction of Elec-
+tron–Ionization Mass Spectrometry Using Neural Networks.ACS Cent. Sci. 2019, 5,
+700–708.
+(15) Zhu, H.; Liu, L.; Hassoun, S. Using Graph Neural Networks for Mass Spectrometry
+Prediction. Machine Learning for Molecules Workshop at NeurIPS. 2020.
+(16) Young, A.; Wang, B.; Röst, H. MassFormer: Tandem Mass Spectrum
+Prediction with Graph Transformers. arXiv preprint arXiv:2111.04824 2021,
+doi:10.48550/arXiv.2111.04824.
+(17) Hong, Y.; Li, S.; Welch, C. J.; Tichy, S.; Ye, Y.; Tang, H. 3DMolMS: prediction of tan-
+dem mass spectra from 3D molecular conformations.Bioinformatics 2023, 39, btad354.
+(18) Zhu, R. L.; Jonas, E. Rapid Approximate Subset-Based Spectra Prediction for Electron
+Ionization–Mass Spectrometry. Anal. Chem. 2023, 95, 2653–2663.
+27
+(19) Wang, M.; Carver, J. J.; Phelan, V. V.; Sanchez, L. M.; Garg, N.; Peng, Y.;
+Nguyen, D. D.; Watrous, J.; Kapono, C. A.; Luzzatto-Knaan, T. Sharing and commu-
+nity curation of mass spectrometry data with Global Natural Products Social Molecular
+Networking. Nat. Biotechnol. 2016, 34, 828–837.
+(20) Dührkop, K.; Nothias, L.-F.; Fleischauer, M.; Reher, R.; Ludwig, M.; Hoffmann, M. A.;
+Petras, D.; Gerwick, W. H.; Rousu, J.; Dorrestein, P. C. Systematic classification of un-
+known metabolites using high-resolution fragmentation mass spectra.Nat. Biotechnol.
+2021, 39, 462–471.
+(21) NIST, Tandem Mass Spectral Library. 2020.
+(22) Goldman, S.; Wohlwend, J.; Stražar, M.; Haroush, G.; Xavier, R. J.; Coley, C. W. An-
+notating metabolite mass spectra with domain-inspired chemical formula transformers.
+Nat. Mach. Intell. 2023, 5, 965–979.
+(23) Weisfeiler, B.; Leman, A. The reduction of a graph to canonical form and the algebra
+which appears therein.nti, Series 1968, 2, 12–16.
+(24) Li, Y.; Tarlow, D.; Brockschmidt, M.; Zemel, R. Gated Graph Sequence Neural Net-
+works. International Conference on Learning Representations. 2016.
+(25) Falcon, W.; The PyTorch Lightning team, PyTorch Lightning. 2019.
+(26) Kingma, D. P.; Ba, J. Adam: A Method for Stochastic Optimization. International
+Conference on Learning Representations. 2015.
+(27) Wang, M.; Zheng, D.; Ye, Z.; Gan, Q.; Li, M.; Song, X.; Zhou, J.; Ma, C.; Yu, L.;
+Gai, Y.; Xiao, T.; He, T.; Karypis, G.; Li, J.; Zhang, Z. Deep Graph Library: A
+Graph-Centric, Highly-Performant Package for Graph Neural Networks.arXiv preprint
+arXiv:1909.01315 2019, doi:10.48550/arXiv.1909.01315.
+28
+(28) Liaw, R.; Liang, E.; Nishihara, R.; Moritz, P.; Gonzalez, J. E.; Stoica, I. Tune: A Re-
+search Platform for Distributed Model Selection and Training. ICML AutoML Work-
+shop. 2018.
+(29) Demuth,W.; Karlovits,M.; Varmuza,K.Spectralsimilarityversusstructuralsimilarity:
+mass spectrometry. Anal. Chim. Acta 2004, 516, 75–85.
+(30) Huber, F.; Ridder, L.; Verhoeven, S.; Spaaks, J. H.; Diblen, F.; Rogers, S.; Hooft, J.
+J. J. v. d. Spec2Vec: Improved mass spectral similarity scoring through learning of
+structural relationships. PLoS Comput. Biol. 2021, 17, e1008724.
+(31) Li, Y.; Kind, T.; Folz, J.; Vaniya, A.; Mehta, S. S.; Fiehn, O. Spectral entropy outper-
+forms MS/MS dot product similarity for small-molecule compound identification.Nat.
+Methods 2021, 18, 1524–1531.
+(32) Bradshaw, J.; Paige, B.; Kusner, M. J.; Segler, M.; Hernández-Lobato, J. M. Barking
+up the right tree: an approach to search over molecule synthesis DAGs. Advances in
+Neural Information Processing Systems 33. 2020; pp 6852–6866.
+(33) Gao, W.; Mercado, R.; Coley, C. W. Amortized Tree Generation for Bottom-up Synthe-
+sis Planning and Synthesizable Molecular Design. International Conference on Learning
+Representations. 2021.
+(34) Demarque, D. P.; Crotti, A. E.; Vessecchi, R.; Lopes, J. L.; Lopes, N. P. Fragmenta-
+tion reactions using electrospray ionization mass spectrometry: an important tool for
+the structural elucidation and characterization of synthetic and natural products.Nat.
+Prod. Rep. 2016, 33, 432–455.
+(35) McLafferty, F. W. Mass Spectrometric Analysis. Molecular Rearrangements. Anal.
+Chem. 1959, 31, 82–87.
+29
+(36) Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones, L.; Gomez, A. N.; Kaiser, L.;
+Polosukhin, I. Attention Is All You Need. Advances in Neural Information Processing
+Systems 30. 2017; pp 5998–6008.
+(37) Lee, J.; Lee, Y.; Kim, J.; Kosiorek, A.; Choi, S.; Teh, Y. W. Set Transformer: A
+Framework for Attention-based Permutation-Invariant Neural Networks. Proceedings
+of the 36th International Conference on Machine Learning. 2019; pp 3744–3753.
+(38) Ertl, P.; Schuffenhauer, A. Estimation of synthetic accessibility score of drug-like
+molecules based on molecular complexity and fragment contributions.J. Cheminform.
+2009, 1, 1–11.
+(39) Nothias, L.-F.; Petras, D.; Schmid, R.; Dührkop, K.; Rainer, J.; Sarvepalli, A.; Prot-
+syuk,I.; Ernst,M.; Tsugawa,H.; Fleischauer,M.; Aicheler,F.; Aksenov,A.A.; Alka,O.;
+Allard, P.-M.; Barsch, A.; Cachet, X.; Caraballo-Rodriguez, A. M.; Da Silva, R. R.;
+Dang, T.; Garg, N.; Gauglitz, J. M.; Gurevich, A.; Isaac, G.; Jarmusch, A. K.; Ka-
+meník, Z.; Kang, K. B.; Kessler, N.; Koester, I.; Korf, A.; Le Gouellec, A.; Ludwig, M.;
+Martin H., C.; McCall, L.-I.; McSayles, J.; Meyer, S. W.; Mohimani, H.; Morsy, M.;
+Moyne, O.; Neumann, S.; Neuweger, H.; Nguyen, N. H.; Nothias-Esposito, M.;
+Paolini, J.; Phelan, V. V.; Pluskal, T.; Quinn, R. A.; Rogers, S.; Shrestha, B.; Tri-
+pathi, A.; van der Hooft, J. J. J.; Vargas, F.; Weldon, K. C.; Witting, M.; Yang, H.;
+Zhang, Z.; Zubeil, F.; Kohlbacher, O.; Böcker, S.; Alexandrov, T.; Bandeira, N.;
+Wang, M.; Dorrestein, P. C. Feature-based molecular networking in the GNPS analysis
+environment. Nat. Methods 2020, 17, 905–908.
+(40) Huang,K.; Fu,T.; Gao,W.; Zhao,Y.; Roohani,Y.; Leskovec,J.; Coley,C.W.; Xiao,C.;
+Sun, J.; Zitnik, M. Artificial intelligence foundation for therapeutic science.Nat. Chem.
+Biol. 2022, 18, 1033–1036.
+(41) Kim, S.; Thiessen, P. A.; Bolton, E. E.; Chen, J.; Fu, G.; Gindulyte, A.; Han, L.; He, J.;
+30
+He, S.; Shoemaker, B. A. PubChem Substance and Compound databases.Nucleic Acids
+Res. 2016, 44, D1202–D1213.
+(42) Dührkop, K.; Shen, H.; Meusel, M.; Rousu, J.; Böcker, S. Searching molecular structure
+databases with tandem mass spectra using CSI:FingerID.Proc. Natl. Acad. Sci. 2015,
+112, 12580–12585.
+(43) CASMI, Critical Assessment of Small Molecule Identification. 2022.
+(44) Kim, S.; Chen, J.; Cheng, T.; Gindulyte, A.; He, J.; He, S.; Li, Q.; Shoemaker, B. A.;
+Thiessen, P. A.; Yu, B. PubChem 2019 update: improved access to chemical data.
+Nucleic Acids Res. 2019, 47, D1102–D1109.
+(45) Yang, K.; Swanson, K.; Jin, W.; Coley, C.; Eiden, P.; Gao, H.; Guzman-Perez, A.;
+Hopper,T.; Kelley,B.; Mathea,M., etal.AnalyzingLearnedMolecularRepresentations
+for Property Prediction.J. Chem. Inf. Model. 2019, 59, 3370–3388.
+(46) Fine, J. A.; Rajasekar, A. A.; Jethava, K. P.; Chopra, G. Spectral deep learning for
+prediction and prospective validation of functional groups.Chem. Sci. 2020, 11, 4618–
+4630.
+(47) Quinn, R. A.; Melnik, A. V.; Vrbanac, A.; Fu, T.; Patras, K. A.; Christy, M. P.;
+Bodai, Z.; Belda-Ferre, P.; Tripathi, A.; Chung, L. K.; Downes, M.; Welch, R. D.;
+Quinn, M.; Humphrey, G.; Panitchpakdi, M.; Weldon, K. C.; Aksenov, A.; da Silva, R.;
+Avila-Pacheco, J.; Clish, C.; Bae, S.; Mallick, H.; Franzosa, E. A.; Lloyd-Price, J.;
+Bussell, R.; Thron, T.; Nelson, A. T.; Wang, M.; Leszczynski, E.; Vargas, F.;
+Gauglitz, J. M.; Meehan, M. J.; Gentry, E.; Arthur, T. D.; Komor, A. C.; Poulsen, O.;
+Boland, B. S.; Chang, J. T.; Sandborn, W. J.; Lim, M.; Garg, N.; Lumeng, J. C.;
+Xavier, R. J.; Kazmierczak, B. I.; Jain, R.; Egan, M.; Rhee, K. E.; Ferguson, D.;
+Raffatellu, M.; Vlamakis, H.; Haddad, G. G.; Siegel, D.; Huttenhower, C.; Mazma-
+nian, S. K.; Evans, R. M.; Nizet, V.; Knight, R.; Dorrestein, P. C. Global chemical
+31
+effects of the microbiome include new bile-acid conjugations.Nature 2020, 579, 123–
+129.
+(48) Tian, Z.; Zhao, H.; Peter, K. T.; Gonzalez, M.; Wetzel, J.; Wu, C.; Hu, X.; Prat, J.;
+Mudrock, E.; Hettinger, R.; Cortina, A. E.; Biswas, R. G.; Kock, F. V. C.; Soong, R.;
+Jenne,A.; Du,B.; Hou,F.; He,H.; Lundeen,R.; Gilbreath,A.; Sutton,R.; Scholz,N.L.;
+Davis, J. W.; Dodd, M. C.; Simpson, A.; McIntyre, J. K.; Kolodziej, E. P. A ubiquitous
+tire rubber–derived chemical induces acute mortality in coho salmon.Science 2021,
+371, 185–189.
+(49) Doroghazi, J. R.; Albright, J. C.; Goering, A. W.; Ju, K.-S.; Haines, R. R.;
+Tchalukov, K. A.; Labeda, D. P.; Kelleher, N. L.; Metcalf, W. W. A roadmap for nat-
+ural product discovery based on large-scale genomics and metabolomics.Nat. Chem.
+Biol. 2014, 10, 963–968.
+32
+TOC Graphic
+Intensity
+M/Z
+O
+O
+O
+O
+H2NO
+O
+H2N
+ICEBERG predicts tandem MS/MS from structure 
+Generate module 
+predicts fragmentations 
+Score module predicts 
+intensities for fragments
+33
+Supporting Information:
+Generating Molecular Fragmentation Graphs
+with Autoregressive Neural Networks
+Samuel Goldman,† Janet Li,‡ and Connor W. Coley∗,¶,§
+†Computational and Systems Biology, Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, USA
+‡Harvard College, Harvard University, Cambridge, Massachusetts 02138, USA
+¶Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge,
+Massachusetts 02139, USA
+§Department of Electrical Engineering and Computer Science, Massachusetts Institute of
+Technology, Cambridge, Massachusetts 02139, USA
+E-mail: *ccoley@mit.edu
+Contents
+1 Extended results S-2
+1.1 Independent data evaluation . . . . . . . . . . . . . . . . . . . . . . . . . . . S-2
+2 Graph neural network details S-7
+3 Baselines S-7
+4 Hyperparameters S-11
+S-1
+arXiv:2304.13136v2  [q-bio.QM]  8 Jan 2024
+Supporting Information A vailable
+S1 Extended results
+We include a complete set of all model results and metrics (i.e., Cosine similarity, coverage,
+validity, and time for 100 spectrum predictions) in Tables S2 and S3. Interestingly, while
+cosine similarity is higher for ICEBERG on nearly all evaluations, the fraction of peaks in
+the ground truth spectrum explained by the predicted spectrum,coverage, the fraction of
+peaks in the true spectrum explained by the predicted spectrum, does not increase. We posit
+that the more strict and rigid fragment-grounding causes our model to miss certain lower
+intensity peaks. In doing so, however, the model is able to maintain higher robustness to
+out-of-distribution molecules.
+We note that not all predicted fragments contain valid molecular formula, as a very
+small fraction of predicted fragments fail the ring double bond equivalent (RDBE) molecular
+formula testS1 when hydrogen shifts are considered.
+Full results for retrieval are shown for NIST20 and NPLIB1 and in Tables S4 and S5
+respectively.
+S1.1 Independent data evaluation
+To further validate our models and inter-model comparison, we evaluatedICEBERG on an
+independent challenge dataset. We selected the spectra utilized in the Critical Assessment
+of Small Molecule Identification 2022 (CASMI22) competition,S2 which contains a collection
+of 304 positive mode tandem mass spectra, as well as negative mode spectra that we do not
+consider herein. This challenge dataset was released after the compilation of all training data
+utilized for our models, so it reflects a realistic evaluation of our models trained on either
+NPLIB1 or NIST20.
+We extract tandem mass spectra from the provided spectral data as described detailed in
+Goldman et al.S3 and further filter the data by removing a single spectrum with a precursor
+S-2
+mass >1,500 Da. To probe model retrieval accuracy on the remaining 303 challenge spectra,
+we compose a database of candidate molecules including the set of all isomers from the Pub-
+Chem databaseS4 for each challenge molecule. We note this assumes the correct identification
+of the precursor formula for each spectrum, which in actuality was achievable with >85%
+accuracy in the contest. The resulting candidate database includes 268 unique formulae and
+478,201 unique molecular candidates, an average of 1,784 candidates per formula. Most con-
+testant entrants hand-crafted retrieval libraries for molecules they anticipated the CASMI
+competition organizers would utilize (natural products datasets, bioactive compounds, etc.).
+We emphasize that this decision may lead to our retrospective library selection conservatively
+underestimating our model’s retrieval performance compared to other contest submissions.
+We evaluate our models on three different criteria: cosine similarity, top 1 retrieval
+accuracy, and the average Tanimoto similarity between the true molecule and our model’s
+retrieved candidate. Because CASMI22 is organized by natural product scientists, we use
+models that we trained on the NPLIB1, rather than NIST20, and compareICEBERG against
+the subset of models with the highest retrieval performance for comparison. ICEBERG is
+still the most performant method with a top 1 retrieval accuracy of 12.9% (Table S1),
+outperformingothermethodsoncosinesimilarityandthetworetrievalmetrics. Curiously, all
+cosine similarities reported are far lower than in the standard test set evaluation, indicating
+that the CASMI22 dataset is challenging and that models may suffer from out-of-distribution
+bias. While comparing against other contest submissions is difficult due to the variance in
+the formula annotation accuracy, retrieval library construction, and manual post-processing,
+our retrieval accuracy is able to correctly identify >4% more of the tested spectra than
+CFM-ID, the most widely adopted spectrum prediction strategy.
+S-3
+Table S1: Independent CASMI 2022 dataset evaluation. A sub-selection of single models
+trained on the NPLIB1 training dataset were re-evaluated on the CASMI22 dataset. Cosine
+similarity is computed on the 303 extracted CASMI22 positive mode spectra under 1,500
+Da. Top 1 retrieval is computed using a PubChem retrieval dataset. The Top 1 Tanimoto
+similarity is computed between the retrieved molecule and the true molecule for each spec-
+trum with a radius 2 Morgan fingerprint computed with RDKit.S5 The highest value in each
+column is typeset in bold.
+† The CFM-ID retrieval accuracy is computed directly from theCFM-ID CASMI22 submis-
+sion which does not assume correct adducts but does customize the retrieval database to a
+smaller, more biased subset of candidates.
+Cosine sim. Top 1 retrieval accuracy Top 1 Tanimoto similarity
+Random - 1.3% 0.196
+CFM-ID 0.248 8.6% † -
+FixedVocab 0.409 7.3% 0.324
+NEIMS (FFN) 0.361 8.6% 0.333
+MassFormer 0.415 7.6% 0.317
+ICEBERG 0.417 12.9% 0.378
+Table S2: Spectra prediction accuracy on NIST20, and NIST20 (scaffold split) forCFM-ID, S6
+3DMolMS, S7 FixedVocab, S8 NEIMS (FFN) , S9 NEIMS (GNN) , S10 MassFormer, S11 SCARF, S12 and
+ICEBERG. Cosine similarity is calculated at a bin resolution of0.1 m/z; Coverage indicates
+the fraction of peaks in the ground truth spectrum explained by the predicted spectrum on
+average; Valid indicates the fraction of predicted peaks that can be explained as a subset
+of the precursor molecule’s chemical formula (filtered to formulae with ring-double bond
+equivalents of greater or equal to zero); Time (s) indicates the number of seconds required
+to predict 100 random spectra from NIST20 on a single CPU including the time to load the
+model. Values are shown± 1.96 times the standard error of the mean across three random
+seeds for the same random split. Scaffold split experiments are only repeated once and shown
+without a corresponding interval. The best value in each column is typeset in bold.
+Dataset NIST20 (Random split) NIST20 (Scaffold split)
+Metric Cosine sim. Coverage Valid Cosine sim. Coverage Valid Time (s)
+CFM-ID 0.412± 0.000 0 .278± 0.000 1.00 ± 0.000 0.411 0 .272 1.00 1114.7
+3DMolMS 0.510± 0.001 0 .734± 0.002 0 .94± 0.002 0 .466 0 .707 0 .97 3.5
+FixedVocab 0.704± 0.001 0 .788± 0.001 1.00 ± 0.000 0.658 0 .785 1.00 5.5
+NEIMS (FFN) 0.617± 0.001 0 .746± 0.002 0 .95± 0.001 0 .546 0 .717 0 .96 3 .9
+NEIMS (GNN) 0.694± 0.001 0 .780± 0.001 0 .95± 0.001 0 .643 0 .766 0 .97 4 .9
+MassFormer 0.721± 0.004 0 .790± 0.006 0 .93± 0.006 0 .682 0 .789 0 .96 7 .7
+SCARF 0.726± 0.002 0.807 ± 0.001 1 .00 ± 0.000 0.669 0.807 1 .00 21.1
+ICEBERG 0.727 ± 0.002 0.754± 0.002 1.00 ± 0.000 0 .699 0.771 1.00 82.2
+S-4
+A B
+C D
+E F
+G H
+I J
+100 200 300 400
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+50 100 150 200
+M/Z
+1.0
+0.5
+0.0
+0.5
+1.0
+Intensity
+100 200 300 400 500 600 700
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+100 150 200 250 300 350 400
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+100 200 300 400 500 600 700
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+100 150 200 250 300 350
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+80 100 120 140 160 180 200
+M/Z
+1.5
+1.0
+0.5
+0.0
+0.5
+1.0
+1.5
+Intensity
+ICEBERG
+True
+ICEBERG
+True
+ICEBERG
+True
+ICEBERG
+True
+ICEBERG
+True
+50 100 150 200 250
+M/Z
+1.0
+0.5
+0.0
+0.5
+1.0
+Intensity
+100 200 300 400 500 600
+M/Z
+1.0
+0.5
+0.0
+0.5
+1.0
+Intensity
+50 100 150 200 250 300
+M/Z
+1.0
+0.5
+0.0
+0.5
+1.0
+Intensity
+Figure S1: Additional ICEBERG prediction examples. ICEBERG (trained on NPLIB1) is uti-
+lized to make predictions on a randomly sampled set of 6 test set examples from NPLIB1
+(A-F) and also 4 randomly selected examples from CASMI22 (G-J). Predictions are shown
+in the top panel with true target spectra shown below. Test molecules are illustrated inset.
+S-5
+Table S3: Spectra prediction accuracy on NPLIB1 forCFM-ID, S6 3DMolMS, S7 FixedVocab, S8
+NEIMS (FFN) , S9 NEIMS (GNN) , S10 MassFormer, S11 SCARF, S12 and ICEBERG. Cosine similarity
+is calculated at a bin resolution of0.1 m/z; Coverage indicates the fraction of peaks in the
+ground truth spectrum explained by the predicted spectrum on average; Valid indicates the
+fraction of predicted peaks that can be explained as a subset of the precursor molecule’s
+chemical formula (filtered to formulae with ring-double bond equivalents of greater or equal
+to zero). Values are shown± 1.96 times the standard error of the mean across three random
+seeds on a single test split. The best value in each column is typeset in bold.
+Dataset NPLIB1
+Metric Cosine sim. Coverage Valid
+CFM-ID 0.377± 0.000 0 .235± 0.000 1.00 ± 0.000
+3DMolMS 0.394± 0.004 0 .507± 0.001 0 .92± 0.001
+FixedVocab 0.568± 0.003 0 .563± 0.002 1.00 ± 0.000
+NEIMS (FFN) 0.491± 0.003 0 .524± 0.002 0 .95± 0.001
+NEIMS (GNN) 0.521± 0.003 0 .547± 0.005 0 .94± 0.001
+MassFormer 0.568± 0.004 0.573 ± 0.009 0.95± 0.003
+SCARF 0.536± 0.013 0 .552± 0.016 1.00 ± 0.000
+ICEBERG 0.627 ± 0.002 0.549± 0.003 1.00 ± 0.000
+Table S4: NIST20 spectra retrieval top k accuracy for different values ofk,± 1.96 times the
+standard error of the mean across three random seeds on the same test set.
+Top k 1 2 3 4 5 8 10
+Random 0.026± 0.001 0 .052± 0.001 0 .076± 0.002 0 .098± 0.001 0 .120± 0.001 0 .189± 0.003 0 .233± 0.004
+3DMolMS 0.055± 0.003 0 .105± 0.000 0 .146± 0.005 0 .185± 0.007 0 .225± 0.009 0 .332± 0.005 0 .394± 0.008
+FixedVocab 0.172± 0.004 0 .304± 0.004 0 .399± 0.002 0 .466± 0.007 0 .522± 0.012 0 .638± 0.009 0 .688± 0.006
+NEIMS (FFN) 0.105± 0.003 0 .243± 0.012 0 .324± 0.013 0 .387± 0.011 0 .440± 0.014 0 .549± 0.010 0 .607± 0.005
+NEIMS (GNN) 0.175± 0.005 0 .305± 0.003 0 .398± 0.002 0 .462± 0.004 0 .515± 0.005 0 .632± 0.007 0 .687± 0.005
+MassFormer 0.191 ± 0.008 0.328± 0.006 0 .422± 0.003 0 .491± 0.002 0 .550± 0.005 0 .662± 0.005 0 .716± 0.003
+SCARF 0.187± 0.008 0 .321± 0.011 0 .417± 0.007 0 .486± 0.008 0 .541± 0.009 0 .652± 0.008 0 .708± 0.009
+ICEBERG 0.189± 0.012 0.375 ± 0.005 0 .489 ± 0.007 0 .567 ± 0.005 0 .623 ± 0.004 0 .725 ± 0.003 0 .770 ± 0.002
+Table S5: NPLIB1 spectra retrieval top k accuracy for different values ofk,± 1.96 times
+the standard error of the mean across three random seeds on the same test set.
+Top k 1 2 3 4 5 8 10
+Random 0.033± 0.002 0 .061± 0.010 0 .092± 0.007 0 .118± 0.005 0 .141± 0.012 0 .216± 0.012 0 .258± 0.012
+3DMolMS 0.087± 0.003 0 .159± 0.020 0 .218± 0.008 0 .268± 0.012 0 .317± 0.011 0 .427± 0.016 0 .488± 0.010
+FixedVocab 0.193± 0.007 0 .314± 0.008 0 .390± 0.005 0 .448± 0.010 0 .492± 0.003 0 .587± 0.010 0 .635± 0.011
+NEIMS (FFN) 0.195± 0.005 0 .313± 0.005 0 .388± 0.006 0 .447± 0.012 0 .488± 0.003 0 .585± 0.014 0 .624± 0.020
+NEIMS (GNN) 0.174± 0.014 0 .285± 0.008 0 .362± 0.004 0 .422± 0.001 0 .471± 0.003 0 .586± 0.013 0 .640± 0.010
+MassFormer 0.198± 0.003 0 .308± 0.004 0 .389± 0.001 0 .454± 0.004 0 .496± 0.012 0 .599± 0.012 0 .653± 0.005
+SCARF 0.135± 0.014 0 .242± 0.001 0 .320± 0.003 0 .389± 0.008 0 .444± 0.004 0 .569± 0.003 0 .630± 0.015
+ICEBERG 0.290 ± 0.008 0 .439 ± 0.013 0 .528 ± 0.010 0 .587 ± 0.009 0 .636 ± 0.004 0 .723 ± 0.001 0 .764 ± 0.005
+S-6
+S2 Graph neural network details
+ICEBERG relies upon graph neural network embeddings of the moleculeGNN(M). Given
+the widespread use and descriptions of such models, we refer the reader to Li et al. for a
+description of the gated graph neural networks we employ. We utilize the DGL libraryS14 to
+implement and featurize molecular graphs. Because our fragmentation method relies upon
+iteratively removing atoms, we often have molecular fragments with incomplete valence shells
+that would not be parsed by RDKit.S5 As such, we opt for a more minimal set of atom and
+bond features described in Table S7 .
+Table S6: Dataset details.
+Name # Spectra # Molecules Description
+NIST20 35,129 24,403 Standards library
+NPLIB1 10,709 8,533 Natural products from GNPS S15
+Table S7: Graph neural network (GNN) atom features.
+Name Description
+Element type one-hot encoding of the element type
+Hydrogen number one-hot encoding the number of hydrogens on each atom
+Adduct type one-hot encoding of the ionization adduct
+Random walk embed steps positional encodings of the nodes computed using DGL
+S3 Baselines
+We compare ICEBERG to three classes of spectrum prediction models: binned prediction
+models that encode a molecule and output a single fixed length discretized spectrum vector,
+fragmentation prediction models such asICEBERG that directly learn to fragment and break
+the input molecule, and formula prediction models that predict chemical formula peaks
+and corresponding intensities. We briefly describe each model used below, emphasizing the
+novelty of their contribution.
+S-7
+For all baselines that utilize 2D graph neural networks that are not pretrained (i.e,.
+NEIMS (GNN) ), SCARF, andFixedVocab), we utilize a common graph neural network base
+architecture consisting of gated graph neural network message passing steps as inICEBERG
+(see Graph neural network details).S13 Baseline GNNs are provided with a wide range of
+atom features including element type, the degree of each atom, hybridization type, formal
+charge, a binary flag denoting whether the atom is in a ring-system, atomic mass as a floating
+point value, a one hot encoding of the chiral tag, the type of the atom, and a random walk
+embedding step. All models tested are provided the same set of experimental covariates: a
+onehot vector corresponding to the adduct type. For graph models, this is concatened as an
+atom level feature, whereas in other models, it is concatenated to the intermediate hidden
+representation.
+Binned prediction
+1. NEIMS (FFN) : Wei et al. encode a fingerprint representation of a molecule with a feed
+forward neural network and predict a fixed dimensional discrete binned output vector.
+In addition to predicting a fragment vector, Wei et al. also predict the mass differences
+from the precursor ion as an independent vector and combine the two outputs with a
+learned, weighted sum. Originally trained on EI mass spectrometry, we replicate this
+approach on our datasets of ESI mass spectra.
+Key hyperparameters are whether or not to use mass differences in the output pre-
+diction, the number of feed forward layers, hidden size, and dropout between hidden
+layers.
+2. NEIMS (GNN) ): Zhu et al. extend the NEIMS model to utilize graph neural networks
+instead of feed forward networks applied to fingerprints. We utilize our default graph
+neural network layer scheme described above, emphasizing that the novelty of this
+contribution is to switch to a 2D graph neural network encoder from fingerprints. In
+S-8
+such a case, we also concatenate model covariates (i.e., adduct one hot) as additional
+atom level features to the GNN).
+Key hyperparameters are whether or not to use mass differences in the output predic-
+tion, the number of GNN layers, the number of random walk embedding steps (i.e.,
+positional encodings of the nodes computed using DGL), and dropout between hidden
+layers.
+3. MassFormer: Youngetal. furtherextendthe NEIMS (GNN) )approachusinga pretrained
+graph neural network model, the Graphormer.S16 Rather than train the model entirely
+fromscratchtomakeamassandmassdifferencepredictionvector, MassFormerencodes
+molecules using a large, 48M parameter model previously pretrained. OurMassFormer
+implementationreplacestheGNNwiththeGraphormermodel. Covariates(i.e., adduct
+type one hots) are concatenated after the Graphormer encoding. We utilize the same
+scheme of Young et al. to use the pretrained Graphomer Version 2, reinitialize all 12
+intermediate Graphormer layers, reinitialize the layer norm, and keep only the learned
+token embeddings. We allow this model to predict mass differences as in NEIMS by
+default.
+Key hyperparameters are the number of feed forward layers after the Graphormer
+encoding, the dropout between these layers, and the hidden dimension size.
+4. 3DMolMS: Hong et al. replace the 2D graph neural network architecture with a 3D
+point cloud graph neural network to predict binned spectra. However, they do not
+predict mass differences as in MassFormer or NEIMS, substantially reducing model
+performance in our reimplementation setting.
+Key hyperparameters are the hidden size of their encoder, number of layers in the 3D
+neural network, number of top layers after the 3D neural network, and the number of
+neighbors to utilize for message passing in 3D space.
+S-9
+Fragmentation prediction
+1. CFM-ID: Wang et al. parametrize a Markov model of fragmentation by first combi-
+natorially fragmenting a molecule of interest then subsequently estimating transition
+probabilities across the fragmentation graph to predict peak intensities. We utilize the
+pretrained version 4 available for public release, rather than retraining the model.
+Formula prediction
+1. FixedVocab: Murphy et al. recently introducedGRAFF-MS, a model that predicts spec-
+tra at the level of chemical formula by pre-defining a list of10, 000 common chemical
+formula and chemical formula differences from the precursor. They encode the in-
+put molecule with a graph neural network and predict intensities at each predefined
+chemical formula. Due to unavailability of source code, we define a variation of their
+model we term FixedVocab that predicts intensities at a library of the most popular
+formula fragments and formula losses in the training dataset. We utilize a cosine sim-
+ilarity loss function to train the model. We revise the name of this model to delineate
+the differences in loss function and consideration of isotopes and adducts between our
+implementations.
+Key hyperparameters are the hidden size of the model, number of graph neural network
+layers, random walk embedding steps, graph pooling, and the size of the fixed-length
+formula vocabulary.
+An earlier version of this work under-reported the accuracy of this model, as the
+implementation did not allow for the prediction of precursor compound masses.
+2. SCARF: Goldman et al. use a similar strategy to Murphy et al., but rather than use
+a fixed vocabulary, they autoregressively generate formula candidates as a prefix tree
+first with the SCARF-Thread model. This smaller vocabulary size conditioned on the
+input molecule enables them to deploy a second neural network modelSCARF-Weave to
+S-10
+explicitly encode the candidate formulae with a neural network alongside the molecule
+in a second modeling step to predict intensities.
+We refer the reader toS12 for a complete description of hyperparameters, as this model
+is used without changes from the original work.
+S4 Hyperparameters
+To fairly compare the various methods, we apply a rigorous hyperparameter optimization
+scheme. We use RayTuneS18 with OptunaS19 and an ASHAScheduler to identify hyperpa-
+rameters from a grid set of options. All models were allotted 50 different hyperoptimization
+trials on a10, 000 spectra subset of NIST20. Hyperparameter descriptions forICEBERG are
+provided in Table S8. Selected baseline andICEBERG hyperparameters are defined in Tables
+S10 and S9 respectively. When possible, we recycle parameters as selected in Goldman et al.,
+as the hyperparameter optimization scheme is equivalent.
+Table S8: Hyperparameter descriptions forICEBERG.
+Name Model ( Generate or Score) Description
+learning rate both optimizer learning rate
+learning rate decay (5, 000 steps) both step-wise learning rate decay every 5,000 model weight update steps
+dropout both model dropout applied in-between linear hidden layers
+hidden size both number of hidden layers
+gnn layers both number of graph neural network layers to encode molecules and fragments
+mlp layers both number of feed forward layers to encode concatenated representations
+transformer layers Score number of set transformer attention layers after mlp encoding
+batch size both number of spectra to include in each training batch
+weight decay both optimizer weight decay
+random walk embed steps Generate number of random walk embedding steps to for graph neural network atom features
+graph pooling both how to combine atom features into a single representation
+bin size Score binned spectrum resolution spacing from0 Da to 1, 500 Da
+S-11
+Table S9: ICEBERG Generate and Score hyperparameter grid and selected values.
+Model Parameter Grid Value
+ICEBERG Generate learning rate [1e− 4, 1e− 3] 0 .00099
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.7214
+dropout {0.1, 0.2, 0.3} 0.2
+hidden size {128, 256, 512} 512
+mlp layers - 1
+gnn layers [1, 6] 6
+batch size {8, 16, 32, 64} 32
+weight decay {0, 1e− 6, 1e− 7} 0
+random walk embed steps [0,20] 14
+graph pooling {mean, attention} mean
+ICEBERG Score learning rate [1e− 4, 1e− 3] 0 .00074
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.825
+dropout {0.1, 0.2, 0.3} 0.1
+hidden size {128, 256, 512} 256
+mlp layers [0, 3] 1
+gnn layers [1, 6] 4
+transformer layers [0, 3] 3
+batch size {8, 16, 32,} 32
+weight decay {0, 1e− 6, 1e− 7} 1e− 7
+bin size - 0.1
+graph pooling {mean, attention} mean
+Table S10: Baseline hyperparameters.
+Model Parameter Grid Value
+NEIMS (FFN) learning rate [1e− 4, 1e− 3] 0 .00087
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.722
+dropout {0.0, 0.1, 0.2, 0.3} 0.0
+hidden size, d {64, 128, 256, 512} 512
+layers, l {1, 2, 3} 2
+batch size {16, 32, 64, 128} 128
+weight decay {0, 1e− 6, 1e− 7} 0
+use differences {True, False} True
+bin size - 0.1
+NEIMS (GNN) ) learning rate [1e− 4, 1e− 3] 0 .00052
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.767
+dropout {0.0, 0.1, 0.2, 0.3} 0.0
+hidden size, d {64, 128, 256, 512} 512
+layers, l [1, 6] 4
+batch size {16, 32, 64} 64
+S-12
+Table S10 – continued from previous page
+Model Parameter Grid Value
+weight decay {0, 1e− 6, 1e− 7} 1e− 7
+use differences {True, False} True
+bin size - 0.1
+random walk embed steps [0,20] 19
+graph pooling {mean, attention} mean
+3DMolMS learning rate [1e− 4, 1e− 3] 0 .00074
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.86
+dropout {0.0, 0.1, 0.2, 0.3} 0.3
+hidden size, d {64, 128, 256, 512} 256
+layers, l [1, 6] 2
+top layers [1, 3] 2
+neighbors, k [3, 6] 5
+batch size {16, 32, 64} 16
+weight decay {0, 1e− 6, 1e− 7} 1e− 6
+bin size - 0.1
+MassFormer learning rate [1e− 4, 1e− 3] 0 .00014
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.85
+feed forward dropout {0.0, 0.1, 0.2, 0.3, 0.4, 0.5} 0.1
+feed forward hidden size,d {64, 128, 256, 512, 1024} 1024
+feed forward layers,l [1, 6] 1
+batch size {32, 64, 128} 128
+weight decay {0, 1e− 6, 1e− 7} 1e− 7
+bin size - 0.1
+FixedVocab learning rate [1e− 4, 1e− 3] 0 .00018
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.92
+dropout {0.0, 0.1, 0.2, 0.3} 0.3
+hidden size, d {64, 128, 256, 512} 512
+layers, l [1, 6] 6
+batch size {16, 32, 64} 64
+weight decay {0, 1e− 6, 1e− 7} 1e− 6
+bin size - 0.1
+random walk embed steps [0,20] 11
+graph pooling {mean, attention} mean
+formula library size {1000, 5000, 10000, 25000, 50000} 5000
+SCARF-Thread learning rate [1e− 4, 1e− 3] 0 .000577
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.894
+dropout {0.0, 0.1, 0.2, 0.3} 0.3
+hidden size, d {128, 256, 512} 512
+mlp layers, l1 [1, 3] 2
+gnn layers, l2 [1, 6] 4
+batch size {8, 16, 32, 64} 16
+weight decay {0, 1e− 6, 1e− 7} 1e− 6
+use differences {True, False} True
+S-13
+Table S10 – continued from previous page
+Model Parameter Grid Value
+random walk embed steps [0,20] 20
+graph pooling {mean, attention} mean
+SCARF-Weave learning rate [1e− 4, 1e− 3] 0 .00031
+learning rate decay (5, 000 steps) [0.7, 1.0] 0.962
+dropout {0.0, 0.1, 0.2, 0.3} 0.2
+hidden size, d {128, 256, 512} 512
+mlp layers, l1 [1, 3] 2
+gnn layers, l2 [1, 6] 3
+transformer layers, l3 [0, 3] 2
+batch size {4, 8, 16, 32, 64} 32
+weight decay {0, 1e− 6, 1e− 7} 0
+bin size - 0.1
+random walk embed steps [0,20] 7
+graph pooling {mean, attention} attention
+References
+(S1) Pretsch, E.; Bühlmann, P.; Affolter, C.; Pretsch, E.; Bhuhlmann, P.; Affolter, C.
+Structure determination of organic compounds ; Springer, 2000.
+(S2) CASMI, Critical Assessment of Small Molecule Identification. 2022.
+(S3) Goldman, S.; Xin, J.; Provenzano, J.; Coley, C. W. MIST-CF: Chemical Formula
+Inference from Tandem Mass Spectra.J. Chem. Inf. Model. 2023,
+(S4) Kim, S.; Chen, J.; Cheng, T.; Gindulyte, A.; He, J.; He, S.; Li, Q.; Shoemaker, B. A.;
+Thiessen, P. A.; Yu, B. PubChem 2019 update: improved access to chemical data.
+Nucleic Acids Res. 2019, 47, D1102–D1109.
+(S5) Landrum, G. RDKit: Open-source cheminformatics software. 2016.
+(S6) Allen, F.; Greiner, R.; Wishart, D. Competitive fragmentation modeling of ESI-
+MS/MS spectra for putative metabolite identification.Metabolomics 2015, 11, 98–
+110.
+S-14
+(S7) Hong, Y.; Li, S.; Welch, C. J.; Tichy, S.; Ye, Y.; Tang, H. 3DMolMS: prediction of
+tandem mass spectra from 3D molecular conformations. Bioinformatics 2023, 39,
+btad354.
+(S8) Murphy, M.; Jegelka, S.; Fraenkel, E.; Kind, T.; Healey, D.; Butler, T. Efficiently
+predicting high resolution mass spectra with graph neural networks. Proceedings of
+the 40th International Conference on Machine Learning. 2023.
+(S9) Wei, J. N.; Belanger, D.; Adams, R. P.; Sculley, D. Rapid Prediction of Elec-
+tron–Ionization Mass Spectrometry Using Neural Networks. ACS Cent. Sci. 2019,
+5, 700–708.
+(S10) Zhu, H.; Liu, L.; Hassoun, S. Using Graph Neural Networks for Mass Spectrometry
+Prediction. Machine Learning for Molecules Workshop at NeurIPS. 2020.
+(S11) Young, A.; Wang, B.; Röst, H. MassFormer: Tandem Mass Spectrum
+Prediction with Graph Transformers. arXiv preprint arXiv:2111.04824 2021,
+doi:10.48550/arXiv.2111.04824.
+(S12) Goldman, S.; Bradshaw, J.; Xin, J.; Coley, C. W. Prefix-Tree Decoding for Predicting
+Mass Spectra from Molecules. Advances in Neural Information Processing Systems 37.
+2023.
+(S13) Li, Y.; Tarlow, D.; Brockschmidt, M.; Zemel, R. Gated Graph Sequence Neural Net-
+works. International Conference on Learning Representations. 2016.
+(S14) Wang, M.; Zheng, D.; Ye, Z.; Gan, Q.; Li, M.; Song, X.; Zhou, J.; Ma, C.; Yu, L.;
+Gai, Y.; Xiao, T.; He, T.; Karypis, G.; Li, J.; Zhang, Z. Deep Graph Library:
+A Graph-Centric, Highly-Performant Package for Graph Neural Networks. arXiv
+preprint arXiv:1909.01315 2019, doi:10.48550/arXiv.1909.01315.
+S-15
+(S15) Wang, M.; Carver, J. J.; Phelan, V. V.; Sanchez, L. M.; Garg, N.; Peng, Y.;
+Nguyen, D. D.; Watrous, J.; Kapono, C. A.; Luzzatto-Knaan, T. Sharing and commu-
+nity curation of mass spectrometry data with Global Natural Products Social Molec-
+ular Networking. Nat. Biotechnol. 2016, 34, 828–837.
+(S16) Ying, C.; Cai, T.; Luo, S.; Zheng, S.; Ke, G.; He, D.; Shen, Y.; Liu, T.-Y. Do Trans-
+formers Really Perform Bad for Graph Representation? Advances in Neural Informa-
+tion Processing Systems 34. 2021; pp 28877–28888.
+(S17) Wang, F.; Liigand, J.; Tian, S.; Arndt, D.; Greiner, R.; Wishart, D. S. CFM-ID 4.0:
+More Accurate ESI-MS/MS Spectral Prediction and Compound Identification.Anal.
+Chem. 2021, 93, 11692–11700.
+(S18) Liaw, R.; Liang, E.; Nishihara, R.; Moritz, P.; Gonzalez, J. E.; Stoica, I. Tune: A Re-
+search Platform for Distributed Model Selection and Training. ICML AutoML Work-
+shop. 2018.
+(S19) Akiba, T.; Sano, S.; Yanase, T.; Ohta, T.; Koyama, M. Optuna: A Next-generation
+Hyperparameter Optimization Framework. Proceedings of the 25th ACM SIGKDD
+international conference on knowledge discovery & data mining. 2019; pp 2623–2631.
+S-16

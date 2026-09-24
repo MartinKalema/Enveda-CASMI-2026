@@ -1,0 +1,772 @@
+                                                                                                                                Articles
+                                                                                                       https://doi.org/10.1038/s41592-022-01486-3
+
+
+
+
+MSNovelist: de novo structure generation from
+mass spectra
+Michael A. Stravs             1,3
+                                 , Kai Dührkop           2
+                                                          , Sebastian Böcker            2
+                                                                                            and Nicola Zamboni              1   ✉
+
+Current methods for structure elucidation of small molecules rely on finding similarity with spectra of known compounds, but
+do not predict structures de novo for unknown compound classes. We present MSNovelist, which combines fingerprint predic-
+tion with an encoder–decoder neural network to generate structures de novo solely from tandem mass spectrometry (MS2)
+spectra. In an evaluation with 3,863 MS2 spectra from the Global Natural Product Social Molecular Networking site, MSNovelist
+predicted 25% of structures correctly on first rank, retrieved 45% of structures overall and reproduced 61% of correct database
+annotations, without having ever seen the structure in the training phase. Similarly, for the CASMI 2016 challenge, MSNovelist
+correctly predicted 26% and retrieved 57% of structures, recovering 64% of correct database annotations. Finally, we illustrate
+the application of MSNovelist in a bryophyte MS2 dataset, in which de novo structure prediction substantially outscored the
+best database candidate for seven spectra. MSNovelist is ideally suited to complement library-based annotation in the case of
+poorly represented analyte classes and novel compounds.
+
+
+
+
+A
+         key challenge in mass spectrometry, particularly in metabo-           is, SMILES20. Similarly, Segler et al.21 used an RNN sequence model
+         lomics and non-targeted analysis, is feature annotation, or           to generate molecules. Numerous variations of these models gener-
+         the assignment of chemical identity to unknown signals                ate molecules in the form of SMILES, SMILES-related representa-
+from their exact mass and fragment (tandem mass spectrometry                   tions, or directly as graphs, achieving specific chemical properties
+(MS2)) spectra. Compounds may be identified by either searching                by fine-tuning, optimization in latent space, or reinforcement learn-
+against mass spectral libraries from synthetic standards or searching          ing (see, for example, refs. 22–24).
+against data inferred from structures (so-called ‘in silico methods’).             For mass spectrometry, two recent approaches have used mol-
+Both approaches have limitations. Matching against experimen-                  ecule generation to generate candidate libraries based on a target
+tal libraries1,2 is limited by the actual availability of standards and        collision cross-section (CCS) and mass25, or for a specific com-
+curated spectral data that poorly represents the diversity and com-            pound class26. However, these methods do not take the structural
+plexity of the chemical space. Searching against structural databases          information from MS2 spectra into account, and therefore only pro-
+(for example, PubChem3 or KEGG4) includes nontrivial simulation                vide a list of candidates that needs further filtering. If information
+of spectra5 or fragmentation patterns6 for candidate compounds, or             from MS2 spectra could be used directly for targeted structure gen-
+the prediction of high-dimensional molecular descriptors for spec-             eration, this would bypass the combinatorial bottleneck for de novo
+tra7–9. Importantly, none of these methods is able to identify truly           structure elucidation. Unfortunately, using MS2 spectra to directly
+novel and unexpected compounds like unknown natural products,                  train molecule generation models is currently not feasible because
+drug metabolites or environmental transformation products.                     of the limited amount of training data. In fact, we estimate that,
+    In principle, the simplest and entirely database-independent               even by merging the largest MS2 repositories (that is, NIST2020,
+approach to assigning a structural identity to truly unknown com-              MoNA, MassBank.EU, Global Natural Product Social Molecular
+pounds is to first determine the molecular formula, then enumer-               Networking (GNPS)), experimental MS2 data would be available
+ate all possible candidates, and finally score against experimental            for circa 60,000 molecules, which is an order of magnitude below
+data10–12. This approach fails in practice because of the combinato-           standard requirements for generative models, typically trained with
+rial explosion in the number of structures that can exist even for             >500,000 structures19,21,22. Many repositories include simulated MS2
+simple formulas13. Recent strategies for identification of true                data, but these are based on class-specific fragmentation rules, for
+unknowns have instead relied on expanding compound databases                   example, for peptides and lipids, and therefore of little use to train
+using chemical reaction rules14,15, identifying partial structures             generative models for more heterogeneous classes.
+using spectral networking16 and ‘hybrid search’ (MS2 library search                We tackle the MS2-to-structure challenge in two consecutive
+including mass shifts)17 or, recently, assigning chemical classes in           tasks. We first use CSI:FingerID8,9 to tackle the MS2-to-fingerprint
+silico using machine learning18.                                               problem. CSI:FingerID predicts a high-dimensional molecular fin-
+    In the context of computational drug design, deep learning                 gerprint, which is normally used to query a molecular structure
+algorithms for targeted de novo molecule generation have recently              database searching for candidates that have a matching fingerprint.
+emerged. These methods allow querying a large chemical space of                Here, we substitute the database search with an RNN generative
+novel compounds without enumerating candidates. In analogy to                  model that was trained to address the fingerprint-to-structure task.
+the methods used for text generation, Gómez-Bombarelli et al.19                Combining the two components in a unique workflow resulted
+used a variational autoencoder (VAE) with a recurrent neural net-              in MSNovelist, a method that generates a ranked list of candidate
+work (RNN) to generate textual representations of molecules, that              structures directly from MS2 spectra. As MSNovelist doesn’t use any
+
+
+Institute of Molecular Systems Biology, Department of Biology, ETH Zürich, Zürich, Switzerland. 2Chair for Bioinformatics, Faculty of Mathematics and
+1
+
+Computer Science, Friedrich-Schiller-Universität Jena, Jena, Germany. 3Present address: Eawag, Dübendorf, Switzerland. ✉e-mail: zamboni@imsb.biol.ethz.ch
+
+Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods                                                                         865
+Articles                                                                                                                       NAture MethodS
+
+                                                                       Initial token
+                                                                             $             O            C            …
+                                        Molecular
+                                                                      C9H11NO          C9H11N        C8H11N        C 0H 0
+                                       formula xM
+       Precursor and                                                                                                                    Ranking by
+       MS2 spectrum                                                                                                                    ModPlatt score
+                                        C9H11NO
+                                                         Encoder          LSTM           LSTM         LSTM         LSTM                  O
+                                                    F
+                                      Fingerprint x
+                                                                                                                                           N
+                                          O                                                                                                H
+                              R
+                                  N                                          O             =           …             *            O=C(Nc1ccccc1C)C
+                                  H
+                                              R
+                                                                                                                 Final token
+
+
+Fig. 1 | Conceptual overview of MSNovelist. Using the existing SIRIUS and CSI:FingerID approach, a molecular fingerprint and a molecular formula were
+predicted. These data were used as input to an encoder–decoder RNN model with LSTM architecture to predict a SMILES sequence. Finally, candidate
+structures were ranked by modified Platt score, that is, according to the match to the predicted molecular fingerprint.
+
+
+structural or spectral database to retrieve candidates, it is particu-           MS2 spectra from GNPS27 closely matching the evaluation setup by
+larly suited to identify poorly represented analyte classes or novel             Dührkop et al.8,9. These spectra cover heterogeneous types of com-
+compounds. We evaluate the method’s performance in the con-                      pounds, samples, instrumentation, spectral quality, and so on. No
+text of the current state-of-the-art database search on a reference              additional quality control or cleanup was performed before subject-
+dataset from the GNPS spectral library with >3,800 MS2 spectra27                 ing these spectra to MSNovelist. For each spectrum, we retrieved
+and on the CASMI 2016 structure identification challenge28. As an                the 128 highest-scoring SMILES sequences (top-128). In 99.5% of
+exemplary application of de novo spectral annotation, we apply our               the instances, MSNovelist generated valid structures with the cor-
+method to a bryophyte liquid chromatography–mass spectrometry                    rect molecular formula. The correct structure was retrieved for 45%
+dataset and putatively annotate seven novel chemical structures.                 and ranked first for 25% of the instances (Fig. 2a). In comparison,
+                                                                                 a database search with CSI:FingerID was able to rank the correct
+Overview of the method                                                           structure on top for 39% of the spectra. This represents the maxi-
+MSNovelist performs de novo structure elucidation from MS2 spec-                 mum that MSNovelist can reach, because it uses the same fingerprint
+tra in two steps (Fig. 1). First, it relies on SIRIUS and CSI:FingerID           for structure generation as CSI:FingerID uses for database search.
+to predict a molecular formula xM and a structural fingerprint xF,               In this subset (GNPS-OK, 1,507 spectra; Supplementary Table 2),
+respectively, from the MS2 spectrum9. The fingerprint xF consists of             MSNovelist correctly retrieved 68% of the true structures. In 61%
+a vector with 3,609 values ranging from 0 to 1 to express the likeli-            of the instances, the true structure matched with the top-ranked
+hood that the molecule of interest has given structural character-               candidate (Fig. 2b). In the cases where the true structure was not
+istics. If known, the molecular formula xMMxM can be specified by                ranked first by MSNovelist, the generated structures were typically
+the user to bypass the SIRIUS prediction. Second, we trained an                  very similar to the target molecule. This is shown by ten examples
+encoder–decoder RNN model to predict structures in the form of                   randomly picked from all incorrect predictions of the GNPS dataset
+a SMILES sequence from the fingerprint xF under the constraints                  (Fig. 2e and Supplementary Fig. 2). In this sample, seven mispre-
+imposed by the formula xM. Conceptually, the model learns how to                 dictions were close isomers of the correct structure, one instance
+represent the structural fingerprint features in a SMILES string. For            showed a partial mismatch in the skeleton, and only two predictions
+every query tuple (xF, xM), the model returns a set of k structures              were completely wrong. Further cases are available in the provided
+ranked by the raw RNN model score, that is, the probability of the               supplementary dataset; a quantitative evaluation of similarity on the
+sequence under the model. As the RNN model can generate invalid                  entire dataset is provided below.
+SMILES, or also generate different SMILES strings that encode for                    The importance of structural information was tested with a
+the same structure, the k structures are validated and dereplicated.             model that lacked the fingerprint input to the encoder. This naïve
+Finally, the candidate structures are re-ranked by calculating the               generator creates structures with a specific molecular formula, but
+match to the query fingerprint xF using the modified Platt score8.               cannot make use of structural information. Importantly, the results
+    A key advantage of our approach is that the training of the RNN              of the naïve generator were ranked by the modified Platt score as in
+model for the second step is independent of spectral libraries. As               the full workflow. In the GNPS dataset, naïve generation retrieved
+fingerprints can be computed for any molecular structure and inde-               only 31% of all correct structures, and 17% were ranked first. While
+pendently from spectral libraries, we can obtain virtually unlimited             this is clearly lower than guided de novo generation, it also shows
+training points18 without the constraints imposed by limited MS2                 that deceptively high performance can be achieved purely by sam-
+data availability. Specifically, the RNN model was trained on a data-            pling large numbers of molecules and a posteriori ranking using the
+set of 1,232,184 chemical structures compiled from the databases                 modified Platt score. A similar trend was observed for the GNPS-OK
+HMDB (4.0)29, COCONUT30 and DSSTox31, and 14,047 predicted                       subset, with 37% of structures retrieved, and 35% were first in the
+fingerprints to parametrize fingerprint simulation (that is, to add              ranking. In both datasets, inclusion of structural information from
+error to the input). All structures used for fingerprint simulation or           fingerprints in de novo generation increased the recovery of true
+present in evaluation datasets were removed from the training set                structures by 13 to 31 percentage points.
+to effectively evaluate the ability to identify structures that have not             As a second benchmark, we generated structures for the 127
+been observed before, that is, two disjoint sets were used: a test set           positive-mode MS2 spectra from the CASMI 2016 competi-
+and a training set (Methods).                                                    tion28, which is a common benchmark for structure elucida-
+                                                                                 tion (Supplementary Fig. 3 and Supplementary Tables 3 and 4).
+Method validation                                                                MSNovelist retrieved 57% of structures (26% ranked first). The
+We benchmarked MSNovelist with two large, diverse and frequently                 naïve model achieved 52% retrieval, and 24% top-1 hits. The
+used MS2 datasets for which the correct structure is known. The                  marginal improvement of MSNovelist over the naïve model indi-
+full structural prediction model was first validated using 3,863                 cates that the structures are likely very similar to training set data.
+
+866                                                                              Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods
+NAture MethodS                                                                                                                                                                                        Articles
+ a                                                               b                                                                            c
+                                                                                                                                                              400
+             1.00          MSNovelist                                       1.00            MSNovelist                                                                            MSNovelist
+                           Naïve generation                                                 Naïve generation                                                                      Naïve generation
+                           Database search                                                                                                                                        Database search
+                                                                                            Ranked by modified Platt                                          300                 Best of training set
+             0.75          Ranked by modified Platt                         0.75
+                                                                                            Ranked by RNN score                                                                   Random from training set
+                           Ranked by RNN score
+
+
+
+ Quantile                                                        Quantile                                                                     Frequency
+             0.50                                                           0.50                                                                              200
+
+
+
+             0.25                                                           0.25                                                                              100
+
+
+
+               0                                                                0
+                                                                                                                                                                  0
+                      1           2                  5      10                      1                 2                  5           10                                0.5          0.6         0.7    0.8        0.9         1.0
+                                        Rank                                                                  Rank                                                                 Similarity (excluding matches)
+
+ d                                                                          e
+                                                                                                          O
+                          MSNovelist
+             500          Naïve generation                                                  O                 OH                                               NH                                                   O
+                          Database search
+                                                                                                      N                 HO   O
+                          Best of training set                                          N                                        O        O               N           O                                                     NH 2
+             400          Random from training set                                                                                        H
+                                                                                                                                          N                                                                  N
+                                                                                                      O       OH             N                                                                               H      O
+
+
+ Frequency
+             300                                                                            1a                                                O                                                              3a
+                                                                                                                                     2a
+             200                                                                                              O                                                                        NH
+
+                                                                                                  O                OH                                         O           O        N        O            H
+             100                                                                                                                                                          H                              N
+                                                                                                          N                                                               N
+                                                                                             N                                                      N
+                                                                                             H                                                                                                                          N
+               0                                                                                                             HO                                               O
+                                                                                                          O        OH
+                                                                                                                                                                                                                               OH
+                    –6,600 –6,400 –6,200 –6,000 –5,800 –5,600                                1b                                                                   2b                                         3b
+                                                                                                                                     O                                                                                  O
+                             Highest modified Platt score
+
+
+Fig. 2 | Validation of MSNovelist with GNPS dataset. a, Rank of correct structure in results for MSNovelist (blue), and naïve generation (orange), with
+ranking by modified Platt score (solid line) or by RNN score (dashed line), and comparison to database search (CSI:FingerID on PubChem; green) for the
+GNPS dataset (n = 3,863). b, Rank of correct structure in results for MSNovelist and naïve generation, with ranking by modified Platt score or ordered
+by model probability, and comparison to database search for GNPS-OK dataset (n = 1,507). c, Tanimoto similarity of best incorrect candidate to correct
+structure for MSNovelist, naïve generation, database search, best candidate from training set and random candidate from training set. d, Modified Platt
+score of top candidates, for MSNovelist, naïve generation, database search, best candidate from training set (light blue) and random candidate from
+training set (red) e, Three randomly chosen examples of incorrect predictions (top candidate) from GNPS dataset. Structures 1a, 2a and 3a represent
+de novo prediction; structures 1b, 2b and 3b represent a correct result. Red marks sites predicted incorrectly by the model (or the entire molecule if the
+prediction was completely wrong), and blue marks the corresponding correct alternative.
+
+
+However, from the 47 instances that were correctly identified by                                              best-in-training set (0.76) and nearly as high as the best incorrect
+database search (CASMI-OK), MSNovelist retrieved 74% and iden-                                                database structure (0.84). This demonstrates that the model system-
+tified 64% at the first rank, while naïve generation only retrieved                                           atically generates combinations of chemical features not seen in the
+56% and identified 51% at the first rank. This demonstrates that the                                          training set. In contrast, naïve generation slightly underperformed
+model effectively uses structural information when present in the                                             the best training set candidate, as expected from generation without
+spectra. Overall, these evaluation tests with two large, diverse and                                          structural guidance.
+representative datasets demonstrate that de novo structural annota-                                               The modified Platt score quantifies the match of the generated
+tion is in principle possible and in 50–70% of the cases generates                                            structure to the input fingerprint. Therefore, it directly measures
+candidates that are consistent with the true structure.                                                       the performance of the fingerprint-to-structure step of MSNovelist,
+                                                                                                              independent of errors in the fingerprint prediction. For the best
+Extrapolation, chemical similarity and model score                                                            MSNovelist candidates, the modified Platt scores (median −5,886)
+We conducted further evaluations to demonstrate model perfor-                                                 were essentially identical to the best database compounds (−5,883)
+mance and to verify that de novo structures outscore training set                                             and higher than best compounds in the training set (−5,928;
+structures in terms of similarity to the query fingerprint and mol-                                           Fig. 2d). Again, the naïve model performed slightly worse than the
+ecule. To provide a numerical measure of how close to truth typi-                                             best training set candidate.
+cal predictions are, we compared the chemical similarity of the best                                              We also evaluated the relevance of posterior re-ranking with the
+incorrect prediction (compare also Cooper et al.32) to the correct                                            modified Platt score. The RNN model without re-ranking by modi-
+structure. This allows a direct comparison of de novo predictions                                             fied Platt score reached notable 19% and 39% correct (top-ranked)
+with the training set data, which contains only incorrect results                                             identifications in the GNPS and GNPS-OK datasets, respectively
+(as all true structures are removed from RNN training). Figure 2c                                             (Fig. 2a,b). The best compounds identified by the RNN model
+shows the histogram of similarity scores over all instances (median                                           alone had a higher modified Platt score (median −5,910) than the
+and 25–75% quantile; Supplementary Table 1). The best incor-                                                  best training set compounds, and reached nearly the same chemi-
+rect de novo predictions (median 0.80) scored higher than the                                                 cal similarity (0.74; Supplementary Fig. 6). This indicates that the
+
+Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods                                                                                                                                                       867
+Articles                                                                                                                                                                        NAture MethodS
+
+           a                                                                                             b
+                                      –4,400                                                                      153.0170
+                                                                                                         100
+
+                                                                467
+
+
+
+
+          MSNovelist ModPlatt score
+                                                                       415
+                                                               570
+                                      –4,500            454 569
+                                                            377
+                                                           391
+                                                                                                                                                  255.0650
+                                                                                                          50
+
+                                      –4,600                                                                                                237.0550
+                                                                                                                          179.0350
+
+
+
+                                                                                                                                                                   297.0770
+                                      –4,700
+                                                                                                              0
+                                               –4,700         –4,600           –4,500       –4,400                 150               210                    270                 330           390
+                                                         Database ModPlatt score                                                                            m /z
+
+           c                                                                  179
+                                                                                                                                      O
+                                                                       255 (–H2O)
+                                                                              153                OH                                               + H+
+                                                    237 (–2 H2O)                                       + H+         213 (–H2O)
+                                                                                      297                                                     O
+                                                   209                 HO               O                                HO                            OH     297 (–CH2O)
+                                                                                                       OH
+                                               (–2 H2O -CO)
+
+                                                                                                                         HO           O                O
+                                                                                OH      O                                                        229 (–CO)
+                                                         237 -> 213                                    OH                                    255          237                      209
+                                                                                     255         229                                       (–H2O)       (–2 H2O)              (–2 H2O - CO)
+
+                                                                             377a (MSNovelist)                                       377b (database)
+
+
+Fig. 3 | De novo annotation of bryophyte metabolites. a, Scores of best MSNovelist candidates versus best database scores for 232 spectra; the solid line
+represents a 1:1, and the dashed line represents ModPlattMSNovelist = ModPlattDB + 50; labels indicate spectrum ID. b, MS2 spectrum of feature 377.
+c, Proposed spectrum interpretation for structure 377a (MSNovelist) and 377b (database).
+
+
+raw RNN score is already informative about the structure–spec-                                                           structure. First, we compared the modified Platt scores for the best
+trum match, but the additional re-ranking by modified Platt score                                                        de novo and database candidates. (Fig. 3a). In 27 cases the same
+yields more correct identifications and higher scores in the auxiliary                                                   structure was identified with both approaches. For 169 cases (75%),
+benchmarks.                                                                                                              the MSNovelist structure scored higher than the database, indicat-
+    Similarly, we examined the necessity of element counting and                                                         ing that the de novo structure was a better fit to the spectrum than
+hydrogen estimation for the generation of valid results and their                                                        any database entry.
+effect on model performance (Supplementary Fig. 4 and 5 and                                                                  We inspected in depth the seven cases that had the largest differ-
+Supplementary Tables 1–4). In summary, the model was still able                                                          ence between the de novo and database-based modified Platt scores.
+to produce high-scoring results without the additional components;                                                       A detailed discussion of the results is provided in Supplementary
+they increased the number of valid results with the correct molecu-                                                      Tables 5–13. For the example of feature 377 (mass-to-charge rati
+lar formula, and consequently, slightly improved overall retrieval.                                                      (m/z) 381.1020, C21H16O7), the de novo-predicted structure 377a
+    Finally, we examined the impact of the number of generated can-                                                      is a polyphenolic compound with a flavonoid core (Fig. 3c) and
+didates. Generation of only 16 candidates by MSNovelist was suf-                                                         all observed fragments (Fig. 3b) are consistent with the proposed
+ficient to outcompete the top-128 naïve candidates in all metrics for                                                    structure (Supplementary Fig. 7). Fragment 153 and neutral loss 126
+all four datasets and sub-datasets, except overall retrieval in CASMI                                                    (fragment 255) are shared with the flavonoid hesperetin. Seven peaks
+(see Supplementary Fig. 3 and 6 and Supplementary Tables 1–4).                                                           are shared with the structurally similar chrysin-7-O-glucuronide
+This provides further evidence that MSNovelist directly generates                                                        and all matching peaks relate to the aglycon. In contrast, the best
+structures with a high spectrum–structure match without requiring                                                        database candidate fails to explain peaks 153 and 179. The struc-
+extensive sampling.                                                                                                      ture predicted de novo is similar to known natural products for-
+                                                                                                                         mosumone A and struthiolanone. The biosynthetic origin of a C21
+De novo annotation of bryophyte metabolites                                                                              polyphenol remains unclear, but we hypothesize that it could arise
+An objective of de novo annotation in discovery metabolomics is to                                                       from a condensation as in the case of struthiolanone34. We noted
+identify novel biological small molecules. We demonstrate the use                                                        that multiple alternative de novo structures also strongly outscored
+of MSNovelist for this application for a dataset of nine bryophyte                                                       the best database suggestion and are compatible with the observed
+species (Peters et al.33). Bryophytes are known to produce diverse                                                       spectrum. In any case, there is solid evidence that feature 377 is a
+secondary metabolites, but are not extensively studied, presenting                                                       novel natural product with a flavonoid core and an interesting can-
+a likely opportunity for natural product discovery. From the data                                                        didate for further structure and biosynthetic pathway elucidation.
+repository (MTBLS709), we extracted 576 consolidated MS2 spec-                                                               Summarizing the in-depth analysis of the seven spectra, in four
+tra and analyzed them with SIRIUS to infer formula. For 224 spec-                                                        cases the MSNovelist was better at explaining the MS2 spectrum, and
+tra, we obtained a molecular formula with high confidence (≥80%                                                          one is equally good as the top database candidate. This witnesses
+explained peaks, ≥90% explained intensity, ≥0.9% ZODIAC score).                                                          the complementarity of the two approaches. We initially limited the
+These were further analyzed by MSNovelist to predict the molecular                                                       analysis to m/z < 500, but could find five additional instances above
+
+868                                                                                                                      Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods
+NAture MethodS                                                                                                                         Articles
+threshold analyzing the entire dataset (Supplementary Fig. 8 and               of chemical space, we were able to predict plausible novel mol-
+Supplementary Table 5). Regardless of the origin, all proposed top             ecules in biological datasets. Finally, generative models using robust
+structures should be seen as starting points for further investigation.        SMILES alternatives36,37 and non-SMILES representations38–41 could
+These could entail further analyses with more fine-grained MSn                 provide avenues for further exploration and development, although
+data, alternative dissociation techniques, or preparative isolation            even the simple SMILES model achieved convincing performance
+and characterization by nuclear magnetic resonance. Eventually,                in our setting.
+pure standards would have to be synthesized and analyzed by iden-                  The MSNovelist method specifically addresses the task of struc-
+tical means to validate predictions.                                           ture generation, and relies on existing methods (or external knowl-
+                                                                               edge) for molecular formula determination. For small compounds
+Discussion                                                                     with m/z < 300, error rates of formula determination by SIRIUS are
+MSNovelist demonstrates that de novo generation of molecular                   <10%; however, they increase to >50% for compounds with m/z
+structure from MS2 spectra without dependency on a structural                  up to 800 when considering individual spectra. However, when
+database is possible. This result challenges the paradigm that the             considering all spectra in a biological sample jointly, error rates
+complexity of small-molecule chemical space precludes these                    of <10% up to m/z 800 can be achieved42; this is recommended to
+approaches. MSNovelist constitutes the first direct application of a           achieve best results with biological datasets. Alternatively, if the
+chemical generative model to mass spectrometry data. While deep                molecular formula is known through orthogonal information, the
+learning models have previously been used to generate candidate                SIRIUS formula prediction may be bypassed and the formula pro-
+libraries to use with independent methods for structure identifi-              vided directly. Finally, to address practical limitations, MSNovelist
+cation by MS2 (refs. 25,26), MSNovelist is capable of integrating the          is currently only trained for positive-mode data. CSI:FingerID per-
+structural information encoded in probabilistic fingerprints. Given            formance is slightly lower on negative-mode MS2 spectra; this will
+that certain isomers fragment (almost) indistinguishably, structural           be likely reflected in MSNovelist performance in the future. Also,
+elucidation from this data is clearly not possible in all cases; yet,          CSI:FingerID and correspondingly MSNovelist processes MS2
+MSNovelist suggested reasonable molecular structures for more                  spectra with a minimum of three fragment ions; richer spectra are
+than half of the MS2 spectra.                                                  desirable for best performance.
+    Three aspects made this achievement possible. First, structural                In conclusion, this work contributes a further building block
+fingerprint predictions from MS2 spectra (by CSI:FingerID) directly            to the growing set of methods for untargeted computational
+encode structural information and may act as a blueprint for a mol-            mass spectrometry. It complements recent methods by Dührkop
+ecule. Second, we decoupled MS2 interpretation from structure gen-             et al.: CANOPUS18 predicts compound classes for unknown spec-
+eration, allowing us to train the generative model with millions of            tra, which can provide biological insight at substance-class level
+structures18 and independently from experimental MS2 data. Third,              without requiring complete structures, whereas COSMIC43 aims
+we exploited the analogy between writing a SMILES code based on a              to increase confidence when annotating compounds in compound
+chemical fingerprint and image captioning, that is, writing a descrip-         databases but not spectral libraries. In contrast, MSNovelist focuses
+tive sentence based on a feature vector. In this context, de novo              on proposing structures for compounds not in compound data-
+structure elucidation is interpreted as a translation-like task from           bases. Complementary application of MSNovelist and CANOPUS
+fingerprint to structure. Trained in this manner, the model works              may provide even more information as a starting point for elucida-
+independently of preexisting scores for spectrum-to-structure                  tion of specific unknowns.
+matching; although we acknowledge that final re-ranking with the
+modified Platt score is important for best results.                            Online content
+    De novo annotation could alternatively be treated directly as an           Any methods, additional references, Nature Research report-
+optimization task with a preexisting scoring function; that is, can-           ing summaries, source data, extended data, supplementary infor-
+didate structures can be obtained by traversing the latent space in            mation, acknowledgements, peer review information; details of
+a generative model or with reinforcement learning on the score.                author contributions and competing interests; and statements of
+This would not require input directly informative about structure              data and code availability are available at https://doi.org/10.1038/
+(such as fingerprints), and would therefore work with any spec-                s41592-022-01486-3.
+trum–structure score, such as match to simulated MS2 spectra using
+CFM-ID5 or any other score used by database search approaches. It              Received: 6 July 2021; Accepted: 7 April 2022;
+would also allow the integration of orthogonal information, most               Published online: 30 May 2022
+trivially, retention time prediction.
+    From the point of view of chemical generative models, the task             References
+                                                                               1. Stein, S. E. & Scott, D. R. Optimization and testing of mass spectral library
+to generate structures compatible with a fingerprint resembles                    search algorithms for compound identification. J. Am. Soc. Mass. Spectrom. 5,
+Tanimoto and Rediscovery benchmarks (for example, ref. 24), for                   859–866 (1994).
+which strong results have been achieved with existing models. It               2. Kind, T. et al. Identification of small molecules using accurate mass MS/MS
+was, however, unclear whether the probabilistic predicted finger-                 search. Mass Spectrom. Rev. 37, 513–532 (2018).
+                                                                               3. Kim, S. et al. PubChem 2019 update: improved access to chemical data.
+print input would provide constraints narrow enough to enable                     Nucleic Acids Res. 47, D1102–D1109 (2019).
+structure elucidation. We showed that our model retrieves a large              4. Kanehisa, M. & Goto, S. KEGG: Kyoto encyclopedia of genes and genomes.
+proportion of correct hits, as well as additional incorrect struc-                Nucleic Acids Res. 28, 27–30 (2000).
+tures that score highly in the database search. Further, incorrect             5. Allen, F., Greiner, R. & Wishart, D. Competitive fragmentation modeling of
+high-scoring structures were highly similar to the correct answers,               ESI-MS/MS spectra for putative metabolite identification. Metabolomics 11,
+                                                                                  98–110 (2014).
+both anecdotally and by objective metric. Given how vast we usually            6. Ruttkies, C., Schymanski, E. L., Wolf, S., Hollender, J. & Neumann, S.
+perceive small-molecule chemical space to be35, our results appear                MetFrag relaunched: incorporating strategies beyond in silico fragmentation.
+better than naïvely expected. Further, a notable part of results could            J. Cheminform. 8, 3 (2016).
+be rediscovered even by isomer sampling, without structural finger-            7. Heinonen, M., Shen, H., Zamboni, N. & Rousu, J. Metabolite identification
+print input. This indicates that the chemical space described with                and molecular fingerprint prediction through machine learning.
+                                                                                  Bioinformatics 28, 2333–2341 (2012).
+the present model and training set is comparably well confined. This           8. Dührkop, K., Shen, H., Meusel, M., Rousu, J. & Böcker, S. Searching
+might limit the model’s ability to discover chemistry extremely dif-              molecular structure databases with tandem mass spectra using CSI:FingerID.
+ferent from known molecules. Even with this ‘conservative’ model                  Proc. Natl Acad. Sci. USA 112, 12580–12585 (2015).
+
+Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods                                                                               869
+Articles                                                                                                                                    NAture MethodS
+9. Dührkop, K. et al. SIRIUS 4: a rapid tool for turning tandem mass spectra           29. Wishart, D. S. et al. HMDB 4.0: the human metabolome database for 2018.
+    into metabolite structure information. Nat. Methods 16, 299–302 (2019).                Nucleic Acids Res. 46, D608–D617 (2018).
+10. Peironcely, J. E. et al. OMG: open molecule generator. J. Cheminform. 4, 21        30. Sorokina, M. & Steinbeck, C. Review on natural products databases: where to
+    (2012).                                                                                find data in 2020. J. Cheminform. 12, 20 (2020).
+11. Peironcely, J. E. et al. Automated pipeline for de novo metabolite                 31. McEachran, A. D. et al. ‘MS-Ready’ structures for non-targeted
+    identification using mass-spectrometry-based metabolomics. Anal. Chem. 85,             high-resolution mass spectrometry screening studies. J. Cheminform. 10, 45
+    3576–3583 (2013).                                                                      (2018).
+12. Schymanski, E. L., Meinert, C., Meringer, M. & Brack, W. The use of MS             32. Cooper, B. T. et al. Hybrid search: a method for identifying metabolites
+    classifiers and structure generation to assist in the identification of unknowns       absent from tandem mass spectrometry libraries. Anal. Chem. 91,
+    in effect-directed analysis. Anal. Chim. Acta 615, 136–147 (2008).                     13924–13932 (2019).
+13. Kerber, A., Laue, R., Meringer, M. & Rücker, C. Molecules in silico: potential     33. Peters, K. et al. Chemical diversity and classification of secondary metabolites
+    versus known organic compounds. MATCH Commun. Math. Co. 54, 301–312                    in nine bryophyte species. Metabolites 9, 222 (2019).
+    (2005).                                                                            34. Ayers, S. et al. Struthiolanone: a flavanone-resveratrol adduct from struthiola
+14. Jeffryes, J. G. et al. MINEs: open access databases of computationally                 argentea. Nat. Prod. Commun. 3, 1934578X0800300 (2008).
+    predicted enzyme promiscuity products for untargeted metabolomics. J.              35. Bohacek, R. S., McMartin, C. & Guida, W. C. The art and practice of
+    Cheminform. 7, 44 (2015).                                                              structure-based drug design: a molecular modeling perspective. Medicinal
+15. Djoumbou-Feunang, Y. et al. BioTransformer: a comprehensive computational              Res. Rev. 16, 3–50 (1996).
+    tool for small molecule metabolism prediction and metabolite identification.       36. O’Boyle, N. & Dalke, A. DeepSMILES: an adaptation of SMILES for use in
+    J. Cheminform. 11, 2 (2019).                                                           machine-learning of chemical structures. Preprint at https://doi.org/10.26434/
+16. Aron, A. T. et al. Reproducible molecular networking of untargeted mass                chemrxiv.7097960.v1 (2018).
+    spectrometry data using GNPS. Nat. Protoc. 15, 1954–1991 (2020).                   37. Krenn, M., Häse, F., Nigam, A., Friederich, P. & Aspuru-Guzik, A.
+17. Benton, H. P., Wong, D. M., Trauger, S. A. & Siuzdak, G. XCMS2: processing             Self-referencing embedded strings (SELFIES): a 100% robust molecular string
+    tandem mass spectrometry data for metabolite identification and structural             representation. Mach. Learn.: Sci. Technol. 1, 045024 (2020).
+    characterization. Anal. Chem. 80, 6382–6389 (2008).                                38. Jin, W., Barzilay, R. & Jaakkola, T. in Drug Discovery (ed. Brown, N.) 228–249
+18. Dührkop, K. et al. Systematic classification of unknown metabolites using              (Royal Society of Chemistry, 2020).
+    high-resolution fragmentation mass spectra. Nat. Biotechnol. 39, 462–471 (2020).   39. Kwon, Y. et al. Efficient learning of non-autoregressive graph variational
+19. Gómez-Bombarelli, R. et al. Automatic chemical design using a data-driven              autoencoders for molecular graph generation. J. Cheminform. 11,
+    continuous representation of molecules. ACS Cent. Sci. 4, 268–276 (2018).              70 (2019).
+20. Weininger, D. SMILES, a chemical language and information system. 1.               40. Samanta, B. et al. NeVAE: a deep generative model for molecular graphs.
+    Introduction to methodology and encoding rules. J. Chem. Inf. Comput. Sci.             J. Mach. Learn. Res. 21, 1–33 (2020).
+    28, 31–36 (1988).                                                                  41. You, J., Liu, B., Ying, R., Pande, V. & Leskovec, J. Graph convolutional policy
+21. Segler, M. H. S., Kogej, T., Tyrchan, C. & Waller, M. P. Generating focused            network for goal-directed molecular graph generation. In Proc. 32nd
+    molecule libraries for drug discovery with recurrent neural networks. ACS              International Conference on Neural Information Processing Systems (eds
+    Cent. Sci. 4, 120–131 (2018).                                                          Bengio, S. et al.) 6412–6422 (Curran Associates, 2018)
+22. Elton, D. C., Boukouvalas, Z., Fuge, M. D. & Chung, P. W. Deep learning for        42. Ludwig, M. et al. Database-independent molecular formula annotation
+    molecular design—a review of the state of the art. Mol. Syst. Des. Eng. 4,             using Gibbs sampling through ZODIAC. Nat. Mach. Intell. 2,
+    828–849 (2019).                                                                        629–641 (2020).
+23. Olivecrona, M., Blaschke, T., Engkvist, O. & Chen, H. Molecular de novo            43. Hoffmann, M. A. et al. High-confidence structural annotation of metabolites
+    design through deep reinforcement learning. J. Cheminform. 9, 48 (2017).               absent from spectral libraries. Nat. Biotechnol. 40, 411–421 (2022).
+24. Brown, N., Fiscato, M., Segler, M. H. S. & Vaucher, A. C. GuacaMol:
+    benchmarking models for de novo molecular design. J. Chem. Inf. Model. 59,         Publisher’s note Springer Nature remains neutral with regard to jurisdictional claims in
+    1096–1108 (2019).                                                                  published maps and institutional affiliations.
+25. Colby, S. M., Nunez, J. R., Hodas, N. O., Corley, C. D. & Renslow, R. S. Deep                         Open Access This article is licensed under a Creative Commons
+    learning to generate in silico chemical property libraries and candidate                              Attribution 4.0 International License, which permits use, sharing, adap-
+    molecules for small-molecule identification in complex samples. Anal. Chem.                           tation, distribution and reproduction in any medium or format, as long
+    92, 1720–1729 (2020).                                                              as you give appropriate credit to the original author(s) and the source, provide a link to
+26. Skinnider, M. A. et al. A deep generative model enables automated structure        the Creative Commons license, and indicate if changes were made. The images or other
+    elucidation of novel psychoactive substances. Nat. Mach. Intell. 3, 973–984        third party material in this article are included in the article’s Creative Commons license,
+    (2021).                                                                            unless indicated otherwise in a credit line to the material. If material is not included in
+27. Wang, M. et al. Sharing and community curation of mass spectrometry data           the article’s Creative Commons license and your intended use is not permitted by statu-
+    with Global Natural Products Social Molecular Networking. Nat. Biotechnol.         tory regulation or exceeds the permitted use, you will need to obtain permission directly
+    34, 828–837 (2016).                                                                from the copyright holder. To view a copy of this license, visit http://creativecommons.
+28. Schymanski, E. L. et al. Critical assessment of small molecule identification      org/licenses/by/4.0/.
+    2016: automated methods. J. Cheminform. 9, 22 (2017).                              © The Author(s) 2022
+
+
+
+
+870                                                                                     Nature Methods | VOL 19 | July 2022 | 865–870 | www.nature.com/naturemethods
+NAture MethodS                                                                                                                                          Articles
+                                                                                           atom connectivity ignoring stereochemistry and charge, ‘InChIKey2D’) was
+Methods                                                                                    extracted. For every unique InChIKey2D, a PubChem-standardized SMILES
+RNN model architecture. The encoder consists of three hidden layers and yields             string45 was retrieved, from which stereochemical information was removed
+a real-valued vector z, which we consider the latent representation of the molecule        using regular expressions. The resulting stereochemistry-free SMILES code
+(Supplementary Fig. 1). Vector z is further transformed via a single layer to starting     was processed in Java using the CDK toolkit (version 2.3) and SIRIUS libraries
+state vectors sDec for the decoder. The decoder is a three-layer long short-term           (version 1.4.3-SNAPSHOT at the time of writing) to obtain an aromatic canonical
+memory (LSTM) RNN44, which for any position i in a SMILES sequence, predicts               SMILES code and a >8,000-bit struct-FP as described elsewhere containing CDK
+probabilities for SMILES character ySi and state sDec  i  from an input of the previous    substructure fingerprints, PubChem fingerprints, Klekota–Roth fingerprints46,
+character ySi−1, the preceding state sDec
+                                        i−1
+                                            , and the context vector z. This basic         FP3 fingerprints, MACCS fingerprints, ECFP6 topological fingerprints47 and
+decoder model can be extended with additional information from an augmented                custom rules for larger substructures18. The aromatic canonical SMILES code
+feature vector vi to increase performance. Vector vi contains the running count            was parsed with the toolkit RDKit, and the molecular formula extracted. The
+of remaining atoms per chemical element, that is, the atom count in xM minus               struct-FP, SMILES code and molecular formula were stored in a database, or
+the sum of atoms of this element in the partial sequence up to yi, and the number          in a CSV-formatted text file. For the CV-spec-FP dataset, the CV-spec-FP was
+of open brackets, that is, the count of open minus closing brackets in the partial         additionally stored. The multiple-kernel SVM method used by SIRIUS predicts (at
+sequence. This auxiliary vector aids the generation of syntactically correct SMILES,       the time of writing) 3,609 bits from the >8,000-bit struct-FP; in the following, the
+and molecules of a particular formula, because sequence termination is contingent          struct-FP shall denote only these 3,609 bits, and FP(S) shall denote the function
+on |vi| = 0 in the training set. Vector vi is directly given from the SMILES sequence      that calculates the 3,609-bit struct-FP for a chemical structure S.
+for heavy atoms, whereas the number of hydrogen atoms is not directly evident in
+a partial SMILES. To this end, an auxiliary two-layer LSTM predicts a sequence of          Input processing and encoding. While deterministic struct-FP by definition
+hydrogen atom counts per SMILES character, trained such that their sum matches             perfectly represent the chemical features of their corresponding molecules, spec-FP
+the total hydrogen count in the molecule. For sequence prediction, xF and xM are           are statistical predictions and contain error. To train the model for use with such
+encoded into z and sDec 0 , and the top-k sequences are decoded via beam search.     For   error-affected data, error-affected sim-FP were generated from struct-FP. For
+every query tuple (xF, xM), the model returns k′ ≤ k valid structures S(1..k ), with
+                                                                              ′
+                                                                                           training, sim-FP were generated on the fly (during training) from struct-FP by
+the corresponding probability under the model (RNN score). To find the structure           random sampling from the CV-spec-FP dataset (minus the current training fold),
+with the best match to the query fingerprint, the structures are re-ranked by the          using a procedure similar to the description in Dührkop et al.18 (‘first method’;
+modified Platt score8, which measures the match between the input fingerprint              Supplementary Algorithm 1).
+(predicted by SIRIUS) and the deterministic fingerprint of each k′ candidate                     More precisely, x∗spec + jitter is pseudocode for adding a random number
+structure.                                                                                                             i
+                                                                                           from ( uniform (0, 1) − 0.5)) × noisefactor to x∗spec and subsequently clipping the
+                                                                                                                                                   i
+                                                                                           results batchwise to the original range of the bit.
+Definitions. We refer to deterministically calculated structural fingerprints for                The sim-FP were either used verbatim (probabilistic input) or rounded to 0
+a molecule as structural fingerprints (struct-FP), and to fingerprints predicted           or 1 (discrete input). In the final model, discrete input was used for both training
+from an MS2 spectrum with CSI:FingerID as spectrum fingerprints (spec-FP).                 and prediction because it led to superior results in correct structure retrieval. For
+Fingerprints that were predicted with CSI:FingerID in a tenfold structure–                 evaluation and in inference mode, spec-FP were also correspondingly rounded.
+disjoint cross-validation setup are called cross-validated spectrum fingerprints                 Additionally, a method based on correlated sampling (similar to ‘second
+(CV-spec-FP). Fingerprints generated by perturbation from struct-FP to simulate            method’; Dührkop et al.18) was implemented, which takes into account correlations
+spec-FP are called simulated fingerprints (sim-FP).                                        between fingerprint bits. However, the method led to identical results in correct
+    We denote ‘Dense<n>’ a dense, fully connected layer with n units and linear            structure retrieval; therefore, the simpler method was further used.
+activation. We denote Dense<n>ReLU a corresponding layer with the activation                     The molecular formula was encoded as a vector xM ∈ Nm for the m = 10
+function ReLU (x) = max (0, x). We denote LSTM<n,m> an LSTM RNN with                       elements E ∈ C, F, I, Cl, N, O, P, Br, S, H (with xM i denoting the sum of atoms
+n layers and m units per layer as described by Hochreiter and Schmidhuber44                of element Ei in the molecule). We denote MF(S) the function returning the
+and implemented in Keras/Tensorflow, with tanh activation, sigmoid recurrent               molecular formula for a structure S.
+activation and no dropout.                                                                       The aromatic canonical SMILES codes were split into tokens consisting of
+    We denote ‘CounterM’ the (recurrent) countdown function                                a single character (for example, C,c, =, N,3), the two-letter elements Br and Cl
+                        CounterM (xi , vi−1 ) = vi−1 − M × xi                              substituted as R and L, or a sequence of characters delimited by square brackets
+                                                                                           (for example, [nH], [N+]), denoting special environments. t = 36 tokens occurring
+with a starting state v0 ∈ Rn and a (constant, non-trainable) matrix M ∈ Rn,dim(x).        >100 times in the training set were retained, the remaining tokens (20 tokens
+                                                                                           with a total of <2,000 occurrences) were discarded and ignored. All token
+Typically M ∈ {1, 0, −1}n,dim(x).
+                                                                                           sequences were prefixed with a start token ($), postfixed with a final token (*)
+    We denote ‘BatchNormθ’ as the batch normalization function as implemented
+                                                                                           and padded to a fixed length of l = 128 with a pad token (&). The sequences s
+in Keras/Tensorflow:
+                                                                                           were then transformed to a one-hot encoded matrix YS ∈ {0, 1}(l,t) (such that
+                                                                                           YSi,j = 1 ⇔ si = j) with column vectors ySi.
+                                  ( (                           )
+              BatchNormθ (xi ) = γ i,θ xi − xi / var(xi ) + ϵ + β i,θ
+                                                ) √
+
+                                                                                           Data augmentation: element count and grammar balance. For promoting the
+for an input vector x with elements x1 ..xn. During training, xi is the batch mean         formation of correct SMILES and the correct chemical formula, the input vector
+and var(xi) is the batch variance, and, during inference, xi and var(xi) are the           was augmented with a counter vi. This vector counted the remaining atoms for
+moving mean and variance obtained during training, respectively. γθ and βθ are             each element, and open parentheses in the current sequence, starting from the
+learned during training, and ϵ is set to 0.001. In summary, BatchNormθ normalizes          molecular formula xM (and zero open brackets) as the initial state. Formally,
+each batch to mean and variance of 0 and 1 per channel during training, and each
+sample to an approximate overall mean/variance during inference.                                                                   CounterM Concatenate ySi , yH
+                                                                                                                                                               i , vi−1 , i > 0
+                                                                                                                                 {          (           (        )     )
+                                                                                                                           M
+                                                                                            vi = Hint ySi , yH
+                                                                                                      (                      )
+                                                                                                             i , v i−1 , x     =
+                                                                                                                                           Concatenate xM , 0 ,           i=0
+                                                                                                                                                      (      )
+Dataset and data preprocessing. A training set for the LSTM RNN was composed
+from the databases HMDB (4.0)29, COCONUT30 and DSSTox31. The training set
+was filtered to remove molecules that couldn’t be parsed with RDKit, SMILES                   The counter matrix M consisted of an upper part mapping input tokens, a row
+codes longer than 127 characters, disconnected SMILES codes (containing a dot),            mapping the predicted implicit hydrogen count to the hydrogen element, and a row
+molecular weight larger than 1,000 Da, a formal charge, more than seven rings (as          mapping tokens (,) to 1,−1, respectively:
+specified in SMILES) or elements other than C, H, N, O, P, S, Br, Cl, I and F. All
+structures contained in the CV-spec-FP dataset (see below) were removed from the                                                       (tokens)
+training set. Finally, the training set contained 1,232,184 molecules with 1,048,512
+distinct structures (by InChIKey2D), and was split into ten structure–disjoint folds.                 C    c    [C−]     N    n    [nH]    ...   (   )    ‘H’
+    For the generation of sim-FP (see below) and model evaluation, a dataset of             M= C      1    1    1        0    0    0             0   0    0     (elements)
+14,047 CV-spec-FP was obtained, corresponding to the openly available part of
+the CANOPUS18 evaluation data, the GNPS dataset and the CASMI dataset. The                       N    0    0    0        1    1    1             0   0    0
+CV-spec-FP dataset was split into ten structure–disjoint folds, and (arbitrarily)                …
+matched to onefold in the training set. All structures present in the CASMI dataset
+were assigned to the same fold, such that the dataset is completely unknown to the               H    0    0    0        0    0    0             0   0    1     (implicit H)
+corresponding model.                                                                             ()   0    0    0        0    0    0             −1 1     0     (parentheses)
+    All molecules in input data were initially retrieved as SMILES code or InChI
+code. For every molecule, a SMILES string standardized with the PubChem
+standardization service was retrieved. Using RDKit, the structure was parsed,              Data augmentation: hydrogen count estimation. As opposed to heavy atom
+the InChIKey was generated, and the first 14 characters (a hash describing                 counts, which are directly specified by tokens in the SMILES sequence, hydrogens
+
+Nature Methods | www.nature.com/naturemethods
+Articles                                                                                                                                         NAture MethodS
+are implicitly described, and assigned after constructing the molecular graph. For            For evaluation, structure–disjoint cross-validation was used; that is, the model
+use in data augmentation (see above), we estimated implicit hydrogens for every          used for structure prediction for any CV-spec-FP was trained without any fingerprints
+token in a partial SMILES sequence from the sequence context. We trained an              for this structure in the CV-spec-FP dataset used for fingerprint simulation.
+LSTM network with parameters ϕ                                                                For ablation studies, stochastic decoding was additionally used. Here, k
+                                                                                         sequences are sampled independently. Starting with the initial token, and the given
+                                  S Hcount
+       ŷH    Hcount
+                                           ;ϕ := Dense<1>           <32,2>
+                               (             )
+         i , si + 1  = Hcountϕ yi , si                   ϕ ◦ LSTMϕ         ( …)          (deterministic)(starting ) state, a token yi+1 = t is sampled according to its probability
+                                                                                         distribution P̂ ySi+1 = t , until the termination token is sampled.
+where the output yHi is the estimated hydrogen count for token i. Instead of
+deriving the hydrogen count per ∑ sequence element from actual molecular                 Recurrent neural network score and modified Platt score. The RNN score is the
+                                                                       ( H graphs
+                                                                               H 2       (log) probability of a SMILES sequence under the RNN model, given the input.
+for training, we summed yH             H
+                                    i yi and minimized the loss Lϕ = ŷtot − ytot ,
+                                                                                  )
+                            tot =
+such that the sum of hydrogens assigned to each sequence element (ignoring               It is calculated by adding the log probabilities for each predicted token over the
+termination and padding tokens) matches the total count in the molecule given by         sequence:
+xM. Hcount is trained concomitantly, but separately from the remaining network
+                                                                                                                                       log P̂ ySi |yS1..i−1
+                                                                                                                                             ( )
+                                                                                                                  RNNscore =
+                                                                                                                                ∑
+(no gradients propagate through yH). We note that because only left-hand context is                                                        i
+available, ‘hydrogen equivalents’ can be positive or negative numbers (for example,
+a branch opening may contribute a negative hydrogen).
+                                                                                             The modified Platt score8,53 measures the match between a spec-FP xF ∈ Rn
+                                                                                         and a struct-FP yF for a structure S; yF = FP (S) ∈ {0, 1}n, taking into account
+Fingerprint encoder and sequence decoder. The encoder block Enc xF , xM ;θ
+                                                                        (        )
+                                                                                         the predicted Platt probability (after additive smoothing) and the CSI:FingerID
+consists of a batch normalization layer and two dense layers (512 and 256 units,
+                                                                                         prediction statistics for each bit. The sensitivity ai = TPi / (TPi + FNi ) and
+respectively; ReLU activation) to compute a latent code z from the concatenation
+                                                                                         specificity bi = TNi / (TNi + FPi ) (with TN indicating the true negatives, TP
+of inputs xF and xM, and a dense layer (2*3*256 units, linear activation) to compute
+                                                                                         the true positives, FP the false positives and FN the false negatives for bit i,
+2*3 initial states sDec
+                    0 for three LSTM layers of 256 units each from the latent code z.    respectively) are obtained from CSI:FingerID output. The ModPlatt score is then
+    Similar to related work, the decoder was implemented as an LSTM with three
+                                                                                         calculated as follows:
+layers of 256 units per layer and a final dense layer with the number of output
+tokens. The input to the LSTM consists of the context vector z (constant over the              ModPlatt xF , yF
+                                                                                                          (       )
+sequence), the preceding sequence token ySi, the molecule target vector vi and the
+LSTM state sDeci :                                                                                              0.75 log xFi + 0.25 log (1 − ai ) ,       xFi ≥ 0.5, yFi = 1
+                                                                                                             
+                                                                                                             
+                                                                                                             
+                                                                                                                                F
+                                                                                                                                                          xFi ≥ 0.5, yFi = 0
+                                                                                                             
+                vin            = BatchNormθ ◦ Concatenate ySi , vi , z                                ∑  0.75 log 1 − xi ,
+                                                                (       )                                    
+                                                                                                                        (        )
+                                                                                                  =
+                                                                                                                    0.75 log xFi ,                           xFi < 0.5, yFi = 1
+                  ( S ) Dec            ( in Dec )
+                P̂ yi+1 , si+1 := Dec v , si ;θ                                                       i∈(1..3609) 
+                                                                                                                  
+                                                                                                                  
+                                                                                                                  
+                                                                                                                 
+                                                                                                                     0.75 log 1 − xFi + 0.25 log (1 − bi ) , xFi < 0.5, yFi = 0
+                                                                                                                 
+                                                   ⟨ t⟩         ⟨256,3⟩
+                                                                                                                              (      )
+                             = Softmax ◦ Denseθ           ◦ LSTMθ         (…)
+
+    Parameters θ (for Enc,Dec) and ϕ (for Hcount) were found (in parallel, but
+                                                                                         Evaluation metrics. The model and the corresponding baselines were compared
+independently) through training in teacher-forcing manner48 to minimize the
+                                                                                         with multiple metrics. The following scores were calculated for every instance of
+categorical cross entropy loss.
+                                                                                         a dataset, and their median and first and third quartiles, and/or their histograms,
+    As in common image captioning models49, the latent space is not explicitly
+                                                                                         were reported.
+regularized; the translation task (from fingerprint features to SMILES
+representation) is expected to be a bona fide regularizer, given a small enough          •    ‘% valid SMILES’: for every instance of a dataset, the percentage of predicted
+latent space. In variational inference, (over)regularized models with complex                 sequences that could be successfully parsed to a molecule using RDKit without
+decoders (particularly when trained with teacher forcing) tend to ignore latent               any modifications.
+code50,51. This may be acceptable in tasks where a higher diversity of results is        •    ‘% correct MF’: for every instance of a dataset, the percentage of predicted
+desired. However, the present task requires decoding to be as precise as possible.            sequences that could be successfully parsed to a molecule using RDKit without
+Multiple regularized models were additionally examined: for example, a VAE-like               any modifications, and that additionally matched the molecular formula of the
+model regularized with Kullback–Leibler divergence (KL-VAE) or with the more                  correct structure.
+information-preserving maximum mean divergence (MMD-VAE); and a model                    •    ‘Modified Platt score’: for every instance of a dataset, the modified Platt score
+regularized by imposing the additional objective of reconstructing the true                   of the highest-ranked candidate versus the query fingerprint. This score is a
+structural fingerprint of a compound from a spectrum-predicted fingerprint. All               direct measure of how closely the generated candidate approaches the target
+models with additional regularization performed worse than the base model.                    fingerprint.
+                                                                                              •       This metric was calculated both for modified Platt-ranked and RNN
+Implementation and training details. The model, evaluation code and Docker                            score-ranked results.
+container was implemented in Keras/Tensorflow, version 2.4.1 on Python 3.7.10,                •       The top score by modified Platt ranking is (trivially) the highest modified
+with associated packages (Reporting summary): matplotlib 3.3.4, pyteomics 4.4.1,                      Platt score overall (the score of the candidate with the highest score).
+rdkit 2020.09.1.0 and 2021.03.1, scipy 1.6.1, sqlite3 3.35.2, tqdm 4.59.0, dill 0.3.3,        •       The top score by RNN ranking is the modified Platt score of the candidate
+h5py 2.10.0, jpype1 1.2.1, numpy 1.19.2, pandas 1.2.3, requests 2.25.1, selfies 1.0.3,                that ranks highest by RNN score.
+spectrum_utils 0.3.4, tensorflow 2.4.1, bitstring 3.1.7, chempy 0.8.0, pywebio 1.3.3,
+                                                                                         •    ‘Similarity’: for every instance of a dataset, the Tanimoto similarity of the
+molmass 2020.6.10, pyyaml 5.4.1; based on Miniconda 4.10.3, with additional Java
+                                                                                              highest-ranked candidate to the correct structure, based on the full (8,925-bit)
+libraries BitToBoolean (edu.rutgers.sakai.java.util.BitToBoolean, no version) and
+                                                                                              fingerprint of the molecule parsed from SMILES and the correct structure. For
+ProgressBar (me.tongfei.progressbar 0.8.1), and the shell utility yq (4.9.6) Java code
+                                                                                              this analysis, SMILES that parse to the correct structure are removed from the
+was compiled with Maven 3.7.0 for OpenJDK 11. The network was trained with
+                                                                                              result set. This permits to compare chemical accuracy of the model with, for
+stochastic gradient descent using the Adam optimizer52 with a learning rate of 0.001,
+                                                                                              example, the training set, without biasing the analysis based on the presence or
+β100 = 0.9, β2 = 0.999 and ϵ = 10−7 over 30 epochs. Although the evaluation loss on
+                                                                                              absence of the correct structure in the dataset.
+sim-FP continued to minimally improve up to epoch 30, the evaluation performance
+of models did not improve or decrease meaningfully anymore after approximately                •       This metric was calculated both for modified Platt-ranked and RNN
+15 epochs. For evaluation, the weights after 20 epochs were used for all models.                      score-ranked results.
+Because weights were only stored if the loss had improved over the last epoch, not all        •       The score was calculated by selecting the candidate with the highest
+folds have a weight at epoch 20; in this case, the last preceding weight was used. The                modified Platt score or highest RNN score, respectively, and calculating
+model was trained on an HPC cluster on a GPU node, using one dedicated Nvidia                         Tanimoto similarity to the correct structure.
+GTX 1080 or Nvidia GTX 1080 Ti GPU, five cores of a Xeon E5-2630v4 processor,                 •       We note that this is not necessarily the highest Tanimoto similarity
+and 80 GB RAM. Training time was approximately 45 min per epoch.                                      overall, as there is no way to find the candidate with the highest Tanimoto
+                                                                                                      similarity without knowing the correct structure.
+Prediction. For sequence prediction from spec-FP, the latent code z and starting
+                                                                                             The following scores were calculated for an entire dataset:
+states sDec                                                           Hcount
+         0 were predicted with the encoder. For hydrogen prediction, s0 (    was
+initialized with zeros; for formula/grammar hinting, v0 = Concatenate      M             •    retrieval (‘% found’): the fraction of instances for which the correct structure
+                                                            ( Dec Hcount x ), 0
+                                                                                )
+as stated above. Given z and the combined initial state s0 = s , s       , v 0, a             was present in the set of predicted structures
+beam search with beam width typically k = 128 was performed with the decoder as          •    rank (top-n retrieval): the fraction of instances for which the correct structure
+described in Supplementary Algorithm 2, with argtopk(x) the positions of the top-k            was at rank n or better in the ordered set of predicted structures
+elements in vector x. In the implementation, the decoding is performed in parallel            •       This metric was calculated both for modified Platt-ranked and RNN
+for multiple queries.                                                                                 score-ranked results.
+
+                                                                                                                                  Nature Methods | www.nature.com/naturemethods
+NAture MethodS                                                                                                                                        Articles
+    Results were post-processed, analyzed and plotted with R 4.0.4 and 4.1.1 with      on a workstation with ten cores, and 2.5 h on a laptop with four cores. Note that
+packages colorblindr (https://github.com/clauswilke/colorblindr/) 0.1.0@e6730be,       high-m/z molecules may require a long time for spectral fragmentation tree
+directlabels 2021.1.13, ggthemes 4.2.4, glue 1.4.2, gridExtra 2.3, khroma 1.7.0,       computation.
+RColorBrewer 1.1-2, scales 1.1.1 and tidyverse 1.3.1.
+
+De novo annotation of bryophyte metabolites. The dataset MTBLS709 was                  References
+downloaded from the MetaboLights repository (ftp://ftp.ebi.ac.uk/pub/databases/        44. Hochreiter, S. & Schmidhuber, J. Long short-term memory. Neural Comput.
+metabolights/studies/public/MTBLS709). Using an R script, the 10,436 MS2 spectra           9, 1735–1780 (1997).
+were consolidated by precursor (within 0.002 m/z) and similarity (>0.9), and           45. Hähnke, V. D., Kim, S. & Bolton, E. E. PubChem chemical structure
+uninformative spectra were removed to yield a dataset of 4,628 spectra. The dataset        standardization. J. Cheminform. 10, 36 (2018).
+was submitted to GNPS for further clustering, molecular networking, initial            46. Klekota, J. & Roth, F. P. Chemical substructures that enrich for biological
+annotation and visualization (https://gnps.ucsd.edu/ProteoSAFe/status.jsp?task=b           activity. Bioinformatics 24, 2518–2525 (2008).
+8b481147b844ebda2481bf9656baec8). From the resulting clustered spectra set, the        47. Rogers, D. & Hahn, M. Extended-connectivity fingerprints. J. Chem. Inf.
+576 spectra with m/z < 500 were selected. For completeness, the entire dataset (667        Model. 50, 742–754 (2010).
+spectra up to m/z 750) was also processed. Spectra were processed with SIRIUS          48. Williams, R. J. & Zipser, D. A learning algorithm for continually running
+4.4.29 for formula prediction (SIRIUS with profile Q-TOF and 20 ppm maximal                fully recurrent neural networks. Neural Comput. 1, 270–280 (1989).
+MS2 deviation, standard settings; ZODIAC with standard settings), fingerprint          49. Vinyals, O., Toshev, A., Bengio, S. & Erhan, D. Show and tell: a neural image
+prediction and structure annotation (CSI:FingerID, search in ‘all databases                caption generator. In 2015 IEEE Conference on Computer Vision and Pattern
+except in silico’). The resulting dataset was filtered to retain only instances with       Recognition (CVPR) 3156–3164 (IEEE, 2015).
+high-confidence formula annotation of ≥80% explained peaks, ≥90% explained             50. Chen, X. et al. Variational lossy autoencoder. In 5th International Conference
+intensity and ≥0.9 ZODIAC score; 224 spectra) and used as input for de novo                on Learning Representations (ICLR, 2017).
+structure prediction.                                                                  51. Zhao, S., Song, J. & Ermon, S. InfoVAE: information maximizing variational
+      The structure candidates from database search and de novo prediction were            autoencoders. Preprint at https://arxiv.org/abs/1706.02262 (2018).
+both ranked by modified Platt score and the top candidate selected. Instances          52. Kingma, D. P. & Ba, J. Adam: a method for stochastic optimization. In 3rd
+where the top candidate from de novo prediction was a markedly better spectrum             International Conference on Learning Representations (ICLR, 2015).
+fit ( ModPlattMSNovelist − ModPlattdatabase > 50) were selected for further analysis   53. Ludwig, M., Dührkop, K. & Böcker, S. Bayesian networks for mass
+(seven instances). The corresponding MS2 spectra were analyzed by hand, by                 spectrometric metabolite identification via molecular fingerprints.
+library search (NIST MS version 2.4, in MS/MS Hybrid mode; product ion                     Bioinformatics 34, i333–i340 (2018).
+tolerance 0.02 m/z) with the NIST 20 library and the MassBank library, and using
+the NIST MS Interpreter (version 3.4.4; using protonated mass and 20 ppm).
+      We note that the implementation and parameters of the modified Platt score       Acknowledgements
+are minimally different from the score implemented in SIRIUS 4.4.29, and in            The authors thank M. Fleischauer for support with the CSI:FingerID web service
+rare exceptions the top candidate found by the modified Platt score might differ       and SIRIUS, and the HPC team of the ETH Zurich Scientific IT service for providing
+from the SIRIUS top candidate; however, rescoring was necessary to achieve a           cluster support. This project was supported by grants from the Strategic Focal Area on
+comparison based on the same metric.                                                   Personalized Health and Related Technologies (PHRT) of the ETH Domain (to N.Z.).
+                                                                                       The funders had no role in study design, data collection and analysis, decision to publish
+Reporting summary. Further information on research design is available in the          or preparation of the manuscript.
+Nature Research Reporting Summary linked to this article.
+                                                                                       Author contributions
+Data availability                                                                      M.A.S. conceived the idea, implemented, trained and evaluated the model. K.D. and S.B.
+The dataset and scripts required to reproduce the validation, bryophyte analysis and   developed the fingerprint simulation, processed the training data and contributed to the
+figures are provided on Zenodo at https://doi.org/10.5281/zenodo.5705830. The          evaluation method. N.Z. supervised the study. All authors contributed to writing the
+dataset MTBLS709 analyzed during the current study is available in the MetaboLights    manuscript.
+repository at https://www.ebi.ac.uk/metabolights/MTBLS709. Processed data are
+available on the GNPS repository at https://gnps.ucsd.edu/ProteoSAFe/status.           Competing interests
+jsp?task=b8b481147b844ebda2481bf9656baec8. The HMDB and COCONUT                        S.B. and K.D. are cofounders of Bright Giant. The remaining authors declare no
+databases are available on Zenodo at https://zenodo.org/record/3375500 and https://    competing interests.
+zenodo.org/record/3778405. The DSSTox database is available at ftp://newftp.epa.
+gov/COMPTOX/Sustainable_Chemistry_Data/Chemistry_Dashboard/MetFrag_
+metadata_files/CompTox_17March2019_SelectMetaData.csv. All further data are            Additional information
+available from the authors on reasonable request.                                      Supplementary information The online version contains supplementary material
+                                                                                       available at https://doi.org/10.1038/s41592-022-01486-3.
+Code availability                                                                      Correspondence and requests for materials should be addressed to Nicola Zamboni.
+MSNovelist is available on GitHub (https://github.com/meowcat/MSNovelist) or
+                                                                                       Peer review information Nature Methods thanks Corey Broeckling and the other,
+as a Docker image on Dockerhub (stravsm/msnovelist). The software requires
+                                                                                       anonymous, reviewer(s) for their contribution to the peer review of this work. Primary
+a Docker installation, and can be run as a pure command line tool or with a
+                                                                                       Handling Editor: Arunima Singh, in collaboration with the Nature Methods team. Peer
+simple web interface. It was tested on Windows and Linux (Ubuntu 18.04,
+                                                                                       reviewer reports are available.
+20.04) computers with 16 or 32 GB RAM. Processing of a single spectrum takes
+<5 min. Processing of the entire bryophyte dataset (550 spectra) requires 1 h          Reprints and permissions information is available at www.nature.com/reprints.
+
+
+
+
+Nature Methods | www.nature.com/naturemethods
+

@@ -1,0 +1,1133 @@
+                                                DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+                                                  Montgomery Bohde 1 2 Mrunali Manjrekar 1 Runzhong Wang 1 Shuiwang Ji 2 Connor W. Coley 1
+
+
+                                                                   Abstract
+                                                                                                                             intensity
+                                                Mass spectrometry plays a fundamental role in                                          1.0
+                                                                                                                                                              de novo
+                                                                                                                                                    O
+                                                                                                                                                              generation
+
+
+
+
+arXiv:2502.09571v2 [cs.LG] 27 May 2025
+                                                elucidating the structures of unknown molecules
+                                                                                                                          Leucine
+                                                                                                                                                         OH
+                                                and subsequent scientific discoveries. One for-                                        0.5
+                                                                                                                                                   NH2
+                                                                                                                                                               OR?
+                                                mulation of the structure elucidation task is the
+                                                                                                                                       0.0
+                                                conditional de novo generation of molecular struc-                                     1.0
+
+
+
+                                                                                                                          Isoleucine
+                                                ture given a mass spectrum. Toward a more accu-                                                     O
+
+                                                rate and efficient scientific discovery pipeline for                                   0.5               OH
+                                                                                                                                                   NH2
+                                                small molecules, we present DiffMS, a formula-
+                                                restricted encoder-decoder generative network                                          0.0
+                                                                                                                                          0   20         40      60        80   100   120   m/z
+                                                that achieves state-of-the-art performance on this
+                                                task. The encoder utilizes a transformer archi-                  Figure 1. De novo structure generation from LC-MS/MS faces
+                                                tecture and models mass spectra domain knowl-                    ambiguity when isobaric or isomeric compounds yield similar frag-
+                                                edge such as peak formulae and neutral losses,                   mentation spectra. In this case, the experimental spectra for leucine
+                                                and the decoder is a discrete graph diffusion                    and isoleucine from NIST (2023) are essentially indistinguishable.
+                                                model restricted by the heavy-atom composition                   It is one of many examples demonstrating that the identification of
+                                                of a known chemical formula. To develop a ro-                    the exact structure is desirable but challenging.
+                                                bust decoder that bridges latent embeddings and
+                                                molecular structures, we pretrain the diffusion
+                                                decoder with fingerprint-structure pairs, which
+                                                                                                                 Tandem mass spectrometry (MS/MS) in combination with
+                                                are available in virtually infinite quantities, com-
+                                                                                                                 liquid chromatography (LC) enables information-rich, high-
+                                                pared to structure-spectrum pairs that number in
+                                                                                                                 throughput profiling of compounds, wherein complex exper-
+                                                the tens of thousands. Extensive experiments on
+                                                                                                                 imental mixtures are separated in two dimensions, first by
+                                                established benchmarks show that DiffMS outper-
+                                                                                                                 retention time (from chromatography) and then by molecule
+                                                forms existing models on de novo molecule gen-
+                                                                                                                 m/z (mass-to-charge ratio) in the first MS (MS1) stage. Each
+                                                eration. We provide several ablations to demon-
+                                                                                                                 “precursor” molecule is then individually passed through
+                                                strate the effectiveness of our diffusion and pre-
+                                                                                                                 the second MS stage (MS2) where it undergoes collision-
+                                                training approaches and show consistent perfor-
+                                                                                                                 induced dissociation and is split into a set of charged molec-
+                                                mance scaling with increasing pretraining dataset
+                                                                                                                 ular fragments, each with a corresponding m/z and an in-
+                                                size. DiffMS code is publicly available at https:
+                                                                                                                 tensity. Modern LC-MS/MS has enabled the discovery of
+                                                //github.com/coleygroup/DiffMS.
+                                                                                                                 many new compounds of interest, such as identifying novel
+                                                                                                                 bile acids in microbiome study (Quinn et al., 2020), uncov-
+                                                                                                                 ering a tire rubber-derived chemical that is toxic to coho
+                                         1. Introduction                                                         salmon (Tian et al., 2021). There is also a growing inter-
+                                                                                                                 est in increased throughput with MS technologies, such
+                                         Mass spectrometry (MS) is a fundamental part of the analyt-             as a high-throughput analysis of chemical reactions (Hu
+                                         ical chemistry toolkit that can assist in the identification of         et al., 2024) and a systematic discovery pipeline for human
+                                         unknown compounds of interest collected from experiments.               metabolites (Gentry et al., 2024).
+                                            1
+                                              Massachusetts Institute of Technology, Cambridge, MA,              From MS1 and MS2 data alone, elucidation of the chemical
+                                         United States 2 Texas A&M University, College Station, TX, United       structure(s) present in the original experimental sample re-
+                                         States. Correspondence to: Connor W. Coley <ccoley@mit.edu>.            mains challenging. Many yet-to-be-discovered metabolites
+                                         Proceedings of the 42 nd International Conference on Machine            have structures that do not exist in standard virtual chem-
+                                         Learning, Vancouver, Canada. PMLR 267, 2025. Copyright 2025             ical libraries (PubChem, Human Metabolome Database,
+                                         by the author(s).                                                       etc.). The majority of observed spectra in MS-based
+
+                                                                                                             1
+                                                      DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+                                                                                                                                                  H
+                                                                                                                                              5
+                                                                                                                                  H               C           H
+
+intensity
+                                                                                                                                                      6
+
+                                                                                                                                          C           C
+
+
+
+
+                                  Precursor formula
+                                                                                                                                      4
+
+
+                                                                            ...                                                           N           C           H
+                                                                                                                                      3
+                            m/z                                                                                                                   C   1
+                                                                                                                                                              C
+                                                                                                                                              2           7
+
+
+            Mass Spec Encoder                                                                                                                     H           O
+                                                                                                                                                          8
+
+
+
+
+Figure 2. DiffMS tackles de novo molecular generation from mass spectra. We embed mass spectrum features with a transformer encoder,
+and assume the chemical formula is determined by off-the-shelf tools (Goldman et al., 2023c; Böcker & Dührkop, 2016) so that the
+numbers and types of heavy atoms (i.e. nodes in the molecular graph) is constrained. The molecular structure is represented as an
+adjacency matrix with one-hot encoded bond types, which in this example are single (blue), double (yellow), aromatic bonds (red) and
+no bond (white). The target molecular structure is generated starting from a randomly initialized adjacency matrix, which is denoised
+through a discrete diffusion process (Vignac et al., 2023). The trajectory used for training is created by randomly disturbing the true
+structure t times.
+
+
+metabolomics campaigns remain unidentified and are char-                                   intensities as inputs to SMILES strings as outputs (Butler
+acterized as “metabolite dark matter” (Bittremieux et al.,                                 et al., 2023; Litsa et al., 2023); however, these autoregressive
+2022). The difficulty of the elucidation task comes from                                   language models do not capture the permutation-invariant
+both computation and chemistry. In terms of computation,                                   nature of mass spectra and molecules, nor do they incorpo-
+there is a large set of possible substructures to explain each                             rate chemical formula constraints as helpful prior knowl-
+measurement, creating an exponential number of structure                                   edge. Another family of approaches utilizes intermediate
+candidates for the overall mass spectrum, i.e., an NP-hard                                 representations such as scaffolds (Wang et al., 2025) or
+combinatorial optimization. From the chemistry perspec-                                    fingerprints (Stravs et al., 2022) before generating chemi-
+tive, a standalone mass spectrum may be insufficient to                                    cal structures, which are arguably more chemically inter-
+determine a unique structure because of the ionization and                                 pretable and leverage additional amounts of structure-only
+fragmentation mechanisms of the instrument; as shown in                                    data available, but have not necessarily led to significant
+Fig. 1, the spectra of two isomeric amino acids are nearly                                 performance improvement on benchmarks. Compared to
+identical. While we would like to be able to determine the                                 the complete structural elucidation challenge of the “in-
+exact structure, from an application perspective, generating                               verse” MS problem, the chemical formula of the unknown
+similar but not exactly matching structures is still useful to                             molecule is usually easier to determine by off-the-shelf tools
+domain experts to narrow down the chemical space.                                          from MS1 and MS2 data, utilizing tools such as SIRIUS
+                                                                                           (Böcker & Dührkop, 2016), BUDDY (Xing et al., 2023),
+Machine learning methods have recently taken root in this
+                                                                                           or MIST-CF (Goldman et al., 2023c). One insight of our
+space to address two key challenges in particular: 1) to learn
+                                                                                           work is to use those available tools by taking the chemical
+how to fragment a given molecule, and predict the resultant
+                                                                                           formula as given and developing a formula-constrained (i.e.,
+mass spectrum, known as “forward” MS simulation (Mur-
+                                                                                           heavy atom-constrained) generation pipeline. We also find
+phy et al., 2023; Goldman et al., 2023a; 2024; Young et al.,
+                                                                                           it beneficial to exploit intermediate chemical representations
+2024b;a; Nowatzky et al., 2024) and 2) to take an experi-
+                                                                                           to enable a scaled-up pretraining stage with theoretically
+mental spectrum and predict the corresponding structure or
+                                                                                           unlimited fingerprint-structure pairs.
+a description thereof, typically as a fingerprint, SMILES, or
+graph representation, known as “inverse” methods (Dührkop                                 To this end, we present DiffMS, a permutation-invariant
+et al., 2015; Stravs et al., 2022; Butler et al., 2023; Litsa                              diffusion model trained end-to-end for molecule genera-
+et al., 2023; Goldman et al., 2023b).                                                      tion conditioned on mass spectra (Fig. 2). DiffMS has an
+                                                                                           encoder-decoder architecture that builds upon modern trans-
+In this paper, we focus on the “inverse” MS problem and
+                                                                                           formers (Vaswani et al., 2017) and discrete graph diffu-
+develop a novel machine learning framework for chemical
+                                                                                           sion (Vignac et al., 2023). For the encoder, we adopt the for-
+structure generation given a mass spectrum, sometimes also
+                                                                                           mula transformer from MIST (Goldman et al., 2023b) with
+described as de novo generation. A recent study of de novo
+                                                                                           pairwise modeling of neutral losses as a domain-informed
+generation from MS shows that all of the methods tested
+                                                                                           inductive bias. For the decoder, we build upon the DiGress
+suffer from near-zero structural accuracy (Bushuiev et al.,
+                                                                                           graph diffusion model (Vignac et al., 2023) using chem-
+2024). Among prior approaches to this task are language
+                                                                                           ical formula constraints and embeddings extracted from
+models that are trained to convert tokenized m/z values and
+                                                                                           the formula transformer as the condition to generate target
+
+                                                                                       2
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+molecules. We provide empirical validation of our end-to-             Recently, Vignac et al. (2023) developed DiGress, a non-
+end model on established mass spectra de novo generation              autoregressive generative model based on discrete graph
+benchmarks (Dührkop et al., 2021b; Bushuiev et al., 2024).           diffusion. The target spaces of these generative models are
+Additional ablation studies demonstrate the effectiveness of          generally unconditioned or loosely conditioned, for exam-
+our pretraining-finetuning framework.                                 ple, to generate drug-like molecules (Luo et al., 2021) or
+                                                                      molecules with certain conformations (Roney et al., 2022).
+Our contributions are summarized as follows:
+                                                                      In the context of de novo structural generation, however,
+  1. We present DiffMS, the first conditional molecular               molecular generation must be strongly conditioned on the
+     generator with formula constraints for structural eluci-         spectral information, i.e., the fragmentation pattern itself
+     dation from mass spectra. We demonstrate discrete dif-           and an inferred chemical formula. There are some efforts
+     fusion as a natural methodology for conditional molec-           that try to generate structures from molecular fingerprints,
+     ular generation that natively handles predefined heavy-          which is another form of strong structural condition, in-
+     atom composition and accounts for the underspecifi-              cluding Neuraldecipher (Le et al., 2020) that learns how
+     cation of conditioning (i.e., the one-to-many mapping            to decode SMILES strings from molecular fingerprints, as
+     from spectrum to structure illustrated by Fig. 1).               well as MSNovelist (Stravs et al., 2022), which proposes
+                                                                      a fingerprint-to-SMILES long short-term memory (LSTM)
+  2. We propose a pretraining-finetuning framework for                network.
+     training DiffMS that makes use of virtual chemical               Both of these methods use autoregressive models that can-
+     libraries with self-labeled structural conditions. Specif-       not strictly enforce formula constraints, while in MS, the
+     ically, the diffusion decoder is trained on a large-scale        chemical formula of the target molecule is an important
+     dataset with 2.8M fingerprint-structure pairs. Our abla-         inductive bias that limits the target space. In this paper, we
+     tion studies show that downstream performance scales             identify discrete graph diffusion as a natural choice to incor-
+     well with increasing fingerprint-structure pretraining           porate formula constraints and improve Vignac et al. (2023),
+     dataset size, providing a promising avenue to scale the          expanding the suite of methods in conditional molecular
+     performance. We also pretrain the spectrum encoder to            generation.
+     predict fingerprints from spectra embeddings to further
+     boost performance of the end-to-end finetuned model.             2.2. Inverse models for structure elucidation from
+                                                                           spectra
+  3. On established benchmarks for de novo structure elu-
+     cidation, DiffMS demonstrates superior performance               Inverse models take an experimental spectrum as input and
+     compared to all existing baselines, achieving improved           predict a relevant representation of the structure: typically,
+     annotation accuracy and better structural similarity to          the molecular graph itself, a SMILES string, or a molecular
+     the true molecule. While de novo generation of the               fingerprint. DENDRAL, arguably the first expert system
+     exact molecular structure remains challenging, struc-            that applied AI to science, focuses on structural elucidation
+     turally close matches can offer valuable insights for            from mass spectrometry data (Lindsay et al., 1980). Recent
+     domain experts (Butler et al., 2023). The broad ap-              years have seen the adoption of machine learning for a
+     plicability of MS underscores the potential impact of            new class of inverse MS models, such as for spectrum-
+     DiffMS in advancing research in chemical and biologi-            to-fingerprint predictions, involving either support vector
+     cal discovery.                                                   machines, as in CSI:FingerID (Dührkop et al., 2015); or
+                                                                      deep learning with transformers, as in MIST (Goldman et al.,
+                                                                      2023b). The fingerprint, which is a binary encoding of the
+2. Background and Related Work                                        structure, can be further used to rank candidate structures
+2.1. Conditional generative molecular design                          from a chemical library. Similar elucidation goals have
+                                                                      been pursued with other types of analytical spectra such as
+Unconditional molecular generation has been well-explored             nuclear magnetic resonance (NMR) (Alberts et al., 2023).
+in the context of AI for chemistry (Zhang et al., 2023), with
+methods such as Gómez-Bombarelli et al. (2018); Segler               However, the elucidation of structures that do not neces-
+et al. (2018) leveraging autoregressive sampling with lan-            sarily exist in any virtual chemical library requires gen-
+guage decoders to generate SMILES representations of                  erative techniques rather than retrieval-based techniques.
+molecules as well as GNN architectures that generate molec-           MSNovelist (Stravs et al., 2022) builds an autoregressive
+ular graphs atom-by-atom for either 2-dimensional (Liu                fingerprint-to-molecule model that takes fingerprint pre-
+et al., 2018; Li et al., 2018; Simonovsky & Komodakis,                dictions returned by CSI-FingerID and generates SMILES
+2018) or 3-dimensional (Flam-Shepherd et al., 2022; Adams             strings, with a decoding process that utilizes the molecular
+& Coley, 2022; Luo & Ji, 2022; Liu et al., 2022) graphs.              formula of the candidate compound as inferred from tools
+
+                                                                  3
+                             DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+such as SIRIUS(Böcker & Dührkop, 2016) or MIST-CF                       Many works have also studied conditional generation with
+(Goldman et al., 2023c). Spec2Mol (Litsa et al., 2023) de-                diffusion. Conditional diffusion models typically fall into
+velops a SMILES autoencoder and trains a spectrum CNN                     two categories: classifier guidance (Dhariwal & Nichol,
+encoder model, with up to four spectral channels to ac-                   2021) and classifier-free guidance (Ho & Salimans, 2022).
+cept spectra collected in low or high energy and positive                 Classifier guidance uses the gradients of the log likelihood of
+or negative mode, that tries to predict the corresponding                 a classifier function pϕ (y|z t ) to guide the diffusion towards
+SMILES embedding from the spectrum. MassGenie (Shri-                      samples with class y. On the other hand, classifier-free
+vastava et al., 2021) is an orthogonal effort that uses forward           guidance trains the denoising network directly to generate
+MS models (Allen et al., 2015; Goldman et al., 2024) to                   samples conditioned on class y and does not require any
+augment training datasets with in silico reference spectra.               external classifier function. DiffMS falls under classifier-
+Toward an end-to-end pipeline for molecular generation                    free guidance.
+from mass spectra, which is the most relevant to our work,
+                                                                          While diffusion models were originally designed to operate
+Butler et al. (2023) build MS2Mol, an end-to-end language
+                                                                          in continuous spaces, recent works have adapted denoising
+model that encodes m/z values and intensities as tokenized
+                                                                          diffusion for discrete data modalities (Austin et al., 2023;
+text input and outputs an inferred chemical formula and
+                                                                          Lou et al., 2024) and graph structured data (Vignac et al.,
+SMILES string in an autoregressive manner. However, their
+                                                                          2023; Chen et al., 2023), both of which are relevant for
+implementation is not currently available at the time of
+                                                                          molecule generation. Here, we follow the discrete diffusion
+writing, preventing direct comparison. Most recently, MAD-
+                                                                          settings of Austin et al. (2023) and Vignac et al. (2023).
+GEN (Wang et al., 2025) presents a diffusion generator of
+chemical structures from scaffolds as a two-stage genera-
+tive process, seemingly bottlenecked in terms of accuracy                 3. Methodology
+by scaffold prediction. In this paper, we improve upon
+                                                                          3.1. Formula-constrained molecular generation
+this thread of end-to-end approaches by encoding inductive
+biases via spectral transformers and utilizing a pretraining-             We represent structure-spectrum pairs as (M, S), where M
+finetuning framework for an MS-conditioned diffusion gen-                 is the graph representation of the molecule with correspond-
+erator. DiffMS has two stages like MADGEN, but is trained                 ing spectrum S. The goal of de novo generation is to recon-
+end-to-end during its final training step, and is heavy-atom              struct the molecular graph M c from S. Because the molecu-
+constrained.                                                              lar structure is typically underspecified given the spectrum,
+                                                                          it is more natural to formulate de novo generation as pre-
+2.3. Diffusion generative models                                          dicting a ranked list of k molecules Mdk = (M  c1 , . . . , M
+                                                                                                                                      ck )
+Denoising diffusion (Sohl-Dickstein et al., 2015; Ho et al.,              that most closely match the given spectra.
+2020) has been shown to be widely effective across many                   One insight in this work is that chemical formulae represent
+tasks such as image (Song et al., 2021; Saharia et al., 2022;             an important physical prior that can significantly reduce
+Karras et al., 2022) and text (Li et al., 2022; Austin et al.,            the molecular search space. Formulae can be inferred from
+2023) generation. More recently, diffusion has been applied               high-resolution MS1 data and isotopic traces with sufficient
+to solve (bio)molecular generative tasks (Corso et al., 2023;             accuracy using tools like SIRIUS (Böcker & Dührkop, 2016)
+Watson et al., 2023; Zeni et al., 2024).                                  or MIST-CF (Goldman et al., 2023c), though the latter does
+Broadly speaking, diffusion models are generative models                  not consider isotope distributions. To that end, we develop
+defined by a forward process that progressively adds noise to             a formula-restricted generation using graph diffusion. In
+a sample z from data distribution q(z 0 ) such that q(z T |z 0 )          practice, we find it sufficient to model only the heavy-atoms
+converges to a known prior distribution p(z T ) as T → ∞.                 in the graph and infer hydrogen atom placement implicitly;
+We additionally require that the noising                                  thus DiffMS generated molecules may differ in formula
+                                           QTprocess be Marko-            from the true molecule in hydrogen atom count.
+vian such that q(z 1 , . . . , z T |z 0 ) = t=1 q(z t |z t−1 ). Fi-
+nally, we select the forward process such that we can effi-
+ciently sample from q(z t |z 0 ).                                         3.2. DiffMS discrete diffusion
+
+A neural network is then trained to reverse this noising pro-             Let a molecular graph M = (A, X, y) with one-hot en-
+cess. However, instead     of predicting pθ (z t−1 |z t ), as long        coded adjacency matrix A ∈ {0, 1}n×n×k , node features
+as pθ (z |z ) = q(z t−1 |z t , z 0 )dpθ (z 0 ) is tractable, we
+          t−1 t                                                           X ∈ Rn×d such as atom types, and graph-level structural
+                      R
+
+can train the model to directly predict the denoised sample               features y ∈ Rc to condition the molecule generation such
+pθ (z 0 |z t ). To generate new samples from the model, we                as molecular fingerprint or mass spectra. Here, n is the
+sample random noise from the prior distribution p(z T ), and              number of heavy atoms in the molecule; k = 5, the number
+iteratively sample from pθ (z t−1 |z t ) until reaching z 0 .             of bond types (no bond, single, double, triple, and aromatic
+
+
+                                                                      4
+                                          DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+ A) Spectrum Encoder                               B) Graph Decoder H                                              C) DiffMS
+                                                                H       C       H                                                                   Formula: C6H5NO
+                                                                    C       C
+
+
+
+                                                                                                                    intensity
+                                                                    N       C       H
+                                                                        C       C                                                                             C
+                                                                                                                                                          C       C
+
+
+
+   intensity
+                                                                                O
+                                                                        H
+                                                                                        C6NO                                                              N
+                                                                                                                                                              C
+                                                                                                                                                                  C
+                                                                                                                                                                      C
+                                                                                                                                             m/z                      O
+
+
+                                                                                                                                  Spectrum
+                                     m/z                                                                                          Encoder
+
+        C2HO         ...    C6H5NO
+                                                             Graph                Node            Edge
+                                                           Embedding            Embedding       Embedding
+               Formula Transformer
+                                                                                                                                          Graph Decoder
+                                                                            Graph Transformer
+
+
+
+
+Figure 3. Model architecture of DiffMS. A) The spectrum encoder first assigns chemical formulae to peaks in an experimental spectrum
+and then learns an embedding vector through a formula transformer. The encoder is pretrained to predict Morgan fingerprints (Morgan,
+1965) from spectra. B) The graph decoder generates the target adjacency matrix by discrete diffusion conditioned on the spectrum
+embedding and node (atom) features. The graph decoder is pretrained with pairs of structures and fingerprints from virtual chemical
+libraries. We scale up the decoder pretraining to exploit the virtually-infinite number of available fingerprint-structure pairs relative to the
+small number of available spectrum-structure pairs, mitigating the challenge of fingerprint-to-molecule generation found non-trivial by Le
+et al. (2020). C) DiffMS integrates the spectrum encoder and graph decoder to generate the structure annotation as a denoising process
+applied to a graph with randomly generated edges. It is finetuned end-to-end on labeled molecule-spectrum data.
+
+
+bonds); d, the dimension of atom features; and c, the di-                                                                                         2
+mension of the conditional features. Because we obtain                                                         t                    π(t/T + ϵ)
+                                                                                                              ᾱ = cos                                                    (4)
+atom types from the formula, we can fix X and generate the                                                                           2(1 + ϵ)
+adjacency matrix A conditioned on X and y.
+                                                                                              with β̄ t = 1 − ᾱt . We then define a neural network
+We define a discrete diffusion process on A. Let At denote                                    ϕθ that learns to predict the denoised adjacency matrix
+the value of A at time t. Let A0 = A, the true molecular                                      A0 . Let Mt = (At , X, y) be the noised molecule at
+adjacency matrix. At each time step, t = 1, . . . , T , we apply                              time t. ϕθ takes Mt as input and predicts probabilities
+noise to each edge independently of others. Specifically,
+                                                            we                               pθ (A0 |Mt ) = ϕθ (Mt ) ∈ Rn×n×k . i.e., it learns to de-
+                                       1           T
+define forward transition matrices
+                                    Q   , . . . Q     such that                              noise At conditioned on X, y. We optimize this network
+Qtmn = q at = n|at−1 = m . Thus:                                                              using cross-entropy loss L between the true adjacency ma-
+                                                                                              trix A and the predicted probabilities Â = ϕθ (Mt ):
+                           q(At |At−1 ) = At−1 Qt                                   (1)                                  X
+                                                                                                          L(A, Â) =            CE (aij , âij )    (5)
+Because the noise is described by a Markov transition pro-                                                                      1≤i<j≤n
+cess, we can directly sample At given A as:                                                                                                           
+                                                                                              To sample new graphs, we need to compute pθ At−1 |Mt .
+                                      t              t
+                              q(A |A) = AQ̄                                         (2)       We do so by marginalizing over the network predictions:
+Where Q̄t = Q1 Q2 . . . Qt . Because molecular graphs are
+undirected, we apply noise only to the upper triangle of A                                      pθ at−1   t
+                                                                                                             X
+                                                                                                                pθ at−1             t
+                                                                                                                                      
+                                                                                                    ij |M    =      ij |aij = ak , M pθ (ak )
+and symmetrize the matrix. We follow the noise schedule                                                            ak
+of Vignac et al. (2023) and select                                                                                                                    (6)
+                                                                                              using pθ at−1        = ak , Mt = q at−1
+                                                                                                                                                  t
+                                                                                                                                                     
+                                                                                                          ij |a
+                                                                                                               ij                 ij |aij = ak , aij if
+                           Q̄t = ᾱt I + β̄ t 1k m⊤                                 (3)           t
+                                                                                              q aij |aij = ak > 0, otherwise 0. We can then generate
+                                                                                                                                 T
+where m is the marginal distribution of edge types in the                                                                     A ∼ m and iteratively
+                                                                                              new graphs by sampling an initial
+                                                                                              sampling from pθ A |M until we obtain A0 .
+                                                                                                                    t−1    t
+training dataset and m⊤ is the transpose of m. This choice
+of Qt converges to a prior distribution that is closer to the
+                                                                                              3.3. Model parametrization and pretraining
+data than a uniform distribution over bond types, enabling
+easier training. We further select the cosine noise schedule                                  We use an encoder-decoder architecture to enable separate
+proposed by Nichol & Dhariwal (2021):                                                         pretraining for the encoder and decoder before finetuning
+
+                                                                                          5
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+the end-to-end generative model. Specifically, a spectrum             4. Experiments
+encoder infers structural information from S and the encoder
+embeddings are used as the structural condition y for the             4.1. Evaluation metrics
+graph diffusion decoder (Fig. 3).                                     We adopt the de novo generation metrics from Bushuiev
+For the encoder module, we use the MIST formula trans-                et al. (2024):
+former of Goldman et al. (2023b). The encoder treats a                   • Top-k accuracy: measures whether the true molecule
+spectrum as a set of (m/z, intensity) peaks. It embeds each                is in the top-k model predictions.
+peak using a predicted chemical formula assignment from                  • Top-k maximum Tanimoto similarity: the structural
+SIRIUS and applies a set transformer that implicitly models                similarity of the closest molecule to the true molecule
+pairwise neutral losses between fragments. We extract the                  in the top-k predictions
+final embedding corresponding to the precursor peak as the               • Top-k minimum MCES (maximum common edge sub-
+structural condition y for the diffusion decoder.                          graph): the graph edit distance of the closest molecule
+We pretrain our encoder on the same datasets used for fine-                to the true molecule in the top-k predictions using the
+tuning (i.e., NPLIB1 (CANOPUS) or MassSpecGym) but                         distance metric proposed by Kretschmer et al. (2023).
+now train the encoder to predict molecular fingerprints. We           We report metrics for k = 1, 10 with additional results in
+find that this pretraining enables the encoder to extract im-         Appendix C. To obtain a ranked list of DiffMS predictions,
+plicit structural information from the spectra and ensures            we sample 100 molecules for each spectrum, remove invalid
+that the encoder learns physically meaningful representa-             or disconnected molecules, and identify the top-k molecules
+tions. We provide an ablation of the encoder pretraining in           based on frequency. This post-processing is also applied to
+Sec. 4.4.                                                             baseline methods for fairest comparison.
+For the decoder network ϕθ that predicts the denoised ad-
+jacency matrix, we use a Graph Transformer (Dwivedi &                 4.2. Datasets and baselines
+Bresson, 2021). Specifically, we use separate MLPs to                 We evaluate DiffMS on two common open-source de novo
+encode edge features At , node features X, and structural             generation benchmark datasets, NPLIB1 (Dührkop et al.,
+condition y. We then apply several Graph Transformer lay-             2021a) and MassSpecGym (Bushuiev et al., 2024). The
+ers before using an MLP to predict the denoised adjacency             NPLIB1 dataset is the subset of GNPS data used to train the
+matrix Â.                                                            CANOPUS tool; this term is used to disambiguate the data
+We pretrain our diffusion decoder on a dataset of fingerprint-        from the method. In order to have a fair evaluation of all
+molecule pairs. Instead of using the spectrum encoder                 methods considered, we re-implement several baseline meth-
+embeddings as the structural condition y, we directly use             ods to be trained only on these datasets, with modifications
+the molecular fingerprint to condition the molecule gen-              to the codebase if they did not have a working open-source
+eration. This is closely aligned with the mass spectra                implementation. While some papers have historically also
+de novo generation task, as the decoder learns to gen-                benchmarked on the NIST20 or NIST23 datasets (NIST,
+erate molecules subject to strong structural constraints.             2023), this dataset is not publicly available without pur-
+Fingerprint-molecule datasets are essentially infinite in size,       chase of a license.
+providing a promising path forward to further improve                 MSNovelist (Stravs et al., 2022) builds a fingerprint-to-
+model performance by increasing the pretraining dataset               SMILES LSTM decoder to predict SMILES strings from
+size. To this end, we build a pretraining dataset consisting          the SIRIUS-generated CSI-FingerID fingerprint. The origi-
+of 2.8M fingerprint-molecule pairs sampled from DSSTox                nal implementation of MSNovelist is not readily retrainable,
+(CCTE, 2019), HMDB (Wishart et al., 2021), COCONUT                    and furthermore relies on the closed-source CSI-FingerID
+(Sorokina et al., 2021), and MOSES (Polykovskiy et al.,               fingerprint. The recently developed MIST model offers an
+2020) datasets. Critically, we remove all NPLIB1 and                  open-source replacement with reported comparative per-
+MassSpecGym test and validation molecules from our de-                formance to CSI-FingerID (Goldman et al., 2023b). Ac-
+coder pretraining dataset so that our evaluation on the end-          cordingly, we re-implement a baseline model that retains
+to-end generation task represents a setting where the model           the main contributions of MSNovelist, adopting the code
+is generating truly novel structures. Bushuiev et al. (2024)          from Zhao et al. (2024), with a 4096-bit Morgan fingerprint
+provide their own dataset of 4M molecules, but use a differ-          spectral encoder using MIST alongside a formula-guided
+ent exclusion criteria to prevent data leakage. We provide            fingerprint-to-SMILES LSTM. This fingerprint-to-SMILES
+an ablation and analysis of performance scaling with respect          decoder is trained on the same 2.8M dataset used to pretrain
+to pretraining dataset size in Sec. 4.4.                              our diffusion decoder; therefore, unlike the original MSNov-
+                                                                      elist implementation, both the spectral encoder and LSTM
+                                                                      decoder never see any test structures. We use the ranking
+
+                                                                  6
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+Table 1. De novo structural elucidation performance on NPLIB1 (Dührkop et al., 2021b) and MassSpecGym (Bushuiev et al., 2024)
+datasets. The best performing model for each metric is bold and the second best is underlined. ‡ indicates results reproduced from
+MassSpecGym. ∗ indicates our implementations of baseline approaches. Methods are approximately ordered by performance.
+                                                       Top-1                                       Top-10
+        Model                         Accuracy ↑     MCES ↓           Tanimoto ↑     Accuracy ↑   MCES ↓      Tanimoto ↑
+                                                               NPLIB1
+                   ∗
+        Spec2Mol                        0.00%          27.82             0.12          0.00%        23.13         0.16
+        MADGEN                          2.10%          20.56             0.22          2.39%        12.64         0.27
+        MIST + Neuraldecipher∗          2.32%          12.11             0.35          6.11%         9.91         0.43
+        MIST + MSNovelist∗              5.40%          14.52             0.34         11.04%        10.23         0.44
+        DiffMS                          8.34%          11.95             0.35         15.44%        9.23          0.47
+                                                          MassSpecGym
+        SMILES Transformer‡             0.00%          79.39             0.03         0.00%         52.13         0.10
+        MIST + MSNovelist∗              0.00%          45.55             0.06         0.00%         30.13         0.15
+        SELFIES Transformer‡            0.00%          38.88             0.08         0.00%         26.87         0.13
+        Spec2Mol∗                       0.00%          37.76             0.12         0.00%         29.40         0.16
+        MIST + Neuraldecipher∗          0.00%          33.19             0.14         0.00%         31.89         0.16
+        Random Generation‡              0.00%          21.11             0.08         0.00%         18.26         0.11
+        MADGEN                          1.31%          27.47             0.20         1.54%         16.84         0.26
+        DiffMS                          2.30%          18.45             0.28         4.25%         14.73         0.39
+
+
+methodology from MSNovelist, wherein beam search (with                4.3. Results
+a width of 100) and subsequently computed log-likelihoods
+                                                                      As seen in Table 1, DiffMS outperforms baseline methods
+are used for ranking. Similarly, Spec2Mol (Litsa et al.,
+                                                                      on both datasets, including more than doubling the accuracy
+2023) was also retrained on the NPLIB1 and MassSpecGym
+                                                                      on MassSpecGym compared to the next best method, MAD-
+datasets for fair evaluation, with only one spectral channel
+                                                                      GEN. While there are several baseline methods that achieve
+instead of four used for training, to alleviate restrictions on
+                                                                      non-zero prediction accuracy on NPLIB1, only MADGEN
+collision energy or adduct. The same ranking for candidate
+                                                                      and DiffMS generate any correct structures on MassSpec-
+molecules as used for DiffMS is applied.
+                                                                      Gym. NPLIB1 is inherently a less challenging dataset than
+We also introduce a new baseline method, MIST + Neu-                  MassSpecGym; given the lack of a scaffold-based split, the
+raldecipher, that replaces the diffusion decoder in DiffMS            CANOPUS test set contains many molecules that are nearly
+with Neuraldecipher. Neuraldecipher encodes a molecule                identical (Tanimoto similarity > 0.85) to molecules in the
+into a CDDD representation (Winter et al., 2019), and uses            train set (Bushuiev et al., 2024). This also explains the
+a pretrained LSTM decoder to reconstruct the SMILES                   competitive performance of MIST + Neuraldecipher and
+string. Similar to DiffMS, we pretrain the MIST en-                   MIST + MSNovelist, which both benefit from their ability to
+coder on spectrum-to-fingerprint predictions, and we pre-             pretrain on these highly similar structures and learn to gen-
+train Neuraldecipher on fingerprint-to-molecule generation.           erate realistic structures as SMILES strings; the MSNovelist
+Since MIST + Neuraldecipher uses the same pretraining-                generation even more so given its formula-aware decoder.
+finetuning approach as DiffMS, this new baseline addition-            In contrast, MassSpecGym ensures that no molecules in
+ally serves as an empirical justification for our graph diffu-        the test set have an MCES < 10 compared to any training
+sion decoder over an LSTM-based approach.                             molecule. As such, MassSpecGym evaluation represents a
+                                                                      more challenging and more realistic out of distribution de
+Finally, we include a comparison to MADGEN (Wang et al.,
+                                                                      novo generation setting, which illustrates the robust perfor-
+2025). The MADGENOracle entry in Wang et al. (2025)
+                                                                      mance of DiffMS across all evaluation metrics. Examples
+feeds in the ground-truth scaffold which does not fall within
+                                                                      of DiffMS-generated sampled are shown in Figure 4 and
+the setting of complete de novo generation, and is thus not
+                                                                      Appendix E. In Appendix B, we show that even in cases
+included in our evaluation. Because MADGEN uses RD-
+                                                                      where DiffMS does not recover the correct structure, it is
+KFingerprints for evaluation, as opposed to the traditional
+                                                                      consistently able to generate “close match“ structures that
+Morgan fingerprint, we exclude their Tanimoto similarities.
+                                                                      are still useful to domain experts.
+
+
+                                                                  7
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+
+
+Figure 4. Ground truth molecules (left column) and DiffMS predictions (right columns) on test samples from the MassSpecGym
+dataset (Bushuiev et al., 2024). Tanimoto similarity and MCES metrics listed for each top-k prediction. From top to bottom, the spectra
+IDs are MassSpecGymID0205184, MassSpecGymID0052933, MassSpecGymID0382596, and MassSpecGymID0152454. The top two
+rows show cases where DiffMS successfully reconstructs the true molecule in the top-1 prediction. In the bottom two rows, DiffMS does
+not reconstruct the correct molecule. Additional examples can be found in Appendix E.
+
+
+4.4. Pretraining Ablations
+To highlight the performance gains from pretraining the
+DiffMS encoder and decoder, we provide several ablations.
+Note that comparisons in Table 1 to MIST + Neuraldeci-                Table 2. DiffMS performance on NPLIB1 with and without pre-
+pher and MIST + MSNovelist already serve as empirical                 training the MIST encoder on the spectrum-to-fingerprint task.
+                                                                      The best performing model for each metric is bold.
+justification for DiffMS’ discrete graph decoder.
+                                                                           Pretrain?    Accuracy ↑      MCES ↓       Tanimoto ↑
+Encoder Pretraining Ablation. We train DiffMS without
+pretraining the MIST encoder on the spectra-to-fingerprint                                         Top-1
+task. As demonstrated in Table 2, encoder pretraining pro-
+vides significant performance gains on the NPLIB1 dataset,                     ✗          4.36%            12.34         0.31
+nearly doubling the top-1 accuracy. Additionally, we see                       ✓          8.34%            11.95         0.35
+that even without pretraining the encoder, DiffMS generates                                       Top-10
+realistic, plausible structures as indicated by the MCES and
+Tanimoto metrics. Nonetheless, the encoder pretraining im-                     ✗          11.46%           9.31          0.44
+proves the ability of the decoder to condition the diffusion                   ✓          15.44%           9.23          0.47
+on the spectra and obtain an exact match.
+Decoder Pretraining Ablation. We train DiffMS with in-
+creasing decoder pretraining dataset size, starting from 0
+
+                                                                  8
+                                                 DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+Table 3. DiffMS de novo structural elucidation performance on NPLIB1 (Dührkop et al., 2021b) and MassSpecGym (Bushuiev et al.,
+2024) datasets using MIST-CF annotated formulae and ground truth formulae. The best performing model for each metric is bold.
+
+                                                                                     Top-1                                                      Top-10
+                                     Formulae                  Accuracy ↑           MCES ↓                       Tanimoto ↑     Accuracy ↑     MCES ↓      Tanimoto ↑
+                                                                                                      NPLIB1
+                                     MIST-CF Formulae                7.03%            11.81                          0.36        14.98%          9.39          0.48
+                                     True Formulae                   8.34%            11.95                          0.35        15.44%          9.23          0.47
+                                                                                             MassSpecGym
+                                     MIST-CF Formulae                1.86%            17.83                          0.27         4.10%         13.71          0.40
+                                     True Formulae                   2.30%            18.45                          0.28         4.25%         14.73          0.39
+
+
+                                                                                                                     annotation tools (Goldman et al., 2023c; Xing et al., 2023;
+                        
+                                                                                                                     Böcker & Dührkop, 2016). In this section, we broaden the
+                        
+                                                                                                                     structural elucidation challenge and investigate the ability
+                                                                                                                     of DiffMS to rely on MIST-CF (Goldman et al., 2023c) for-
+                                                                                                                mula predictions to test its performance in settings where
+                                                                                                                     the true chemical formula is unknown.
+ $ F F X U D F \
+                        
+                                                                                                                     For each spectrum, we predict the top 5 most likely formu-
+                                                                                                                lae using MIST-CF. We then generate candidate structures
+                                                                                3 U H W U D L Q L Q J              for each of the predicted formulae. To have a fair compari-
+                                                                                  6 D P S O H V
+                                                                                          0                  son, we still generate 100 total molecules, split across the
+                                                                                               0
+                                                                                               0                  5 predicted formulae. As shown in Table 3, DiffMS still
+                        
+                                                                                               0                  has strong performance even when relying on formula an-
+                                                                                            
+                                                                                                                notation tools to supply the formula. While the elucidation
+                                                                                                          accuracy is slightly lower, the MCES and Tanimoto met-
+                                                         7 R S  .
+                                                                                                                     rics are actually better in some cases using the MIST-CF
+Figure 5. NPLIB1 top-k accuracy for DiffMS pretrained on in-                                                         predicted formulae. Intuitively, sampling molecules with
+creasingly large fingerprint-to-molecule datasets. Additional met-                                                   different formulae gives us higher diversity and thus a better
+rics available in Table 5 in the Appendix.                                                                           chance of getting a “close” structure.
+
+
+molecules (i.e., no pretraining) up to the full pretraining                                                          5. Conclusion
+dataset of 2.8M molecules. As shown in Fig. 5, any amount
+                                                                                                                     In this work, we propose DiffMS, a conditional molecule
+of decoder pretraining offers a significant increase in perfor-
+                                                                                                                     generative model with formula constraints for structural
+mance. Additionally, we observe good performance scaling
+                                                                                                                     elucidation from mass spectra. We develop a pretraining-
+with increasing pretraining dataset size. Since fingerprint-
+                                                                                                                     finetuning framework for separate spectra encoder and graph
+to-molecule datasets are essentially infinite in size, this pro-
+                                                                                                                     diffusion decoders that makes use of extensive fingerprint-
+vides an avenue to continue scaling DiffMS’ performance
+                                                                                                                     molecule datasets and ensures the spectrum encoder learns
+by building even larger and more chemically comprehensive
+                                                                                                                     to extract physically meaningful representations from mass
+pretraining datasets.
+                                                                                                                     spectra. We show that DiffMS achieves state-of-the-art
+Additional results and figures for encoder and decoder pre-                                                          results across common de novo generation benchmarks, and
+training ablations can be found in Appendix C.                                                                       provide several ablations to demonstrate the effectiveness
+                                                                                                                     of our contributions and the potential to further improve
+4.5. Formula Inference Ablation                                                                                      performance by scaling pretraining.
+In many real-world elucidation settings, chemists may know
+the true chemical formula of the target compound a priori or                                                         Acknowledgments
+be able to determine the true formula using auxiliary meth-                                                          This work was partly sponsored by DSO National Labo-
+ods. However, chemical formulae can also be predicted from                                                           ratories in Singapore (to C.W.C.), the MIT Summer Re-
+the spectrum with high accuracy by out-of-the-box formula
+
+                                                                                                                 9
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+search Program (MSRP), National Science Foundation un-                  CCTE, E.      Distributed Structure-Searchable Tox-
+der grant IIS-2243850 (to S.J.), and ARPA-H under grant                  icity (DSSTox) Database.         4 2019.       doi:
+1AY1AX000053 (to S.J.).                                                  10.23645/epacomptox.5588566.v7.               URL
+                                                                         https://epa.figshare.com/articles/
+Impact Statement                                                         dataset/Chemistry_Dashboard_Data_
+                                                                         DSSTox_Identifiers_Mapped_to_CAS_
+The advancement of computational tools for structure eluci-              Numbers_and_Names/5588566.
+dation will aid in the identification of unknown molecules,
+including metabolites as biomarkers for diagnostic appli-               Chen, X., He, J., Han, X., and Liu, L.-P. Efficient and
+cations or improving understanding of biology. There are                  degree-guided graph generation via discrete diffusion
+many potential beneficial societal consequences of our work               modeling, 2023. URL https://arxiv.org/abs/
+and very few potential negative ones, none of which warrant               2305.04111.
+elaboration here.                                                       Corso, G., Stärk, H., Jing, B., Barzilay, R., and Jaakkola,
+                                                                          T. Diffdock: Diffusion steps, twists, and turns for molec-
+References                                                                ular docking. In International Conference on Learning
+                                                                          Representations (ICLR), 2023.
+Adams, K. and Coley, C. W. Equivariant shape-conditioned
+  generation of 3d molecules for ligand-based drug design.              Dhariwal, P. and Nichol, A. Diffusion models beat gans
+  arXiv preprint arXiv:2210.04893, 2022.                                  on image synthesis. Advances in neural information
+                                                                          processing systems, 34:8780–8794, 2021.
+Alberts, M., Zipoli, F., and Vaucher, A. C. Learning the
+  language of nmr: Structure elucidation from nmr spectra               Dührkop, K., Shen, H., Meusel, M., Rousu, J., and Böcker,
+  using transformer models. In NeurIPS 2023 Workshop,                     S. Searching molecular structure databases with tandem
+  2023.                                                                   mass spectra using csi: Fingerid. Proceedings of the
+                                                                          National Academy of Sciences, 112(41):12580–12585,
+Allen, F., Greiner, R., and Wishart, D. Competitive fragmen-              2015.
+  tation modeling of esi-ms/ms spectra for putative metabo-
+  lite identification. Metabolomics, 11:98–110, 2015.                   Dührkop, K., Nothias, L.-F., Fleischauer, M., Reher, R.,
+                                                                          Ludwig, M., Hoffmann, M. A., Petras, D., Gerwick,
+Austin, J., Johnson, D. D., Ho, J., Tarlow, D., and van den               W. H., Rousu, J., Dorrestein, P. C., and Böcker, S.
+  Berg, R. Structured denoising diffusion models in dis-                  Systematic classification of unknown metabolites us-
+  crete state-spaces, 2023. URL https://arxiv.org/                        ing high-resolution fragmentation mass spectra. Nature
+  abs/2107.03006.                                                         Biotechnology, 39(4):462–471, Apr 2021a. ISSN 1546-
+                                                                          1696. doi: 10.1038/s41587-020-0740-8. URL https:
+Bittremieux, W., Wang, M., and Dorrestein, P. C. The
+                                                                          //doi.org/10.1038/s41587-020-0740-8.
+  critical role that spectral libraries play in capturing the
+  metabolomics community knowledge. Metabolomics, 18                    Dührkop, K., Nothias, L.-F., Fleischauer, M., Reher, R., Lud-
+  (12):94, 2022.                                                          wig, M., Hoffmann, M. A., Petras, D., Gerwick, W. H.,
+                                                                          Rousu, J., Dorrestein, P. C., et al. Systematic classi-
+Böcker, S. and Dührkop, K. Fragmentation trees reloaded.
+                                                                          fication of unknown metabolites using high-resolution
+  Journal of cheminformatics, 8:1–26, 2016.
+                                                                          fragmentation mass spectra. Nature biotechnology, 39(4):
+Bushuiev, R., Bushuiev, A., de Jonge, N. F., Young, A.,                   462–471, 2021b.
+  Kretschmer, F., Samusevich, R., Heirman, J., Wang, F.,
+                                                                        Dwivedi, V. P. and Bresson, X. A generalization of trans-
+  Zhang, L., Dührkop, K., Ludwig, M., Haupt, N. A.,
+                                                                         former networks to graphs. AAAI Workshop on Deep
+  Kalia, A., Brungs, C., Schmid, R., Greiner, R., Wang,
+                                                                         Learning on Graphs: Methods and Applications, 2021.
+  B., Wishart, D. S., Liu, L.-P., Rousu, J., Bittremieux, W.,
+  Rost, H., Mak, T. D., Hassoun, S., Huber, F., van der                 Flam-Shepherd, D., Zhigalin, A., and Aspuru-Guzik, A.
+  Hooft, J. J. J., Stravs, M. A., Böcker, S., Sivic, J., and             Scalable fragment-based 3d molecular design with rein-
+  Pluskal, T. Massspecgym: A benchmark for the dis-                       forcement learning. arXiv preprint arXiv:2202.00658,
+  covery and identification of molecules, 2024. URL                       2022.
+  https://arxiv.org/abs/2410.23326.
+                                                                        Gentry, E. C., Collins, S. L., Panitchpakdi, M., Belda-
+Butler, T., Frandsen, A., Lightheart, R., Bargh, B., Taylor, J.,          Ferre, P., Stewart, A. K., Carrillo Terrazas, M., Lu, H.-
+  Bollerman, T., Kerby, T., West, K., Voronov, G., Moon,                  h., Zuffa, S., Yan, T., Avila-Pacheco, J., et al. Reverse
+  K., et al. Ms2mol: A transformer model for illuminating                 metabolomics for the discovery of chemical structures
+  dark chemical space from mass spectra. ChemRxiv, 2023.                  from humans. Nature, 626(7998):419–426, 2024.
+
+                                                                   10
+                          DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+Goldman, S., Bradshaw, J., Xin, J., and Coley, C. Prefix-            Li, X., Thickstun, J., Gulrajani, I., Liang, P. S., and
+  tree decoding for predicting mass spectra from molecules.            Hashimoto, T. B. Diffusion-lm improves controllable
+ Advances in Neural Information Processing Systems, 36:                text generation. Advances in Neural Information Process-
+ 48548–48572, 2023a.                                                   ing Systems, 35:4328–4343, 2022.
+
+Goldman, S., Wohlwend, J., Stražar, M., Haroush, G.,                Li, Y., Vinyals, O., Dyer, C., Pascanu, R., and Battaglia,
+ Xavier, R. J., and Coley, C. W. Annotating metabo-                    P. Learning deep generative models of graphs. arXiv
+  lite mass spectra with domain-inspired chemical formula              preprint arXiv:1803.03324, 2018.
+  transformers. Nature Machine Intelligence, 5(9):965–979,
+                                                                     Lindsay, R. K., Buchanan, B., Feigenbaum, E., and Leder-
+  2023b.
+                                                                       berg, J. Applications of artificial intelligence for organic
+Goldman, S., Xin, J., Provenzano, J., and Coley, C. W.                 chemistry: the DENDRAL project. McGraw-Hill Compa-
+  Mist-cf: Chemical formula inference from tandem mass                 nies, 1980.
+  spectra. Journal of Chemical Information and Modeling,             Litsa, E. E., Chenthamarakshan, V., Das, P., and Kavraki,
+  64(7):2421–2431, 2023c.                                              L. E. An end-to-end deep learning framework for translat-
+Goldman, S., Li, J., and Coley, C. W. Generating molecu-               ing mass spectra to de-novo molecules. Communications
+  lar fragmentation graphs with autoregressive neural net-             Chemistry, 6(1):132, 2023.
+ works. Analytical Chemistry, 96(8):3419–3428, 2024.                 Liu, L., Jiang, H., He, P., Chen, W., Liu, X., Gao, J., and
+                                                                       Han, J. On the variance of the adaptive learning rate
+Gómez-Bombarelli, R., Wei, J. N., Duvenaud, D.,
+                                                                       and beyond. In Proceedings of the Eighth International
+  Hernández-Lobato, J. M., Sánchez-Lengeling, B., She-
+                                                                       Conference on Learning Representations (ICLR 2020),
+  berla, D., Aguilera-Iparraguirre, J., Hirzel, T. D., Adams,
+                                                                       April 2020.
+  R. P., and Aspuru-Guzik, A. Automatic chemical de-
+  sign using a data-driven continuous representation of              Liu, M., Luo, Y., Uchino, K., Maruhashi, K., and Ji, S.
+  molecules. ACS central science, 4(2):268–276, 2018.                  Generating 3d molecules for target protein binding. In
+                                                                       International Conference on Machine Learning, 2022.
+Ho, J. and Salimans, T. Classifier-free diffusion guidance.
+  arXiv preprint arXiv:2207.12598, 2022.                             Liu, Q., Allamanis, M., Brockschmidt, M., and Gaunt, A.
+                                                                       Constrained graph variational autoencoders for molecule
+Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-            design. Advances in neural information processing sys-
+  bilistic models. In Proceedings of the 34th International            tems, 31, 2018.
+ Conference on Neural Information Processing Systems,
+  NIPS ’20, Red Hook, NY, USA, 2020. Curran Associates               Loshchilov, I. and Hutter, F. Sgdr: Stochastic gradient
+  Inc. ISBN 9781713829546.                                             descent with warm restarts, 2017.
+
+Hu, M., Yang, L., Twarog, N., Ochoada, J., Li, Y., Vrettos,          Loshchilov, I. and Hutter, F. Decoupled weight decay reg-
+  E. I., Torres-Hernandez, A. X., Martinez, J. B., Bhatia,             ularization. In Proceedings of the Seventh International
+ J., Young, B. M., et al. Continuous collective analysis of            Conference on Learning Representations (ICLR 2019),
+  chemical reactions. Nature, 636(8042):374–379, 2024.                 2019.
+
+Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating         Lou, A., Meng, C., and Ermon, S. Discrete diffusion model-
+  the design space of diffusion-based generative models.               ing by estimating the ratios of the data distribution, 2024.
+ Advances in neural information processing systems, 35:                URL https://arxiv.org/abs/2310.16834.
+  26565–26577, 2022.                                                 Luo, S., Guan, J., Ma, J., and Peng, J. A 3d generative model
+                                                                       for structure-based drug design. Advances in Neural
+Kretschmer, F., Seipp, J., Ludwig, M., Klau, G. W.,
+                                                                       Information Processing Systems, 34:6229–6239, 2021.
+  and Böcker, S. Small molecule machine learning:
+  All models are wrong, some may not even be useful.                 Luo, Y. and Ji, S. An autoregressive flow model for 3d
+  bioRxiv, 2023.    doi: 10.1101/2023.03.27.534311.                    molecular geometry generation from scratch. In Inter-
+  URL https://www.biorxiv.org/content/                                 national conference on learning representations (ICLR),
+  early/2023/03/27/2023.03.27.534311.                                  2022.
+Le, T., Winter, R., Noé, F., and Clevert, D.-                       Morgan, H. L. The generation of a unique machine de-
+  A.      Neuraldecipher–reverse-engineering extended-                scription for chemical structures-a technique developed
+  connectivity fingerprints (ecfps) to their molecular struc-         at chemical abstracts service. Journal of chemical docu-
+  tures. Chemical science, 11(38):10378–10389, 2020.                  mentation, 5(2):107–113, 1965.
+
+                                                                11
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+Murphy, M., Jegelka, S., Fraenkel, E., Kind, T., Healey, D.,            In Artificial Neural Networks and Machine Learning–
+ and Butler, T. Efficiently predicting high resolution mass             ICANN 2018: 27th International Conference on Artificial
+ spectra with graph neural networks. In International Con-              Neural Networks, Rhodes, Greece, October 4-7, 2018,
+ ference on Machine Learning, pp. 25549–25562. PMLR,                    Proceedings, Part I 27, pp. 412–422. Springer, 2018.
+ 2023.
+                                                                      Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and
+Nichol, A. Q. and Dhariwal, P. Improved denoising diffu-                Ganguli, S. Deep unsupervised learning using nonequi-
+  sion probabilistic models. In International conference on             librium thermodynamics. In Bach, F. and Blei, D. (eds.),
+  machine learning, pp. 8162–8171. PMLR, 2021.                          Proceedings of the 32nd International Conference on Ma-
+                                                                        chine Learning, volume 37 of Proceedings of Machine
+NIST. NIST standard reference database. National Institute              Learning Research, pp. 2256–2265, Lille, France, 07–
+  of Standards and Technology, 2023. URL https://                       09 Jul 2015. PMLR. URL https://proceedings.
+  www.nist.gov/srd.                                                     mlr.press/v37/sohl-dickstein15.html.
+Nowatzky, Y., Russo, F., Lisec, J., Kister, A., Reinert, K.,          Song, Y., Sohl-Dickstein, J., Kingma, D. P., Kumar, A.,
+  Muth, T., and Benner, P. Fiora: Local neighborhood-                   Ermon, S., and Poole, B. Score-based generative mod-
+  based prediction of compound mass spectra from single                 eling through stochastic differential equations. In In-
+  fragmentation events. bioRxiv, pp. 2024–04, 2024.                     ternational Conference on Learning Representations,
+                                                                        2021. URL https://openreview.net/forum?
+Polykovskiy, D., Zhebrak, A., Sanchez-Lengeling, B., Golo-
+                                                                        id=PxTIG12RRHS.
+  vanov, S., Tatanov, O., Belyaev, S., Kurbanov, R., Arta-
+  monov, A., Aladinskiy, V., Veselov, M., Kadurin, A., Jo-            Sorokina, M., Merseburger, P., Rajan, K., Yirik, M. A., and
+  hansson, S., Chen, H., Nikolenko, S., Aspuru-Guzik, A.,               Steinbeck, C. Coconut online: Collection of open natural
+  and Zhavoronkov, A. Molecular sets (moses): A bench-                  products database. Journal of Cheminformatics, 13(1),
+  marking platform for molecular generation models, 2020.               Jan 2021. doi: 10.1186/s13321-020-00478-9.
+  URL https://arxiv.org/abs/1811.12823.
+                                                                      Stravs, M. A., Dührkop, K., Böcker, S., and Zamboni, N.
+Quinn, R. A., Melnik, A. V., Vrbanac, A., Fu, T., Patras,               Msnovelist: de novo structure generation from mass spec-
+  K. A., Christy, M. P., Bodai, Z., Belda-Ferre, P., Tripathi,          tra. Nature Methods, 19(7):865–870, 2022.
+ A., Chung, L. K., et al. Global chemical effects of the
+  microbiome include new bile-acid conjugations. Nature,              Tian, Z., Zhao, H., Peter, K. T., Gonzalez, M., Wetzel, J.,
+  579(7797):123–129, 2020.                                              Wu, C., Hu, X., Prat, J., Mudrock, E., Hettinger, R., et al.
+                                                                        A ubiquitous tire rubber–derived chemical induces acute
+Roney, J. P., Maragakis, P., Skopp, P., and Shaw, D. E.                 mortality in coho salmon. Science, 371(6525):185–189,
+  Generating realistic 3d molecules with an equivariant                 2021.
+  conditional likelihood model. 2022.
+                                                                      Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+Saharia, C., Chan, W., Saxena, S., Li, L., Whang, J., Denton,           L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. Atten-
+  E. L., Ghasemipour, K., Gontijo Lopes, R., Karagol Ayan,              tion is all you need. In Neural Info. Process. Systems,
+  B., Salimans, T., et al. Photorealistic text-to-image dif-            volume 30, 2017.
+  fusion models with deep language understanding. Ad-
+  vances in neural information processing systems, 35:                Vignac, C., Krawczuk, I., Siraudin, A., Wang, B., Cevher,
+  36479–36494, 2022.                                                    V., and Frossard, P. Digress: Discrete denoising diffusion
+                                                                        for graph generation. In International Conference on
+Segler, M. H., Kogej, T., Tyrchan, C., and Waller, M. P.                Learning Representations (ICLR), 2023.
+  Generating focused molecule libraries for drug discovery
+  with recurrent neural networks. ACS central science, 4              Wang, Y., Chen, X., Liu, L., and Hassoun, S. MADGEN:
+  (1):120–131, 2018.                                                   Mass-spec attends to de novo molecular generation. In
+                                                                       The Thirteenth International Conference on Learning
+Shrivastava, A. D., Swainston, N., Samanta, S., Roberts,               Representations, 2025. URL https://openreview.
+  I., Wright Muelas, M., and Kell, D. B. Massgenie: A                  net/forum?id=78tc3EiUrN.
+  transformer-based deep learning method for identifying
+  small molecules from their mass spectra. Biomolecules,              Watson, J. L., Juergens, D., Bennett, N. R., Trippe,
+  11(12):1793, 2021.                                                   B. L., Yim, J., Eisenach, H. E., Ahern, W., Borst,
+                                                                       A. J., Ragotte, R. J., Milles, L. F., Wicky, B. I. M.,
+Simonovsky, M. and Komodakis, N. Graphvae: Towards                     Hanikel, N., Pellock, S. J., Courbet, A., Sheffler, W.,
+  generation of small graphs using variational autoencoders.           Wang, J., Venkatesh, P., Sappington, I., Torres, S. V.,
+
+                                                                 12
+                           DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+  Lauko, A., Bortoli, V. D., Mathieu, E., Ovchinnikov,                Conference on Bioinformatics and Biomedicine (BIBM),
+  S., Barzilay, R., Jaakkola, T., DiMaio, F., Baek, M.,               pp. 817–822. IEEE, December 2024.
+  and Baker, D. De novo design of protein structure and
+  function with rfdiffusion. Nature, 620:1089 – 1100,
+  2023. URL https://api.semanticscholar.
+  org/CorpusID:271161349.
+
+Winter, R., Montanari, F., Noé, F., and Clevert, D.-
+ A. Learning continuous and data-driven molecular de-
+ scriptors by translating equivalent chemical represen-
+ tations. Chem. Sci., 10:1692–1701, 2019. doi: 10.
+ 1039/C8SC04175J. URL http://dx.doi.org/10.
+ 1039/C8SC04175J.
+
+Wishart, D. S., Guo, A., Oler, E., Wang, F., Anjum, A.,
+ Peters, H., Dizon, R., Sayeeda, Z., Tian, S., Lee, B.,
+ Berjanskii, M., Mah, R., Yamamoto, M., Jovel, J., Torres-
+ Calzada, C., Hiebert-Giesbrecht, M., Lui, V., Varshavi,
+ D., Varshavi, D., Allen, D., Arndt, D., Khetarpal, N.,
+ Sivakumaran, A., Harford, K., Sanford, S., Yee, K.,
+ Cao, X., Budinski, Z., Liigand, J., Zhang, L., Zheng,
+ J., Mandal, R., Karu, N., Dambrova, M., Schiöth, H.,
+ Greiner, R., and Gautam, V. Hmdb 5.0: the human
+ metabolome database for 2022. Nucleic Acids Research,
+ 50(D1):D622–D631, 11 2021. ISSN 0305-1048. doi:
+ 10.1093/nar/gkab1062. URL https://doi.org/10.
+ 1093/nar/gkab1062.
+
+Xing, S., Shen, S., Xu, B., Li, X., and Huan, T. BUDDY:
+  molecular formula discovery via bottom-up MS/MS in-
+  terrogation. Nat. Methods, 20(6):881–890, June 2023.
+
+Young, A., Röst, H., and Wang, B. Tandem mass spectrum
+  prediction for small molecules using graph transformers.
+  Nature Machine Intelligence, 6(4):404–416, 2024a.
+
+Young, A., Wang, F., Wishart, D., Wang, B., Röst,
+  H., and Greiner, R. Fragnnet: A deep probabilistic
+  model for mass spectrum prediction. arXiv preprint
+  arXiv:2404.02360, 2024b.
+
+Zeni, C., Pinsler, R., Zügner, D., Fowler, A., Horton, M., Fu,
+  X., Shysheya, S., Crabbé, J., Sun, L., Smith, J., Nguyen,
+  B., Schulz, H., Lewis, S., Huang, C.-W., Lu, Z., Zhou,
+  Y., Yang, H., Hao, H., Li, J., Tomioka, R., and Xie, T.
+  Mattergen: a generative model for inorganic materials de-
+  sign, 2024. URL https://arxiv.org/abs/2312.
+  03687.
+
+Zhang, X., Wang, L., Helwig, J., Luo, Y., Fu, C., Xie, Y.,
+  ..., and Ji, S. Artificial intelligence for science in quan-
+  tum, atomistic, and continuum systems. arXiv preprint
+  arXiv:2307.08423, 2023.
+
+Zhao, K., Liu, Y., Dian, L., Sun, S., and Cui, X. How to
+  train your neural network for molecular structure gener-
+  ation from mass spectra? In 2024 IEEE International
+
+                                                                 13
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+Table 4. Additional evaluation of molecule validity, and percentage above domain-expert-defined Tanimoto thresholds on NPLIB1
+(Dührkop et al., 2021b) and MassSpecGym (Bushuiev et al., 2024) de novo generation datasets. The best performing model for each
+metric is bold and the second best is underlined. Definitions of meaningful match (Tanimoto similarity ≥ 0.4) and close match (Tanimoto
+similarity ≥ 0.675) are taken from Butler et al. (2023).
+                              OVERALL                        T OP -1                                       T OP -10
+  M ODEL                     % VALID ↑    % M EANINGFUL MATCH ↑        % C LOSE MATCH ↑    % M EANINGFUL MATCH ↑      % C LOSE MATCH ↑
+                                                                           NPLIB1
+  S PEC 2M OL                  66.5%               0.00%                    0.00%                  0.00%                   0.00%
+  MIST + N EURALDECIPHER      91.11%              29.30%                    7.33%                 41.39%                  12.82%
+  MIST + MSN OVELIST          98.60%              32.90%                   11.78%                 44.79%                  19.02%
+  D IFF MS                    100.0%              27.40%                   12.83%                 46.45%                  22.04%
+                                                                        M ASS S PEC G YM
+  S PEC 2M OL                  68.5%                0.0%                     0.0%                   0.0%                    0.0%
+  MIST + N EURALDECIPHER      81.78%               0.29%                    0.01%                  0.39%                   0.09%
+  MIST + MSN OVELIST          98.58%               0.66%                    0.00%                  1.92%                   0.00%
+  D IFF MS                    100.0%              12.41%                    3.78%                 32.47%                   6.73%
+
+
+
+A. Experimental Details
+For node features X, we use a one-hot encoding of atom types, X ∈ Rn×d , where d is the number of different atom types in
+the dataset.
+For pretraining the decoder, we use 2048-bit Morgan fingerprints with radius 2 for the structural conditioning y ∈ R2048 .
+We use the same training objective as the end-to-end finetuning, i.e., minimizing the cross-entropy loss between the
+denoised adjacency matrix Â and the true adjacency matrix, Â. We build a decoder pretraining datset consisting of 2.8M
+fingerprint-molecule pairs sampled from DSSTox (CCTE, 2019), HMDB (Wishart et al., 2021), COCONUT (Sorokina
+et al., 2021), and MOSES (Polykovskiy et al., 2020) datasets. We pretrain the decoder for 100 epochs using the AdamW
+optimizer (Loshchilov & Hutter, 2017) and a cosine annealing learning rate scheduler (Loshchilov & Hutter, 2019).
+We pretrain the encoder on the same dataset used for finetuning (i.e. NPLIB1, MassSpecGym), which are orders of
+magnitude smaller than the decoder pretraining dataset. For encoder pretraining, we use the multi-objective loss settings of
+Goldman et al. (2023b). We pretrain the encoder for 100 epochs using the RAdam optimizer (Liu et al., 2020).
+We finetune the end-to-end model using cross-entropy loss and no auxiliary training objectives, i.e. only the denoising
+diffusion objective. We use the AdamW optimizer with cosine annealing learning rate schedule for finetuning. We finetune
+DiffMS for 50 epochs on NPLIB1 and 15 epochs on MassSpecGym.
+DiffMS is a relatively lightweight model, and all experiments were run on NVIDIA 2080ti GPUs with 12 GB of memory. On
+these GPUs, finetuning DiffMS takes 1.45 minutes per epoch on CANOPUS and 46 minutes per epoch on MassSpecGym.
+It takes 4 minutes on average to generate 100 samples from DiffMS.
+
+B. Additional Results
+As an addendum to the evaluations in Table 1, we provide some additional metrics to further contextualize DiffMS
+performance. Firstly, we evaluate the percentage of model samples that correspond to valid molecules. Additionally,
+we adopt the domain-expert thresholds put forth by MS2Mol (Butler et al., 2023), where we evaluate whether candidate
+molecules were a “meaningful” match in structural similarity, having a Tanimoto similarity of 0.4 or greater; or a “close
+match” in structural similarity, having a Tanimoto similarity of 0.675 or greater. We omit MADGEN and the baseline
+methods from Bushuiev et al. (2024) as they do not report these metrics.
+As shown in Table 4, 100% of DiffMS samples are valid molecules. This is directly enforced because of our graph-based
+representation. In contrast, SMILES strings generated by baseline methods may not correspond to a valid structure. We find
+that DiffMS consistently achieves higher meaningful and close match rates than baseline methods. Impressively, DiffMS
+achieves over 32 times more meaningful matches in the top-10 predictions than the next best baseline on MassSpecGym.
+These results show that while generating exact matches continues to be a challenging task for de novo structural elucidation,
+DiffMS is able to generate meaningful structural matches at a high rate.
+
+                                                                  14
+                                                DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+                                                                                                                                                   
+                         
+
+                         
+                                                                                                                                                   
+
+                         
+
+
+
+                                                                                                                    7 D Q L P R W R  6 L P 
+                                                                                                                                                   
+  $ F F X U D F \
+                         
+
+                                                                                                                                              
+                                                                                 3 U H W U D L Q L Q J                                                                                                     3 U H W U D L Q L Q J
+                                                                                   6 D P S O H V                                                                                                              6 D P S O H V
+                                                                                           0                                                                                                                        0
+                                                                                                0                                                                                                                     0
+                                                                                           0                                                                                                                        0
+                                                                                                0                                                                                                                        0
+                                                                                                                                                                                                                        
+                                                                                                                                              
+                                                                                                                                                                                                                     
+                                                         7 R S  .                                                                                                                 7 R S  .
+
+Figure 6. Annotation accuracy (left) and Tanimoto similarity (right) on the NPLIB1 dataset for DiffMS pretrained on increasingly large
+pretraining datasets.
+
+Table 5. DiffMS performance on NPLIB1 for DiffMS pretrained on increasingly large fingerprint-to-molecule datasets. The best
+performing model for each metric is bold and second best is underlined.
+
+                           # P RETRAINING                                   T OP -1                                                                                               T OP -10
+                            S TRUCTURES         ACCURACY ↑                  MCES ↓                     TANIMOTO ↑                                             ACCURACY ↑          MCES ↓              TANIMOTO ↑
+                                        0               2.22%               15.37                                 0.22                                          4.86%              12.06                 0.34
+                                      0.2M              3.61%               13.22                                 0.28                                         10.71%              9.85                  0.41
+                                      0.8M              5.60%               13.02                                 0.30                                         12.70%              9.86                  0.44
+                                      1.2M              7.22%               11.63                                 0.33                                         14.69%               9.23                 0.43
+                                      2.8M              8.34%               11.95                                 0.35                                         15.44%               9.23                 0.47
+
+
+C. Ablations
+C.1. Additional Pretraining Ablation Results
+In this section, we provide additional results for the ablation studies in Sec. 4.4. Table 5 and Fig. 7 demonstrate DiffMS’
+performance scaling with respect to increasingly large decoder pretraining datasets, and Fig 6 shows the impact of pretraining
+the spectra encoder.
+
+C.2. Prior Distribution Ablations
+In this section we provide an additional ablation study to justify the choice of the marginal prior distribution. Specifically, we
+compare with two alternative prior distributions: the “empty” distribution, consisting of no bonds, and the “fully connected”
+distribution, consisting of all single bonds. As shown in Table 6, the marginal distribution performs best, though the empty
+distribution is not far behind. Intuitively, the empty distribution is close to the marginal distribution as molecular graphs are
+typically very sparse. These results support our intuitions that having a prior distribution that is closer to the data distribution
+results in better performance.
+
+D. Formulae Annotation Study
+In this section, we provide additional experiments using MIST-CF (Goldman et al., 2023b) and BUDDY (Xing et al., 2023)
+for formula annotation on the NPLIB1 and MassSpecGym datasets. Specifically, we use BUDDY and MIST-CF to predict
+the top-5 most likely formulae for each spectra in the test sets and measure the accuracy of these formula annotations.
+As shown in Table 7, MIST-CF and BUDDY both achieve good performance on NPLIB1, where MIST-CF achieves over
+
+                                                                                                                  15
+                                              DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+
+                                                                                                                                                      
+                         
+
+                         
+                                                                                                                                                      
+
+                         
+
+
+
+                                                                                                                       7 D Q L P R W R  6 L P 
+                                                                                                                                                      
+
+  $ F F X U D F \
+                         
+
+                                                                                                                                                 
+
+                         
+                                                                                                                                                      
+                                                                       3 U H W U D L Q  ( Q F R G H U                                                                                                    3 U H W U D L Q  ( Q F R G H U
+                                                                                              < H V                                                                                                                              < H V
+                                                                                              1 R                                                                                                                                1 R
+                                                                                                                                                 
+                                                                                                                                                                                                                               
+                                                        7 R S  .                                                                                                                          7 R S  .
+
+Figure 7. Annotation accuracy (left) and Tanimoto similarity (right) on the NPLIB1 dataset for DiffMS with and without encoder
+pretraining.
+
+
+Table 6. DiffMS performance on NPLIB1 with different prior distributions. The best performing model for each metric is bold and second
+best is underlined.
+
+                                                                                       T OP -1                                                                                                T OP -10
+               P RIOR D ISTRIBUTION
+                                                      ACCURACY ↑                     MCES ↓                          TANIMOTO ↑                                        ACCURACY ↑             MCES ↓              TANIMOTO ↑
+                     F ULLY C ONNECTED                    3.36%                         12.67                                            0.28                              7.60%                  9.56                         0.4
+                           E MPTY                         6.60%                         11.55                                            0.34                             14.94%                  9.07                         0.47
+                         M ARGINAL                        8.34%                         11.95                                            0.35                             15.44%                  9.23                         0.47
+
+
+90% top-5 accuracy. However, both methods struggle on MassSpecGym, underscoring the difficulty of this dataset. It
+is important to note that neither NPLIB1 nor MassSpecGym include MS1 data, such as precursor m/z, which can aid in
+deriving accurate formula annotations. As such, these formula annotation accuracies are likely lower than what could be
+achieved in end-to-end elucidation workflows.
+
+Table 7. Formula annotation accuracy for MIST-CF (Goldman et al., 2023c) and BUDDY(Xing et al., 2023) on the NPLIB1 (Böcker &
+Dührkop, 2016) and MassSpecGym (Bushuiev et al., 2024) datasets. The best performing method for each metric is bold.
+
+                                                                                     NPLIB1                                                                           M ASS S PEC G YM
+                                             M ODEL
+                                                                    T OP -1 ACC .                     T OP -5 ACC .                                              T OP -1 ACC .   T OP -5 ACC .
+                                             BUDDY                         78%                                83%                                                   59%               71%
+                                             MIST-CF                       84%                                92%                                                   48%               69%
+
+
+
+
+                                                                                                                     16
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+E. DiffMS Generated Molecules
+E.1. NPLIB1 Molecules
+
+
+
+
+Figure 9. Negative (failure) test samples from the NPLIB1 dataset (Dührkop et al., 2021b). Ground truth molecules (left column) and
+DiffMS predictions (right columns).
+
+
+
+
+                                                                17
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+
+
+Figure 8. Positive (correct) test samples from the NPLIB1 dataset (Dührkop et al., 2021b). Ground truth molecules (left column) and
+DiffMS predictions (right columns).
+
+
+
+
+                                                                18
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+E.2. MassSpecGym Molecules
+
+
+
+
+Figure 10. Positive (correct) test samples from the MassSpecGym dataset (Bushuiev et al., 2024). Ground truth molecules (left column)
+and DiffMS predictions (right columns).
+
+
+
+
+                                                                 19
+                            DiffMS: Diffusion Generation of Molecules Conditioned on Mass Spectra
+
+
+
+
+Figure 11. Negative (failure) test samples from the MassSpecGym dataset (Bushuiev et al., 2024). Ground truth molecules (left column)
+and DiffMS predictions (right columns).
+
+
+                                                                 20
+

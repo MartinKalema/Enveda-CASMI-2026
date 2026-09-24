@@ -1,0 +1,1843 @@
+MS-GPT: Rethinking MS/MS De Novo Structure Elucidation
+as Spectrum-Induced Posterior Querying
+of a Molecule-Language Model
+Xin Zhao
+zhaoxin0807@sjtu.edu.cn
+MoE Key Lab of Artificial
+Intelligence, AI Institute,
+School of Computer
+Science
+Shanghai Jiao Tong
+University
+Shanghai, China
+Yumin Liu
+ymliu@sjtu.edu.cn
+Instrumental Analysis
+Center
+Shanghai Jiao Tong
+University
+Shanghai, China
+Zhuo Li
+zhuo.li@vipl.ict.ac.cn
+ByteDance Inc.
+Beijing, China
+Weichu Zheng
+sjtu_zwc0518@sjtu.edu.cn
+MoE Key Lab of Artificial
+Intelligence, AI Institute,
+School of Computer
+Science
+Shanghai Jiao Tong
+University
+Shanghai, China
+Feng Zhu
+fzchem@sjtu.edu.cn
+Frontiers Science Center
+for Transformative
+Molecules; Shanghai Key
+Laboratory for Molecular
+Engineering of Chiral
+Drugs; School of Chemistry
+and Chemical Engineering;
+Zhangjiang Institute for
+Advanced Study
+Shanghai Jiao Tong
+University
+Shanghai, China
+Xiaokang Yang∗
+xkyang@sjtu.edu.cn
+MoE Key Lab of Artificial
+Intelligence, AI Institute,
+School of Computer
+Science
+Shanghai Jiao Tong
+University
+Shanghai, China
+Yaohui Jin∗
+jinyh@sjtu.edu.cn
+MoE Key Lab of Artificial
+Intelligence, AI Institute,
+School of Computer
+Science
+Shanghai Jiao Tong
+University
+Shanghai, China
+Yanyan Xu∗
+yanyanxu@sjtu.edu.cn
+MoE Key Lab of Artificial
+Intelligence, AI Institute,
+School of Computer
+Science
+Shanghai Jiao Tong
+University
+Shanghai, China
+Abstract
+Molecular structure elucidation from tandem mass spectra (MS/MS)
+is a central inverse problem in analytical chemistry. Most exist-
+ing approaches to MS/MS identification remain tied to reference
+libraries or predefined candidate sets, whereasde novomethods
+aim to generate structures directly from spectra. A commonde
+novoroute predicts a molecular fingerprint from the spectrum
+and then decodes structures from it, enabling decoder pretrain-
+ing on large molecule-only corpora. However, this paradigm cre-
+ates a training–inference mismatch: the decoder is trained on or-
+acle fingerprints computed from molecules, but at inference it
+is queried with a noisy spectrum-induced fingerprint posterior
+that is typically collapsed to a single thresholded fingerprint. We
+introduce MS-GPT, which recasts fingerprint-mediatedde novo
+elucidation as spectrum-induced posterior querying of a condi-
+tional molecule-language model. MS-GPT conditions a molecule-
+language model on fingerprints and formulas, then converts the
+spectrum-induced posterior into a band of fingerprint queries near
+the oracle-fingerprint manifold through active-bit density calibra-
+tion. Candidates sampled across this band are pooled and ranked
+by generation-frequency consensus. A lightweight LoRA adapter
+further mitigates domain-specific posterior bias while preserving
+∗Corresponding authors.
+the pretrained molecular prior. On NPLIB1 and MassSpecGym, MS-
+GPT sets a new state of the art, reaching Top-1/Top-10 exact-match
+accuracy of29.8%/41.1%and23 .9%/28.7%, respectively. Candidate-
+pool scaling shows that efficient autoregressive molecular gen-
+eration continues to improve recall with a little additional infer-
+ence cost. The source code and model checkpoints are available at
+https://github.com/VIKI623/MS-GPT.
+CCS Concepts
+•Computing methodologies  Machine learning;•Applied
+computingChemistry.
+Keywords
+tandem mass spectrometry, de novo structure elucidation, spectrum-
+induced posterior, molecule-language model, AI for science
+1
+arXiv:2607.23607v1  [cs.LG]  26 Jul 2026
+Zhao et al.
+1 Introduction
+Molecular structure elucidation from tandem mass spectra (MS/MS)
+is a central inverse problem in analytical chemistry, with applica-
+tions in drug discovery, natural product research, environmental
+monitoring, and clinical diagnostics [ 1]. Existing computational
+approaches match query spectra to reference libraries [16], score
+database candidates through simulated fragmentation [34, 40], infer
+molecular fingerprints for candidate ranking [10, 13], or retrieve
+structures through cross-modal alignment [8, 18]. Although effec-
+tive, these methods remain tied to reference spectra or predefined
+candidate sets, limiting their reach to previously characterized re-
+gions of chemical space.De novostructure elucidation instead gen-
+erates candidate structures directly from a query spectrum, offering
+a route into the dark chemical space that reference-dependent meth-
+ods leave unexplored [4, 6, 36].
+A practical route tode novostructure elucidation is the two-stage
+fingerprint-mediated paradigm. A spectrum encoder first predicts a
+molecular fingerprint from the MS/MS input, and a conditional de-
+coder then generates structures from the predicted fingerprint [36].
+Because fingerprints can be computed from molecular structures
+alone, the decoder can be pretrained on large molecule-only corpora
+without annotated spectra [21, 38]. Recent work in this paradigm
+has largely emphasized more expressive decoders, including se-
+quence, diffusion-like, and flow-based architectures [2, 3, 14, 28, 37].
+However, improving the decoder architecture alone leaves a cen-
+tral mismatch unresolved: the decoder is trained on discrete oracle
+fingerprints computed from molecules, but inference supplies a
+noisy spectrum-induced fingerprint posterior . Most pipelines
+collapse this posterior to a single thresholded fingerprint before
+molecule generation, replacing a distribution over fingerprint bits
+with one deterministic point query. We instead treat the posterior
+not as a fingerprint to be thresholded once, but as a distribution from
+which decoder queries should be constructed. This view reformu-
+lates fingerprint-mediated MS/MSde novoelucidation as spectrum-
+induced posterior querying of a conditional molecule-language
+model: the model learns a spectrum-free map from fingerprint-
+formula queries to compatible molecular structures, while spec-
+tral evidence enters at inference through posterior-derived queries
+rather than a single point estimate.
+Here, we introduce MS-GPT to realize this posterior-querying
+formulation. MS-GPT builds on SAFE-GPT [29], a pretrained autore-
+gressive generator for molecular SAFE token sequences, and adapts
+it to condition on fingerprints and formulas. MS-GPT addresses this
+oracle-to-posterior gap along two complementary axes: how the
+posterior is converted into queries the model can answer, and how
+the model is adapted to answer domain-shifted posterior queries ac-
+curately. Along the first axis, active-bit density band calibration and
+fixed-size group querying keep posterior-derived queries near the
+oracle-fingerprint manifold while spanning plausible posterior op-
+erating points. Along the second axis, posterior-aligned adaptation
+selectively updates the query-reading pathway, aligning the model
+with posterior-derived active-bit co-occurrence patterns while pre-
+serving the pretrained molecular prior.
+Our contributions are summarized as follows:
+• We reformulate fingerprint-mediated MS/MSde novoeluci-
+dation asspectrum-induced posterior querying of a conditional
+Figure 1: NPLIB1 Top-10 exact-match accuracy versus per-
+spectrum inference compute (log scale). The MS-GPT curve
+spans candidate-pool sizes =100–1500; other markers de-
+note diffusion-like and autoregressive baselines. Candidate-
+pool scaling steadily improves recovery with a near-linear
+increase in inference compute, placing MS-GPT on a favor-
+able accuracy–efficiency frontier.
+molecule-language model, moving beyond the common point-
+query approximation. The conditional molecule-language
+model is pretrained on molecule-only data and conditioned
+on posterior-derived queries at inference.
+• We propose three components for spectrum-induced poste-
+rior querying.Active-bit density band calibrationcalibrates a
+query band near the oracle-fingerprint manifold.Fixed-size
+group queryingdistributes the candidate pool across poste-
+rior operating points in the band while holding its total size
+fixed.Posterior-aligned adaptationtunes query reading while
+preserving the pretrained molecular prior.
+• We establish new state-of-the-art exact-match accuracy and
+Morgan Tanimoto similarity on NPLIB1 and MassSpecGym.
+Our ablation study shows that all three components provide
+complementary gains. Candidate-pool scaling shows that
+efficient autoregressive molecular generation continues to
+improve recall with a little additional inference cost.
+2 Related Work
+2.1 Molecule-Language Models
+Molecule-language models build on the serialization of molecu-
+lar graphs as token sequences. SMILES provides a compact line
+notation for chemical structures [44], while later representations
+such as SELFIES and SAFE improve validity, substructure local-
+ity, and sequence generation [20, 29]. Building on these notations,
+Transformer [39] pretraining has produced transferable molec-
+ular representations for property prediction and representation
+learning, including SMILES Transformer, ChemBERTa, and MoL-
+Former [7, 15, 32]. Molecule strings have also supported cross-
+modal and generative models, including MolT5 for translating be-
+tween molecules and text, GP-MoLFormer for scaled autoregressive
+2
+MS-GPT for MS/MS De Novo Structure Elucidation
+100
+120
+140
+160
+180
+200
+220
+0
+0.5
+1.0
+Intensity
+Experimental MS/MS spectrum
+Spectrum to Fingerprint
+Posterior Predictor
+m/z
+       
+C6H5ClN2
++
+       
+C10H11ClN2
++
+       
+C8H7ClN2
++
+       
+C10H14ClN3
++
+Fingerprint Posterior
+C10H14ClN3
+Molecular Formula
+(a)  Spectrum to Posterior
+(b)  Posterior to Query
+1.0
+1.2
+1.4
+1.6
+1.8
+2.0
+Density Ratio 
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+Threshold 
+min (≈Density Match)
+max (≈Noise Floor)
+lower : 
+denser fp-bit queries
+higher : 
+sparser fp-bit queries
+(ii) Group Querying
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+[b216]
+[b378]
+[b426]
+…
+[b1855]
+…
+[b2787]
+…
+[b3091]
+…
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+[b216]
+[b378]
+[b527]
+…
+[b1855]
+…
+[b2787]
+…
+[b3091]
+…
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+[b216]
+[b378]
+[b527]
+…
+[b1855]
+…
+[b2864]
+…
+[b3091]
+…
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+[b216]
+[b378]
+[b527]
+…
+[b2080]
+…
+[b2864]
+…
+[b3091]
+…
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+[b216]
+[b378]
+[b527]
+…
+[b2080]
+…
+[b2864]
+…
+[b3118]
+Active Bit Tokens
+3=0.086 (=1.31) #active bits: 40
+Formula Tokens
+11=0.183 (=1.04) #active bits: 33
+14=0.219 (=1.00) #active bits: 31
+17=0.256 (=0.97) #active bits: 30
+20=0.292 (=0.95) #active bits: 29
+(i) Density Band Calibration
+ = [ > ]
+…
+N
+C
+1
+…
+)
+n
+1
+c
+1
+3
+…
+C
+C
+1
+N
+C
+1
+…
+c
+n
+1
+N
+C
+1
+…
+c
+1
+Cl
+N
+C
+1
+…
+c
+n
+1
+Generated Sequences
+3=0.086
+11=0.183
+14=0.219
+17=0.256 
+20=0.292
+Structures
+Ranked Candidates
+#1  freq=50 #2  freq=22
+#3  freq=13 #n  freq=1
+by InChiKey-14 freqDecoder Block 1
+Decoder Block L
+Generated M × N SAFE Sequences
+[C:10]
+Formula Encoder
+[H:14]
+[Cl:1]
+[N:3]
+Active Bit Encoder
+[b378]
+[b216]
+[b527]
+…
+SAFE-GPT Backbone
+(c)  Querying Conditional Molecular Language Model
+Conditional
+Context 
+Figure 2: MS-GPT inference as spectrum-induced posterior querying. (a) A spectrum encoder maps an MS/MS spectrum and
+formula to a fingerprint posterior. (b) Active-bit density band calibration maps to a calibrated threshold interval, from which
+multiple posterior-derived queries are constructed. (c) The conditional molecule-language model generates SAFE sequences
+conditioned on each query; candidates are pooled across queries, grouped by InChIKey-14, and ranked by generation frequency.
+generation, and SAFE-GPT for fragment-structured SAFE gener-
+ation [11, 29, 33]. Together, these studies show that large-scale
+molecule-only corpora can endow sequence models with broad
+chemical priors.
+Unlike prior molecule-language models for unconditional gener-
+ation, property optimization, or text-conditioned design, our model
+conditionally maps molecular formulas and substructural finger-
+prints to compatible structures. This conditioning formulation en-
+ables molecule-only pretraining for MS/MS elucidation, but it also
+creates an oracle-to-posterior gap: pretraining conditions on or-
+acle fingerprints, whereas inference supplies a noisy spectrum-
+induced fingerprint posterior. MS-GPT addresses this gap by mak-
+ing posterior-derived query construction the central mechanism
+linking spectral evidence to the pretrained molecular prior.
+2.2 Structure Elucidation from Mass
+Spectrometry
+Computational methods for MS/MS identification have traditionally
+relied on reference spectra or predefined candidate sets. Spectral-
+library search compares query spectra with measured references [1,
+16, 41]; in silico fragmentation matches candidate-derived fragment
+masses to observed peaks [34], while spectral prediction methods
+rank candidates by matching predicted spectra to the query [40, 42];
+CSI:FingerID and MIST predict molecular fingerprints for candidate
+ranking [10, 13]; and learned spectral embeddings support exact-
+match and molecular analogue search [5, 8, 18]. These approaches
+perform well when suitable references or candidates are available
+at inference time, but their search space is bounded by the cho-
+sen library or database.De novostructure elucidation relaxes this
+constraint by generating structures directly from spectra, thereby
+supporting the study of under-annotated natural products and the
+exploration of dark chemical space.
+Some methods translate spectra into molecular strings [6, 22, 27,
+35]. MSNovelist instead popularized a fingerprint-mediated route
+from fingerprint prediction to SMILES decoding [36]. This route is
+attractive because its decoder can be pretrained on molecule-only
+corpora, as demonstrated by Neuraldecipher and MolForge [21, 38].
+Recent work has broadened the decoder family: MS-BART adopts
+sequence-to-sequence generation [14]; MADGEN combines scaffold
+retrieval with spectrum-guided generation [43]; DiffMS, MBGen,
+and FRIGID develop graph or masked diffusion decoders [2, 3, 37];
+and flow-matching variants generate structures through iterative
+probability flows or formula-constrained molecular graphs [26, 28].
+Orthogonal formulations explore test-time tuned language models
+and iterative optimization with forward spectral simulation [23, 24].
+Across these lines of work, recent progress has largely centered
+on more expressive decoder architectures, while query construction
+from spectrum-induced fingerprint posteriors remains less explored.
+Fingerprint-mediated pipelines commonly collapse each posterior
+to a single thresholded query, discarding per-bit confidences and
+alternative structural hypotheses. MS-GPT applies active-bit den-
+sity band calibration to form a band of posterior-derived queries
+near the oracle-fingerprint manifold, distributes a candidate pool
+of fixed size across the band, and ranks the pooled candidates by
+generation-frequency consensus. This posterior-query perspective
+complements stronger spectrum encoders and more expressive de-
+coders: improved query construction can better align the spectrum-
+induced posterior with the conditional molecule-language model.
+3
+Zhao et al.
+3 Method
+3.1 Problem Formulation
+Given a tandem mass spectrum and its molecular formula,de
+novostructure elucidation aims to generate the underlying molecu-
+lar structure directly, without a reference library or a predefined
+candidate set. Following the fingerprint-mediated paradigm, we
+introduce a discrete fingerprint variable∈{ 0, 1}, represented as
+a-bit Morgan fingerprint [25, 31]:
+(|,)=E ∼(|,)
+
+(|,)
+
+,(1)
+where is a spectrum encoder inducing a distribution over finger-
+prints and  is a fingerprint-formula-conditioned decoder. For
+any molecule , the corresponding oracle fingerprint is 
+ =
+MorganFP(), allowing to be pretrained on molecule-only cor-
+pora without annotated spectra.
+This decoupling creates a mismatch between pretraining and
+inference: the decoder is pretrained on oracle fingerprints, whereas
+at inference the oracle fingerprint is replaced by aspectrum-induced
+fingerprint posterior (,)∈[ 0, 1], whose-th entry estimates
+( =1|,) (Figure 2(a)). Existing pipelines collapse into a sin-
+gle thresholded fingerprint, = 1[>] , and draw all candidates
+from(| ,) . Thispoint-query approximationreplaces the pos-
+terior expectation in Eq. (1) with one deterministic operating point,
+discarding the per-bit confidences and the alternative structural
+hypotheses they encode. MS-GPT instead separates posterior query
+construction into two complementary steps: active-bit density band
+calibration determines the query interval, while fixed-size group
+querying constructs  posterior queries at interpolated thresh-
+olds within the band and draws samples per query. Across these
+queries, the conditional molecule-language model exploits learned
+fingerprint-bit co-occurrence to assemble fingerprint-encoded sub-
+structures into compatible molecular structures. In our implemen-
+tation, a separate MIST spectrum encoder [13] instantiates for
+each spectral dataset, and is a fingerprint-formula-conditioned
+adaptation of SAFE-GPT [29] that generates molecular structures
+as SAFE token sequences.
+3.2 Conditional Molecule-Language Model
+The conditional molecule-language model realizes(|,) by
+generating SAFE sequence representations of molecular structures
+compatible with a fingerprint-formula query (Figure 2(c)). We pre-
+train the decoder to maximize the conditional likelihood of these
+sequences given oracle fingerprints and formulas,
+max
+
+E∼D
+
+log(| 
+,)
+
+,(2)
+where each molecule in the molecule-only corpusD provides
+a SAFE sequence, an oracle fingerprint
+, and a formula,
+all derived from its molecular structure. Because the model never
+observes spectra during pretraining, the decoder remains spectral-
+domain independent: a single molecule-only pretrained decoder
+can be shared unchanged across downstream spectral datasets, with
+spectral evidence entering only at query time through.
+Architecture.The conditional model adapts the SAFE-GPT de-
+coder for dual fingerprint-formula conditioning, warm-started from
+its pretrained weights. A fingerprint encoder embeds the active
+bits of the fingerprint query  into a set of conditioning tokens,
+and a formula encoder embeds the per-element atom counts of
+. Cross-attention modules interleaved through the transformer
+blocks then attend to this conditioning context. During pretraining,
+ is the oracle fingerprint; at inference, is a posterior-derived
+thresholded query. SAFE is a fragment-based representation, so the
+decoder emits ring systems and functional groups as coherent units,
+aligning the generation target with the substructural semantics that
+the Morgan fingerprint encodes.
+Formula-grouped pretraining.We group each mini-batch by exact
+molecular formula. Near-isomeric molecules that share a formula
+also share many fingerprint bits, placing structurally similar alter-
+natives in direct contrast within a batch. This contrast encourages
+the model to resolve the remaining structural ambiguity under a
+fixed formula and oracle fingerprint, rather than exploiting that
+ambiguity as a generation shortcut (Figure 3(a)).
+3.3 Posterior Query Construction
+Active-bit density band calibration.The conditional model is
+trained only on oracle fingerprints, so it implicitly expects queries
+from the oracle-fingerprint manifold. However, the oracle finger-
+print is unavailable at inference time, and the fingerprint must
+instead be obtained by thresholding the spectrum-induced poste-
+rior:
+()=1[>].
+The encoder’s posterior is a separately learned estimate that car-
+ries prediction error, so a naively thresholded query can move away
+from the oracle-fingerprint manifold: too low a threshold admits
+many weak bits, whereas too high a threshold discards plausible
+substructures. An appropriate threshold cannot be chosen example
+by example at inference time, since no oracle fingerprint is avail-
+able for comparison. We therefore calibrate at the population level,
+matching the active-bit density of thresholded posterior queries to
+the ground-truth active-bit density estimated from the encoder’s
+training annotations.
+LetTenc denote the spectrum encoder’s training set and define
+the training-set active-bit density reference, measured by active-bit
+count, as
+enc =E(,,)∼Tenc
+
+∥MorganFP()∥ 0
+
+,(3)
+where∥·∥ 0 counts active bits in a binary fingerprint. Thus enc
+estimates the ground-truth fingerprint density on the same anno-
+tated spectra that train the encoder and shape the posterior. For
+a threshold, define
+()=E (,)∼T enc
+
+∥1[(,)>]∥ 0
+
+(4)
+as the expected active-bit count after thresholding the predicted
+posterior. Since() decreases with, a target density ratio de-
+termines the threshold
+ =−1( enc),(5)
+so that()/ enc = . Larger lowers the threshold and retains ad-
+ditional lower-confidence bits, whereas smaller raises the thresh-
+old and yields sparser queries. An active-bit density band is thus
+a density-ratio intervalKaround the oracle-fingerprint active-bit
+density. Through Eq. (5), this density band maps to a posterior-
+threshold interval; applying thresholds from this interval to an
+4
+MS-GPT for MS/MS De Novo Structure Elucidation
+Frozen
+Trainable
+(b)   Posterior-Aligned Adaptation
+(a)   Formula-Grouped Pretraining
+Formula-Grouped
+Batching
+[b69]
+[b102]
+[b237]
+...
+[b3921]
+[C:8]
+[H:10]
+[O:1]
+[b389]
+[b807]
+[b1045]
+...
+[b3921]
+[C:8]
+[H:10]
+[O:1]
+[b767]
+[b807]
+[b1088]
+...
+[b3921]
+[C:8]
+[H:10]
+[O:1]
+Conditional Molecule-
+Language Model
+c
+1
+3
+c
+c
+...
+.
+O
+2
+3
+c
+1
+2
+c
+c
+...
+O
+C
+C
+2
+c
+1
+2
+c
+c
+...
+.
+C
+C
+2 Pretrain Once, 
+Spectral-Domain
+Independent
+Molecule-Only Corpus Oracle Fingerprint Active Bit Tokens Target SAFE Sequences
+Decoder Block 1
+Decoder Block 2
+Decoder Block L-1
+Decoder Block L
+Cross-Attention
+Conditioning
+LoRA
+Cross-Attention
+Conditioning
+LoRA
+LM Head
+Formula Tokens
+[C:10]
+[H:14]
+[Cl:1]
+[N:3]
+Predicted Fingerprint Posterior
+[b216]
+[b378]
+[b527]
+…
+Formula Encoder
+Active Bit Encoder
+Objective
+LoRA
+Conditional Context 
+c
+1
+3
+…
+C
+C
+1
+c
+1
+3
+…
+C
+C
+1
+Target SAFE Sequences 
+CE on 
+KL anchor to 
+the pretrain model
++
+Prediction from
+the pretrained model 
+Formula Tokens 
+Generated SAFE Sequences
+Figure 3: Pretraining and adaptation of the conditional molecule-language model. (a) Molecule-only formula-grouped pretrain-
+ing teaches the model to map oracle fingerprint-formula queries to SAFE sequences. (b) Posterior-aligned adaptation trains
+lightweight LoRA modules on posterior-derived queries from the target spectral domain, while keeping the formula encoder,
+SAFE-GPT backbone, and language-model head frozen.
+individual posterior produces a band of posterior-derived finger-
+print queries with calibrated active-bit counts, keeping the queries
+near the oracle-fingerprint manifold in aggregate.
+Fixed-size group querying.For candidate-pool size , rather than
+drawing all candidates from a single thresholded query, we con-
+struct posterior queries from the threshold interval induced by
+the calibrated active-bit density bandK=[ min, max] and draw
+ samples from each, giving=× (Figure 2(b)). We invert
+Eq. (5) only at the two band endpoints,
+max =−1(maxenc),  min =−1(minenc),
+and linearly interpolate a prespecified number  of thresholds
+between them,
+ =max+ −1
+−1
+min−max
+, =1,...,,
+thereby approximating
+(|,)≈ 1
+
+∑
+=1
+(| ,),
+ =1[> ].
+(6)
+for> 1. We chooseK to include density match (=1.00) and
+extend mainly toward denser queries. Appendix A.6 presents post
+hoc diagnostic results for this choice, while Appendix B.4 provides
+the density-band configuration details. The point-query approxima-
+tion adopted by prior fingerprint-mediated pipelines is recovered
+as the degenerate case=1.
+3.4 Posterior-Aligned Adaptation
+Density band calibration mitigates the aggregate mismatch between
+posterior-derived queries and the oracle-fingerprint manifold, but
+it does not resolve errors in which bits are active or how their de-
+pendencies differ from oracle fingerprints. Through molecule-only
+pretraining, the conditional model learns a molecular prior over
+fingerprint-bit co-occurrence: it can discount isolated active bits
+that conflict with the surrounding pattern and can still generate
+chemically coherent structures when some compatible substruc-
+tures are missing from the query. However, if the spectrum encoder
+produces domain-specific posterior bias, thresholded queries may
+retain systematic bit-pattern shifts even inside the calibrated density
+band. These shifts affect how the pretrained decoder resolves com-
+peting chemically plausible completions. We therefore introduce a
+lightweightposterior-aligned adapterthat aligns the query-reading
+pathway with posterior-derived active-bit patterns in the target
+spectral domain, while preserving the pretrained molecular prior.
+Adapter architecture.Let , denote the LoRA-adapted condi-
+tional model, where  are the frozen pretrained weights and 
+are trainable low-rank adapter parameters [17]. We attach LoRA
+only to the query-reading pathway: the fingerprint encoder projec-
+tions and the cross-attention modules that route fingerprint con-
+ditioning into the SAFE-GPT. The SAFE-GPT backbone, language-
+model head, and formula encoder remain frozen. This confines
+adaptation to how posterior-derived queries are encoded and routed
+into SAFE-token generation, rather than relearning the fingerprint-
+formula-conditioned molecular prior acquired during pretraining
+(Figure 3(b)).
+Adaptation training.For each annotated pair (,) in the do-
+main training setTpa, we retain the predicted posterior (,) ,
+the oracle fingerprint 
+, the formula , and the SAFE target
+sequence. During adaptation, the decoder input is not the oracle
+fingerprint. Instead, we sample a threshold uniformly from the
+5
+Zhao et al.
+interval[ max,min]and form the thresholded query
+(,)=1[(,)>].
+The adapter is trained with teacher-forced SAFE likelihood on these
+posterior-derived queries, plus a frozen-teacher KL anchor:
+min
+
+E (,,)∼Tpa
+∼Uniform([ max,min])
+h
+LCE
+, ;,,
+
++LKL
+,, ;,,
+i
+,
+(7)
+whereLCE is the next-token cross-entropy of , andLKL is a
+token-level KL from the frozen model to the adapted model on
+the same posterior-derived query. The weights(,) depend on
+recoverability: thefrozen-hitgroup, where the frozen model al-
+ready generates the ground-truth molecular structure at the default
+candidate-pool size, receives weak CE and a strong KL anchor;
+theresidualgroup, where the molecular structure is missed de-
+spite adequate posterior–oracle agreement, receives equal CE and
+KL weights to adapt the model to residual posterior bias; and the
+low-coveragegroup, where the molecular structure is missed with
+inadequate posterior–oracle agreement, receives no CE and only
+the KL anchor. Appendix B.3 specifies the recoverability grouping
+criterion and loss coefficients per group.
+4 Experiments
+4.1 Experimental Setup
+Datasets and benchmarks.We evaluate under the known-formula
+protocol on two public MS/MSde novobenchmarks:NPLIB1[ 9]
+contains natural-product spectra from GNPS [ 41], and its train-
+ing and test molecules are structurally similar, making it an in-
+distribution benchmark;MassSpecGym[ 4] follows an MCES-
+based structurally held-out split, measuring generalization to struc-
+turally distant molecules.
+Evaluation metrics.Following prior work on known-formula
+MS/MSde novoevaluation, we report Top-  accuracy, Top- Tani-
+moto similarity, and Top- MCES distance over ranked generated
+candidates at∈{ 1, 10}.Top- accuracymeasures whether any
+of the top- candidates shares the same 2D structure (the first
+14 InChIKey characters) with the ground-truth molecule.Top-
+Tanimoto similaritymeasures the highest structural similarity
+to the ground-truth molecule among the top  candidates.Top-
+ MCES distancemeasures the smallest graph-edit distance to
+the ground-truth molecule among the top  candidates. For ab-
+lations,Top- % Close Match(%CM) measures the percentage
+of spectra whose top- generated candidates include a structure
+with RDKit topological-fingerprint Tanimoto similarity≥ 0.675[ 2].
+Baseline MCES values are reported in the corresponding papers
+and reflect different evaluator configurations. For MS-GPT, we fol-
+low the DiffMS [3] configuration and summarize the differences in
+Appendix B.6.
+Baselines.We compare against representative methods from the
+main decoder families for this task. Autoregressive sequence base-
+lines include Spec2Mol [ 22], MIST+Neuraldecipher [ 21], MIST+
+MSNovelist [36], MS-BART [14], and MIST+MolForge [38]. Diffusion-
+like baselines include DiffMS [ 3], MBGen [ 37], and FRIGID [ 2];
+scaffold-based baselines include MADGEN [43] and MSAnchor [30].
+Baseline numbers are taken from their papers under the same
+known-formula protocol, except that the revised MIST+MolForge
+accuracies come from FRIGID [2].
+Implementation.The MIST spectrum encoder trained on the cor-
+responding dataset produces the fingerprint posterior, and the
+lightweight LoRA adapter is trained on posterior-derived queries
+from that spectral domain. The underlying conditional molecule-
+language model is pretrained for two epochs on approximately
+100M molecular structures, after excluding connectivity-equivalent
+structures from the validation and test splits of both benchmarks.
+Unless stated otherwise, evaluation uses candidate-pool size=100,
+with=20query groups and=5samples per group. Appendix A.7
+reports additional results on pretraining data scaling, while Appen-
+dix B provides full implementation details.
+4.2 Main Results
+Table 1 summarizes performance. MS-GPT achieves the highest
+exact-match accuracy on both benchmarks, reaching Top-1/Top-
+10 accuracies of29.76%/41.07%on NPLIB1 and23 .91%/28.65%on
+MassSpecGym. Compared with FRIGID, the strongest exact-match
+baseline, MS-GPT improves Top-1/Top-10 by4.73/7.70percentage
+points on NPLIB1 and5.62/6.65percentage points on MassSpecGym.
+These gains hold on both the in-distribution NPLIB1 benchmark and
+the structurally distant MassSpecGym benchmark. MS-GPT shares
+the same conditional molecule-language model across benchmarks;
+only the MIST spectrum encoder and lightweight LoRA adapter are
+trained for each benchmark. MCES offers a complementary view
+that MS-GPT improves over all autoregressive baselines and records
+the best Top-10 MCES on NPLIB1, while diffusion-like decoders
+lead on the remaining MCES comparisons. This pattern is consis-
+tent with the generative trade-off: iterative diffusion can refine
+local graph structure, whereas autoregressive molecular generation
+scales candidate pools efficiently.
+4.3 Component Ablation
+Table 2 reports a component ablation of MS-GPT on NPLIB1. Re-
+moving posterior-aligned adaptation gives MS-GPT-Base. Relative
+to MS-GPT-Base, MS-GPT improves Top-1/Top-10 accuracy by
+1.34/7.29points. The gains are concentrated at Top-10, indicat-
+ing that posterior-aligned adaptation mainly improves candidate-
+pool recall. Starting from MS-GPT-Base, we then isolate the two
+query-construction components. Replacing active-bit density band
+calibration with randomly sampled queries outside the calibrated
+band reduces Top-1/Top-10 accuracy by3.87/2.23points. Collaps-
+ing fixed-size group querying to a single threshold gives three
+point-query controls: a density-matched operating point at=1.00
+and two operating points whose thresholds are selected on the
+validation set to maximize 1 and cosine similarity, respectively.
+Even the strongest point-query control falls below MS-GPT-Base
+by4.02/4.91Top-1/Top-10 points. The MassSpecGym counterpart
+in Appendix A.1 shows the same pattern.
+4.4 Posterior-Fidelity Analysis
+We stratify NPLIB1 by spectrum-induced posterior fidelity to in-
+vestigate how much performance depends on posterior quality. For
+each test spectrum, posterior fidelity  is the largest Tanimoto
+6
+MS-GPT for MS/MS De Novo Structure Elucidation
+Table 1:De novostructural elucidation performance on NPLIB1 [ 9] and MassSpecGym [ 4], assuming a known chemical formula.
+The best result in each column is bolded, and methods are ordered by Top-1 accuracy within each benchmark. Baseline entries
+are taken from the respective papers, with † indicating revised MIST+MolForge accuracies reported by FRIGID [2]. ‡ Baseline
+MCES evaluators have inconsistent configurations; Appendix B.6 summarizes these differences.
+Top-1 Top-10
+Model AccuracyMCES ‡TanimotoAccuracyMCES ‡Tanimoto
+NPLIB1
+Spec2Mol [22] 0.00 48.57 0.12 0.00 17.58 0.16
+MADGEN [43] 2.10 20.56 0.22 2.39 12.69 0.27
+MIST+MolForge† [38] 2.24 14.16 0.40 5.11 10.96 0.47
+MIST+Neuraldecipher [21] 2.32 10.26 0.35 6.11 8.53 0.43
+MIST+MSNovelist [36] 5.40 13.10 0.34 11.04 8.57 0.44
+MS-BART [14] 7.45 9.66 0.44 10.99 8.31 0.51
+DiffMS [3] 8.34 11.95 0.35 15.44 9.23 0.47
+MSAnchor [30] 8.51 11.12 0.38 16.90 8.95 0.49
+MBGen [37] 12.20 7.72 0.41 22.29 6.71 0.50
+FRIGID [2] 25.037.100.58 33.37 5.56 0.64
+MS-GPT (ours) 29.767.380.61 41.07 5.51 0.67
+MassSpecGym
+MIST+MSNovelist [36] 0.00 39.84 0.06 0.00 18.83 0.15
+Spec2Mol [22] 0.00 36.78 0.12 0.00 36.02 0.16
+MIST+Neuraldecipher [21] 0.00 22.93 0.14 0.00 21.76 0.16
+MS-BART [14] 1.07 16.47 0.23 1.11 15.12 0.28
+MADGEN [43] 1.31 27.47 0.20 1.54 16.84 0.26
+DiffMS [3] 2.30 18.45 0.28 4.25 14.73 0.39
+MSAnchor [30] 2.68 16.57 0.32 4.67 14.12 0.41
+MBGen [37] 7.5813.250.38 12.5410.160.41
+MIST+MolForge† [38] 10.73 22.15 0.37 14.48 17.88 0.41
+FRIGID [2] 18.29 13.49 0.43 22.00 11.65 0.47
+MS-GPT (ours) 23.9115.500.52 28.6511.740.54
+Table 2: Component ablation of MS-GPT on NPLIB1. Cells
+report Top-1/Top-10.
+Variant AccuracyTanimoto%CM
+MS-GPT 29.76/41.07 0.61/0.67 63.99/70.54
+w/o Posterior-Aligned Adaptation
+MS-GPT-Base 28.42/33.78 0.58/0.62 62.05/66.37
+w/o Posterior-Aligned Adaptation, Density Band Calibration
+Outer-band querying 24.55/31.55 0.54/0.57 54.61/59.67
+w/o Posterior-Aligned Adaptation, Group Querying
+Density match (=1.00) 24.40/28.87 0.52/0.54 54.91/57.74
+1 (=0.340) 22.47/25.30 0.49/0.51 50.45/53.12
+Cosine (=0.377) 21.88/24.55 0.48/0.49 50.15/51.93
+similarity between the oracle fingerprint and any posterior-derived
+query over the calibrated density band. This yields low ( <0.5),
+middle (0.5≤ <0.7), and high (≥0.7) bins [12, 19]. Figure 4 shows
+that MS-GPT accuracy rises sharply from the low-fidelity bin to the
+high-fidelity bin; the MassSpecGym counterpart in Appendix A.2
+shows an even more pronounced trend. This benchmark-spanning
+dependence confirms that the fingerprint condition steers molec-
+ular generation: the model is not simply drawing plausible struc-
+tures from the pretrained molecular prior independently of spectral
+evidence. Relative to MS-GPT-Base, posterior-aligned adaptation
+contributes most in the middle and high bins, especially at Top-10.
+The low-fidelity bin remains difficult for both models, identifying
+the spectrum-induced posterior as a central remaining bottleneck.
+4.5 Pretraining-Proximity Analysis
+We stratify NPLIB1 by pretraining proximity to investigate whether
+performance is driven mainly by close analogs in the fingerprint-
+formula pretraining set. Pretraining proximity is the maximum Tan-
+imoto similarity between each test molecule and any pretraining
+molecule with the same formula. The same cutoffs as in Section 4.4
+define low, middle, and high proximity bins. Figure 5 shows that
+accuracy improves from the low-proximity bin to the middle bin,
+indicating that nearby structures provide a helpful conditional prior.
+7
+Zhao et al.
+Low
+(25.1%)
+Mid
+(27.8%)
+High
+(47.0%)
+0
+10
+20
+30
+40
+50
+60
+70Accuracy (%)
+MS-GPT
+MS-GPT-Base
+Figure 4: NPLIB1 Top-1/Top-10 exact-match accuracy by
+posterior-fidelity bin. Parentheses indicate test-set propor-
+tions; dark segments show Top-1 accuracy and total bar
+heights show Top-10 accuracy.
+Low
+(30.8%)
+Mid
+(36.5%)
+High
+(32.7%)
+0
+10
+20
+30
+40
+50Accuracy (%)
+MS-GPT
+MS-GPT-Base
+Figure 5: NPLIB1 Top-1/Top-10 exact-match accuracy by
+pretraining-proximity bin. Parentheses indicate test-set pro-
+portions; dark segments show Top-1 accuracy and total bar
+heights show Top-10 accuracy.
+However, the trend changes only mildly from the middle to high
+bin, and the gain of MS-GPT over MS-GPT-Base is not concentrated
+in the high-proximity bin. The result therefore suggests that perfor-
+mance benefits from nearby pretraining neighborhoods but is not
+primarily driven by nearest-neighbor memorization. This behavior
+is consistent with the molecule-language model learning reusable
+co-occurrence patterns between active-bit conditioning tokens and
+SAFE tokens, rather than relying on whole-molecule structural
+similarity. This distinction separates reusable substructure-level
+transfer from retrieval driven by close whole-molecule analogs in
+the pretraining corpus. The corresponding MassSpecGym analysis
+in Appendix A.3 shows the same conclusion.
+4.6 Inference Efficiency and Scaling
+MS-GPT generates each candidate in a single autoregressive pass,
+avoiding iterative graph generation or refinement. Figure 1 com-
+pares per-spectrum inference compute with Top-10 exact-match
+accuracy on NPLIB1. MS-GPT occupies a favorable accuracy–cost
+region: diffusion-like decoders require one to two orders of magni-
+tude more time, whereas autoregressive baselines are comparably
+fast but far less accurate. Posterior querying therefore improves ac-
+curacy without giving up the efficiency of autoregressive molecular
+generation.
+Autoregressive molecule generation also makes the candidate
+pool inexpensive to enlarge. In the candidate-pool scaling experi-
+ment, we keep the query grid fixed and draw more samples from
+each query, expanding the pooled candidate set with a near-linear
+cost increase. Figure 1 shows that Top-10 exact-match accuracy con-
+tinues to improve as the candidate-pool size grows. The MassSpec-
+Gym counterpart in Appendix A.4 shows the same trend, and Ap-
+pendix A.5 examines how a fixed candidate-pool size is allocated
+over query groups. Detailed case studies are provided in Appen-
+dix C.
+5 Conclusion
+We introduced MS-GPT, a spectrum-induced posterior-querying
+framework for fingerprint-mediated MS/MSde novostructure eluci-
+dation. Instead of collapsing the fingerprint posterior to one point
+estimate, MS-GPT converts it into a calibrated band of posterior-
+derived queries near the oracle-fingerprint manifold and queries
+a conditional molecule-language model pretrained on a molecule-
+only corpus. Active-bit density band calibration, fixed-size group
+querying, and posterior-aligned adaptation bridge the oracle-to-
+posterior gap while preserving the pretrained molecular prior. On
+NPLIB1 and MassSpecGym, MS-GPT sets a new state of the art in
+exact-match accuracy and Morgan Tanimoto similarity; ablations
+show complementary gains from all three components. Candidate-
+pool scaling further improves Top-10 recovery with near-linear
+growth in inference compute. These results frame MS/MSde novo
+elucidation as posterior querying over molecule-language models,
+with future progress depending on more faithful spectrum-induced
+posteriors and stronger conditional molecular generation.
+6 Limitations and Ethical Considerations
+Our study is limited to two public MS/MS benchmarks under the
+known-formula setting and depends on a fixed-dimensional fin-
+gerprint posterior predicted by the spectrum encoder; missing or
+incorrect posterior information can therefore affect candidate gen-
+eration. The datasets contain no human participants or private
+data, so informed consent and institutional ethics review are not
+applicable. Practical applications, such as compound identification
+in drug discovery and environmental monitoring, require expert
+review and experimental validation of the predicted structures.
+7 Generative AI Usage
+Generative AI tools assisted with language polishing of the authors’
+original draft and code debugging. All suggested textual revisions
+and code changes were reviewed and verified by the authors.
+8
+MS-GPT for MS/MS De Novo Structure Elucidation
+References
+[1] Wout Bittremieux, Mingxun Wang, and Pieter C. Dorrestein. 2022. The criti-
+cal role that spectral libraries play in capturing the metabolomics community
+knowledge.Metabolomics18, 12 (2022), 94.
+[2] Montgomery Bohde, Hongxuan Liu, Mrunali Manjrekar, Magdalena Lederbauer,
+Shuiwang Ji, Runzhong Wang, and Connor W. Coley. 2026. FRIGID: Scaling
+Diffusion-Based Molecular Generation from Mass Spectra at Training and Infer-
+ence Time.arXiv preprint arXiv:2604.16648(2026).
+[3] Montgomery Bohde, Mrunali Manjrekar, Runzhong Wang, Shuiwang Ji, and
+Connor W. Coley. 2025. DiffMS: Diffusion Generation of Molecules Conditioned
+on Mass Spectra.arXiv preprint arXiv:2502.09571(2025).
+[4] Roman Bushuiev, Anton Bushuiev, Niek F. de Jonge, Adamo Young, Fleming
+Kretschmer, Raman Samusevich, Janne Heirman, Fei Wang, Luke Zhang, Kai
+Dührkop, et al. 2024. MassSpecGym: A benchmark for the discovery and iden-
+tification of molecules. InAdvances in Neural Information Processing Systems,
+Vol. 37. 110010–110027.
+[5] Roman Bushuiev, Anton Bushuiev, Raman Samusevich, et al . 2025. Self-
+supervised learning of molecular representations from millions of tandem mass
+spectra using DreaMS.Nature Biotechnology(2025).
+[6] Thomas Butler, Abraham Frandsen, Rose Lightheart, et al . 2023. MS2Mol: A
+transformer model for illuminating dark chemical space from mass spectra.
+ChemRxiv(2023).
+[7] Seyone Chithrananda, Gabriel Grand, and Bharath Ramsundar. 2020. Chem-
+BERTa: Large-Scale Self-Supervised Pretraining for Molecular Property Predic-
+tion.arXiv preprint arXiv:2010.09885(2020).
+[8] Niek F. de Jonge, Joris J. R. Louwen, Elena Chekmeneva, et al. 2023. MS2Query:
+reliable and scalable MS2 mass spectra-based analogue search.Nature Commu-
+nications14, 1 (2023), 1752.
+[9] Kai Dührkop, Louis-Félix Nothias, Markus Fleischauer, Raphael Reher, Marcus
+Ludwig, Martin A. Hoffmann, Daniel Petras, William H. Gerwick, Juho Rousu,
+Pieter C. Dorrestein, and Sebastian Böcker. 2021. Systematic classification of
+unknown metabolites using high-resolution fragmentation mass spectra.Nature
+Biotechnology39, 4 (2021), 462–471.
+[10] Kai Dührkop, Huibin Shen, Marvin Meusel, Juho Rousu, and Sebastian Böcker.
+2015. Searching molecular structure databases with tandem mass spectra using
+CSI:FingerID.Proceedings of the National Academy of Sciences112, 41 (2015),
+12580–12585.
+[11] Carl Edwards, Tuan Lai, Kevin Ros, Garrett Honke, Kyunghyun Cho, and Heng Ji.
+2022. Translation between Molecules and Natural Language. InProceedings of the
+2022 Conference on Empirical Methods in Natural Language Processing (EMNLP).
+Association for Computational Linguistics, Abu Dhabi, United Arab Emirates.
+[12] P. Franco, N. Porta, John D. Holliday, and Peter Willett. 2014. The use of 2D
+fingerprint methods to support the assessment of structural similarity in orphan
+drug legislation.Journal of Cheminformatics6, 1 (2014), 5. doi:10.1186/1758-
+2946-6-5
+[13] Samuel Goldman, Jeremy Wohlwend, Martin Strazar, Guy Haroush, Ramnik J.
+Xavier, and Connor W. Coley. 2023. Annotating metabolite mass spectra with
+domain-inspired chemical formula transformers.Nature Machine Intelligence5,
+9 (2023), 965–979.
+[14] Yang Han, Pengyu Wang, Kai Yu, Xin Chen, and Lu Chen. 2025. MS-BART:
+Unified Modeling of Mass Spectra and Molecules for Structure Elucidation.arXiv
+preprint arXiv:2510.20615(2025).
+[15] Shion Honda, Shoi Shi, and Hiroki R. Ueda. 2019. SMILES Transformer: Pre-
+trained Molecular Fingerprint for Low Data Drug Discovery.arXiv preprint
+arXiv:1911.04738(2019).
+[16] Hisayuki Horai, Masanori Arita, Shigehiko Kanaya, et al . 2010. MassBank: a
+public repository for sharing mass spectral data for life sciences.Journal of Mass
+Spectrometry45, 7 (2010), 703–714.
+[17] Edward J. Hu, Yelong Shen, Phillip Wallis, Zeyuan Allen-Zhu, Yuanzhi Li, Shean
+Wang, Lu Wang, and Weizhu Chen. 2021. LoRA: Low-Rank Adaptation of Large
+Language Models.arXiv preprint arXiv:2106.09685(2021).
+[18] Florian Huber, Sven van der Burg, Justin J. J. van der Hooft, and Lars Ridder. 2021.
+MS2DeepScore: a novel deep learning similarity measure to compare tandem
+mass spectra.Journal of Cheminformatics13, 1 (2021), 84.
+[19] Raphael Klein, Sascha Jung, Alexander Neumann, Mehran Jalaie, Alan M. Math-
+iowetz, and Markus Boehm. 2026. Strategies for Identifying Molecules of Interest
+in Large Chemical Spaces.Journal of Chemical Information and Modeling(2026).
+doi:10.1021/acs.jcim.6c01496
+[20] Mario Krenn, Florian Häse, Akshat Kumar Nigam, Pascal Friederich, and Alán
+Aspuru-Guzik. 2020. SELFIES: A 100% robust molecular string representation.
+Machine Learning: Science and Technology1, 4 (2020), 045024.
+[21] Tuan Le, Robin Winter, Frank Noé, and Djork-Arné Clevert. 2020.
+Neuraldecipher–reverse-engineering extended-connectivity fingerprints
+(ECFPs) to their molecular structures.Chemical Science11, 38 (2020),
+10378–10389.
+[22] Eleni E. Litsa, Vijil Chenthamarakshan, Payel Das, and Lydia E. Kavraki. 2023.
+An end-to-end deep learning framework for translating mass spectra to de-novo
+molecules.Communications Chemistry6, 1 (2023), 132.
+[23] Mrunali Manjrekar, Runzhong Wang, Samuel Goldman, Jenna C. Fromer, and
+Connor W. Coley. 2026. Generative structural elucidation from mass spectra as
+an iterative optimization problem.arXiv preprint arXiv:2602.07709(2026).
+[24] Laura Mismetti, Marvin Alberts, Andreas Krause, and Mara Graziani. 2025. Test-
+Time Tuned Language Models Enable End-to-end De Novo Molecular Structure
+Generation from MS/MS Spectra.arXiv preprint arXiv:2510.23746(2025).
+[25] Harry L. Morgan. 1965. The generation of a unique machine description for
+chemical structures–a technique developed at chemical abstracts service.Journal
+of Chemical Documentation5, 2 (1965), 107–113.
+[26] Ghaith Mqawass, Tuan Le, Fabian Theis, and Djork-Arné Clevert. 2026. De Novo
+Molecular Structure Elucidation from Mass Spectra via Flow Matching.arXiv
+preprint arXiv:2602.19912(2026).
+[27] Neng Kai Nigel Neo, Jing Lim, Yong Zhau Preston Ngoui, Xue Ting Serene Koh,
+and Bingquan Shen. 2025. One Small Step with Fingerprints, One Giant Leap for
+De NovoMolecule Generation from Mass Spectra.arXiv preprint arXiv:2508.04180
+(2025).
+[28] Jianan Nie and Peng Gao. 2026. FlowMS: Flow Matching for De Novo Structure
+Elucidation from Mass Spectra.arXiv preprint arXiv:2603.18397(2026).
+[29] Emmanuel Noutahi, Cristian Gabellini, Michael Craig, Jonathan S. C. Lim, and
+Prudencio Tossou. 2024. Gotta be SAFE: a new framework for molecular design.
+Digital Discovery3 (2024), 796–804.
+[30] Xiaohan Qin, Chao Wang, Zhengyang Zhou, Linjiang Chen, Wenjie Du, and Yang
+Wang. 2026. MSAnchor: De Novo Molecular Generation from Mass Spectrometry
+Data with Anchor-Extended Molecular Scaffolds. InProceedings of the AAAI
+Conference on Artificial Intelligence, Vol. 40. 953–961.
+[31] David Rogers and Mathew Hahn. 2010. Extended-connectivity fingerprints.
+Journal of Chemical Information and Modeling50, 5 (2010), 742–754.
+[32] Jerret Ross, Brian Belgodere, Vijil Chenthamarakshan, Inkit Padhi, Youssef
+Mroueh, and Payel Das. 2022. Large-Scale Chemical Language Representa-
+tions Capture Molecular Structure and Properties.Nature Machine Intelligence4,
+12 (2022), 1256–1264.
+[33] Jerret Ross, Brian Belgodere, Samuel C. Hoffman, Vijil Chenthamarakshan,
+Youssef Mroueh, and Payel Das. 2024. GP-MoLFormer: A Foundation Model for
+Molecular Generation.arXiv preprint arXiv:2405.04912(2024).
+[34] Christoph Ruttkies, Emma L. Schymanski, Sebastian Wolf, Juliane Hollender, and
+Steffen Neumann. 2016. MetFrag relaunched: incorporating strategies beyond in
+silico fragmentation.Journal of Cheminformatics8, 1 (2016), 3.
+[35] Anubhav D. Shrivastava, Neil Swainston, Sudeshna Samanta, Ian Roberts, Marc
+Wright Muelas, and Douglas B. Kell. 2021. MassGenie: A transformer-based
+deep learning method for identifying small molecules from their mass spectra.
+Biomolecules11, 12 (2021), 1793.
+[36] Michael A. Stravs, Kai Dührkop, Sebastian Böcker, and Nicola Zamboni. 2022.
+MSNovelist: de novo structure generation from mass spectra.Nature Methods
+19, 7 (2022), 865–870.
+[37] Xichen Sun, Wentao Wei, Jiahua Rao, Jiancong Xie, and Yuedong Yang. 2026.
+De Novo Molecular Generation from Mass Spectra via Many-Body Enhanced
+Diffusion. InAAAI Conference on Artificial Intelligence.
+[38] Umut V. Ucak, Ikuo Ashyrmamatov, and Juyong Lee. 2023. Reconstruction of
+lossless molecular representations from fingerprints.Journal of Cheminformatics
+15, 1 (2023), 26.
+[39] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+Aidan N. Gomez, Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. InAdvances in Neural Information Processing Systems, Vol. 30.
+[40] Fei Wang, Jaanus Liigand, Siyang Tian, David Arndt, Russell Greiner, and David S.
+Wishart. 2021. CFM-ID 4.0: more accurate ESI-MS/MS spectral prediction and
+compound identification.Analytical Chemistry93, 34 (2021), 11692–11700.
+[41] Mingxun Wang, Jeremy J. Carver, Vanessa V. Phelan, Laura M. Sanchez, Neha
+Garg, Yao Peng, Don Duy Nguyen, et al. 2016. Sharing and community cura-
+tion of mass spectrometry data with Global Natural Products Social Molecular
+Networking.Nature Biotechnology34, 8 (2016), 828–837.
+[42] Runzhong Wang, Mrunali Manjrekar, Behnam Mahjour, Julijana Avila-Pacheco,
+Justin Provenzano, Emily Reynolds, Magdalena Lederbauer, Evgeny Mashin,
+Samuel Goldman, Mingxun Wang, et al . 2025. Neural spectral prediction for
+structure elucidation with tandem mass spectrometry.bioRxiv(2025).
+[43] Yinkai Wang, Xiaohui Chen, Liping Liu, and Soha Hassoun. 2025. MADGEN:
+Mass-Spec attends to De Novo Molecular Generation. InInternational Conference
+on Learning Representations.
+[44] David Weininger. 1988. SMILES, a chemical language and information system. 1.
+Introduction to methodology and encoding rules.Journal of Chemical Information
+and Computer Sciences28, 1 (1988), 31–36.
+9
+Zhao et al.
+A Additional Experimental Results
+A.1 Component Ablation
+Table 3 presents the MassSpecGym counterpart to the NPLIB1 abla-
+tion in Table 2. MS-GPT leads consistently in exact-match accuracy,
+structural similarity, and close-match rate. Removing posterior-
+aligned adaptation causes a broad but moderate decline, indicating
+that adaptation helps the pretrained generator respond to posterior-
+derived conditions. Query construction has a stronger effect: sam-
+pling outside the calibrated density band weakens performance,
+while every single-threshold control falls short of grouped querying.
+The density-matched query is the strongest of these point controls,
+but it does not recover the benefit of covering multiple posterior
+conditions. This pattern mirrors NPLIB1 and shows that density cal-
+ibration, group coverage, and posterior-aligned adaptation remain
+complementary in the more structurally shifted setting.
+Table 3: Component ablation of MS-GPT on MassSpecGym.
+Cells report Top-1/Top-10.
+Variant AccuracyTanimoto%CM
+MS-GPT 23.91/28.65 0.52/0.54 52.51/55.27
+w/o Posterior-Aligned Adaptation
+MS-GPT-Base 22.77/26.96 0.50/0.52 50.83/53.33
+w/o Posterior-Aligned Adaptation, Density Band Calibration
+Outer-band querying 19.70/22.84 0.41/0.43 43.91/45.14
+w/o Posterior-Aligned Adaptation, Group Querying
+Density match (=1.00) 20.08/22.80 0.44/0.46 45.47/47.23
+1 (=0.257) 19.58/22.78 0.43/0.44 44.17/45.85
+Cosine (=0.269) 19.42/22.56 0.42/0.44 43.91/45.55
+A.2 Posterior-Fidelity Analysis
+Figure 6 extends the posterior-fidelity analysis to MassSpecGym.
+Accuracy separates sharply across the three bins: both variants
+recover almost no exact matches in the low-fidelity group, improve
+in the middle group, and perform substantially better in the high-
+fidelity group. The shared trend of MS-GPT and MS-GPT-Base
+shows that the quality of the spectrum-induced posterior remains
+a primary determinant of recovery under structural shift. The ad-
+vantage of MS-GPT emerges mainly once the posterior provides
+informative structural evidence and is clearest for Top-10 recovery
+in the high-fidelity group. Posterior-aligned adaptation therefore
+helps translate informative queries into broader candidate-pool
+recovery, but does not compensate for poorly grounded queries.
+The low-fidelity group remains the main target for improving the
+spectrum encoder and posterior construction.
+A.3 Pretraining-Proximity Analysis
+Figure 7 extends the pretraining-proximity analysis to MassSpec-
+Gym. Both MS-GPT and MS-GPT-Base peak in the middle-proximity
+group and decline in the high-proximity group, rather than improv-
+ing monotonically with proximity. MassSpecGym is structurally
+held out, and connectivity-equivalent evaluation structures are
+Low
+(34.4%)
+Mid
+(18.6%)
+High
+(47.0%)
+0
+10
+20
+30
+40
+50
+60Accuracy (%)
+MS-GPT
+MS-GPT-Base
+Figure 6: MassSpecGym Top-1/Top-10 exact-match accuracy
+by posterior-fidelity bin. Parentheses indicate test-set pro-
+portions; dark segments show Top-1 accuracy and total bar
+heights show Top-10 accuracy.
+Low
+(30.7%)
+Mid
+(21.8%)
+High
+(47.6%)
+0
+5
+10
+15
+20
+25
+30
+35
+40Accuracy (%)
+MS-GPT
+MS-GPT-Base
+Figure 7: MassSpecGym Top-1/Top-10 exact-match accuracy
+by pretraining-proximity bin. Parentheses indicate test-set
+proportions; dark segments show Top-1 accuracy and total
+bar heights show Top-10 accuracy.
+additionally excluded from the corpus for fingerprint–formula
+conditional pretraining. A high-proximity neighbor is therefore
+structurally similar but cannot be the exact target. The decline is
+consistent with competition from familiar same-formula isomers.
+Alongside the monotonic posterior-fidelity trend in Appendix A.2,
+this contrast suggests that posterior quality shapes whether the
+pretrained neighborhood supports recovery or supplies convincing
+decoys. An informative spectrum-induced posterior distinguishes
+the target from close alternatives, whereas weak evidence leaves
+the learned conditional prior insufficiently constrained. MS-GPT
+remains ahead across all three groups, suggesting that posterior-
+aligned adaptation mitigates this conflict without eliminating it.
+A.4 Inference Efficiency and Scaling
+Figure 8 plots MassSpecGym Top-10 exact-match accuracy against
+per-spectrum inference compute; Table 4 reports the correspond-
+ing fixed-grid sweeps for NPLIB1 and MassSpecGym. Across both
+sweeps, Top-10 recovery generally rises as the candidate pool grows,
+10
+MS-GPT for MS/MS De Novo Structure Elucidation
+Figure 8: MassSpecGym Top-10 exact-match accuracy versus
+per-spectrum inference compute (log scale). The MS-GPT
+curve spans candidate-pool sizes =100–1500; other markers
+denote baseline methods.
+Table 4: Candidate-pool scaling of MS-GPT on NPLIB1 and
+MassSpecGym. Rows report per-spectrum compute on a sin-
+gle NVIDIA RTX 6000 Ada GPU and Top-1/Top-10 exact-
+match accuracy (%) at each candidate-pool size.
+Compute (s/spec)Top-1Top-10
+NPLIB1
+100 0.93 29.76 41.07
+200 1.74 29.76 41.82
+300 2.34 31.40 43.60
+500 3.76 31.10 45.68
+700 4.88 31.10 44.94
+1000 6.75 30.80 45.68
+1500 9.35 30.95 46.88
+MassSpecGym
+100 0.93 23.91 28.65
+200 1.76 24.42 30.22
+300 2.60 24.60 31.36
+500 4.25 25.02 32.64
+700 5.75 25.12 33.03
+1000 9.98 25.10 33.37
+1500 16.21 25.40 34.06
+whereas Top-1 changes more modestly and shows small fluctu-
+ations. Together, these trends indicate that additional sampling
+broadens candidate coverage more reliably than it alters the lead-
+ing prediction. Although the gains taper at larger candidate-pool
+sizes, MS-GPT still attains strong Top-10 exact-match accuracy
+on MassSpecGym at comparatively low per-spectrum inference
+compute.
+A.5 Allocation at Fixed Candidate-Pool Size
+Figures 9 and 10 examine how a fixed candidate-pool size is divided
+between query diversity and per-query sampling depth. On both
+1 10 20 30 40 50
+Number of query groups M (B = 100)
+24
+26
+28
+30
+32T op-1 accuracy (%)
+default N = 5
+MS-GPT
+MS-GPT-Base
+24
+28
+32
+36
+40
+T op-10 accuracy (%)
+Figure 9: NPLIB1 Top-1/Top-10 exact-match accuracy across
+query-group allocations at fixed candidate-pool size =100.
+Increasing refines the grid over the calibrated density band
+while reducing samples per group (≈ 100/). Solid circles
+and dashed squares denote Top-1 and Top-10 accuracy on the
+left and right axes, respectively; the vertical line marks the
+default=20,=5.
+1 10 20 30 40 50
+Number of query groups M (B = 100)
+20
+21
+22
+23
+24
+25T op-1 accuracy (%)
+default N = 5
+MS-GPT
+MS-GPT-Base
+22
+24
+26
+28
+30
+T op-10 accuracy (%)
+Figure 10: MassSpecGym Top-1/Top-10 exact-match accuracy
+across query-group allocations at fixed candidate-pool size
+=100. Increasing refines the grid over the calibrated den-
+sity band while reducing samples per group (≈ 100/). Solid
+circles and dashed squares denote Top-1 and Top-10 accu-
+racy on the left and right axes, respectively; the vertical line
+marks the default=20,=5.
+datasets, the clearest improvement appears when the single-point
+query is replaced by a small grid of posterior queries. Performance
+then remains broadly stable as the grid is refined, with excess gen-
+erations trimmed where necessary to preserve : MassSpecGym
+exhibits a particularly flat plateau, whereas NPLIB1 fluctuates more
+without a consistent trend toward larger. This pattern indicates
+that the main benefit comes from spanning plausible posterior
+operating points rather than repeatedly sampling from a single
+threshold; once multiple queries are included, the precise allocation
+matters less. The default=20,=5balances coverage across the
+query band with per-query sampling depth and lies within this
+11
+Zhao et al.
+stable regime. MS-GPT remains ahead of MS-GPT-Base throughout
+both sweeps, indicating that the advantage of posterior-aligned
+adaptation persists across candidate-pool allocations.
+A.6 Density-Ratio Diagnostics
+Appendix B.4 specifies the shared endpointsmin andmax, chosen
+empirically with reference to validation-set metrics. The resulting
+band is intentionally conservative, beginning near density match
+and extending toward denser queries to retain a wider set of lower-
+confidence bits. This choice was guided by the expectation that
+co-occurrence patterns learned between active-bit conditioning
+tokens and SAFE tokens during conditional pretraining could help
+the model tolerate isolated noisy bits while benefiting from the
+additional structural cues retained by denser queries.
+Figures 11 and 12 provide a post hoc analysis of this calibration.
+Across the sweep, increasing produces denser single-threshold
+queries, as confirmed by the monotonic active-bit curves. The high-
+fidelity share peaks near density match; the middle-fidelity share
+remains elevated farther into the denser regime; and the low-fidelity
+share increases toward both extremes. To our surprise, validation
+and test exhibit similar-dependent patterns throughout the sweep.
+The curves nearly overlap on MassSpecGym; on NPLIB1, the abso-
+lute fidelity shares differ more, but the same qualitative progression
+is preserved. This cross-split agreement suggests that provides
+a consistent coordinate for posterior fidelity across the observed
+splits. The position of the high-fidelity peak and its cross-split
+stability suggest that the selected band may have been more con-
+servative than necessary; a modest shift toward smaller would
+filter more low-confidence bits and move the query grid toward
+the high-fidelity region, potentially improving Top-1 exact-match
+accuracy.
+20
+40
+60
+80Spectra (%)
+(a) Low fidelity
+15
+25
+35
+45
+(b) Mid fidelity
+T est
+Val
+0.5 1.0 1.5 2.0
+Density ratio 
+0
+20
+40
+60Spectra (%)
+(c) High fidelity
+0.5 1.0 1.5 2.0
+Density ratio 
+0
+40
+80
+120
+Mean active bits
+(d) Active bits
+Figure 11: NPLIB1 posterior-fidelity bin proportions and
+mean active-query-bit count versus density ratio . Curves
+compare validation and test splits; the dashed line marks
+density match (=1.00), and shading marks the calibrated
+density bandK=[0.95,1.50].
+30
+50
+70
+90Spectra (%)
+(a) Low fidelity
+10
+20
+30
+40
+(b) Mid fidelity
+T est
+Val
+0.5 1.0 1.5 2.0
+Density ratio 
+0
+20
+40
+60Spectra (%)
+(c) High fidelity
+0.5 1.0 1.5 2.0
+Density ratio 
+0
+60
+120
+180
+Mean active bits
+(d) Active bits
+Figure 12: MassSpecGym posterior-fidelity bin proportions
+and mean active-query-bit count versus density ratio .
+Curves compare validation and test splits; the dashed line
+marks density match (=1.00), and shading marks the cali-
+brated density bandK=[0.95,1.50].
+A.7 Pretraining Data Scaling
+Table 5 examines a separate one-epoch pretraining trajectory of
+MS-GPT-Base on a filtered, approximately1B-structure SAFE-GPT
+corpus, with fingerprint–formula conditioning retained through-
+out. The architecture, candidate-pool size, and density-band infer-
+ence protocol remain fixed, and connectivity-equivalent validation
+and test structures from both benchmarks are excluded. Its100M
+checkpoint is therefore distinct from the main two-epoch model.
+Exact-match accuracy and Morgan Tanimoto similarity improve
+throughout the sweep, indicating that greater pretraining exposure
+strengthens both the leading prediction and the broader candi-
+date pool. Gains become more gradual at larger scales but persist
+through the largest checkpoint, suggesting diminishing returns
+without clear saturation.
+Table 5: Pretraining data scaling of MS-GPT-Base on NPLIB1.
+Rows list one-epoch checkpoints by cumulative structures
+seen. Accuracy and Tanimoto report Top-1/Top-10 exact-
+match accuracy (%) and maximum Morgan Tanimoto similar-
+ity, respectively; cumulative GPU-hours are estimated across
+eight NVIDIA A800 GPUs. Bold marks the best result.
+Structures Seen GPU Hours AccuracyTanimoto
+5M7.8 12.05/16.52 0.325/0.352
+10M14.9 16.96/21.28 0.393/0.418
+50M71.8 24.85/31.10 0.513/0.546
+100M143.1 26.04/33.48 0.526/0.567
+500M712.0 30.65/36.46 0.555/0.583
+1B1422.531.55/37.80 0.577/0.609
+12
+MS-GPT for MS/MS De Novo Structure Elucidation
+B Experimental Details
+B.1 Model Architecture
+Our conditional molecule-language model augments the SAFE-GPT
+decoder [29] with fingerprint and formula conditioning through
+cross-attention (Figure 2(c)). The model contains150 .1M unique
+parameters: an86.7M GPT-2 backbone warm-started from SAFE-
+GPT and63 .4M parameters in the fingerprint encoder, formula
+encoder, cross-attention blocks, and shared context projection, all
+initialized from scratch. Table 6 summarizes the architecture and
+parameter counts.
+Backbone.The decoder is a12-layer GPT-2-style transformer
+with model width768,12attention heads, and a maximum sequence
+length of256tokens. Its vocabulary extends the1880-token SAFE-
+GPT vocabulary with the tokens < and >, giving1882tokens in
+total. The language-model head shares its weight matrix with the
+input-token embedding. To warm-start the backbone, we copy the
+shared token-embedding rows, all transformer-block weights, the
+final layer norm, and the first256positional-embedding rows from
+the public datamol-io/safe-gpt checkpoint; the two added token
+rows are initialized from scratch.
+Fingerprint encoder.We represent each query as a4096-bit radius-
+2 Morgan fingerprint [25, 31] and retain only its active bits. Each
+selected bit is represented by a learned embedding of its index at
+width768. A2-layer pre-norm Transformer encoder (12heads, feed-
+forward width3072, GELU) then contextualizes the per-bit embed-
+dings. We retain at most256active bits in ascending bit-index order
+and pad shorter sequences to this length with an accompanying
+validity mask. Thus, the fingerprint encoder supplies up to256valid
+conditioning tokens. During conditional pretraining, the fingerprint
+input is the oracle fingerprint computed from the molecule; at
+inference, it is a thresholded posterior query=1[>].
+Formula encoder.We represent the molecular formula as integer
+atom counts over14elements (C, H, N, O, S, P, F, Cl, Br, I, B, Si, Se,
+As). For each element, a learned element embedding is concatenated
+with a two-layer MLP encoding of its atom count, projected to width
+768, and layer-normalized. This produces14formula-conditioning
+tokens.
+Cross-attention conditioning.The padded fingerprint sequence
+and14formula tokens are concatenated, together with their valid-
+ity mask, into a shared context of270token positions and passed
+through one shared linear projection. A conditioning block is in-
+serted after decoder layers2, 4, 6, 8, 10, and12. Each block applies
+pre-norm cross-attention from the decoder hidden states to the
+shared context, followed by a pre-norm feed-forward sublayer
+(768 3072 768, GELU); residual connections wrap both sublay-
+ers. Fingerprint and formula information therefore enter through
+one shared conditioning pathway, which remains present for every
+training example.
+B.2 Conditional Pretraining
+Starting from the SAFE-GPT initialization described above, we train
+the fingerprint–formula-conditioned model with the molecule-only
+objective in Eq. (2); no spectra enter this stage. The conditionally
+pretrained decoder is shared across spectral datasets; within the
+decoder, only the lightweight adapter is trained separately for each
+dataset.
+Corpus construction.For the main model, we construct the corpus
+from a117,280,040-record subset of the SAFE-GPT molecule col-
+lection. Each SAFE string is converted to SMILES; stereochemistry
+is removed before canonicalization, fingerprint computation, and
+formula extraction. We discard17,220,290records that fail SAFE-
+to-SMILES conversion, RDKit parsing, or feature computation, and
+further exclude52,391records whose 14-character InChIKey con-
+nectivity block matches one of the9,413unique blocks in the vali-
+dation or test split of either benchmark. The resulting main corpus
+contains100,007,359records, with connectivity-equivalent valida-
+tion and test structures excluded from conditional pretraining.
+Formula-grouped batching.We organize batches around exact
+molecular formula (Figure 3(a)). Formula groups containing at least
+64records, the per-GPU batch size, are shuffled internally and
+partitioned into complete same-formula batches. Smaller groups
+are pooled, shuffled, and partitioned into mixed-formula batches.
+Only complete local batches are retained; the combined batch list
+is shuffled each epoch and divided evenly among the eight data-
+parallel processes. This policy preserves the likelihood objective
+while increasing the within-batch concentration of alternatives that
+share the same formula.
+Optimization.We optimize all150 .1M parameters for2epochs (≈
+195k optimizer updates) with AdamW (=( 0.9, 0.95), weight decay
+0.01). The learning rate warms up for2000updates to a peak of
+3× 10−4 and then follows a cosine decay. Training employs bfloat16
+mixed precision, gradient clipping at norm1 .0, and a maximum
+sequence length of256. The effective global batch size is1024(64 per
+GPU, eight GPUs, and two gradient-accumulation steps). The main
+two-epoch run requires approximately358aggregate GPU-hours
+across eight NVIDIA A800 GPUs.
+B.3 Posterior-Aligned Adaptation
+For each spectral dataset, we fit a separate posterior-aligned adapter
+to the shared conditional molecule-language model (Section 3.4,
+Figure 3(b)).
+Adapter placement.We attach rank-4LoRA modules [ 17] (= 8,
+dropout0.05) to39linear layers: the fingerprint encoder’s value
+and combine projections, the shared context projection, and six
+projections in each cross-attention block (query, key, value, output,
+and two feed-forward projections). All150.1M pretrained weights
+remain frozen; the350,212trainable LoRA parameters constitute
+0.23%of the model. Before attaching LoRA to the query, key, and
+value projections, we split each fused query–key–value projection
+and copy the corresponding pretrained weight slices, leaving the
+model’s initial function unchanged.
+Recoverability grouping.The oracle fingerprint available for each
+annotated training pair serves only to assign its recoverability
+group. Under the default=100posterior-querying protocol, a pair
+isfrozen-hitif the frozen candidate pool contains an InChIKey-14
+match. For a miss, we compute the posterior–oracle agreement
+=max ∈G Tanimoto(1[>], ), over the same dataset-specific
+20-point density-band gridG applied at inference (Appendix B.4).
+13
+Zhao et al.
+Table 6: Architecture and unique parameter counts of the conditional molecule-language model. The GPT-2 backbone is
+warm-started from SAFE-GPT, while the conditioning components are initialized from scratch. The tied token embedding and
+language-model head are counted once. Dropout is0 .1in the GPT-2 backbone, fingerprint Transformer, and cross-attention
+blocks.
+Component Configuration #Params
+Backbone (GPT-2) 12 layers,=768, 12 heads, sequence length 256, vocabulary 188286.7M
+Fingerprint encoder 4096-bit radius-2 Morgan,≤256active bits, 2-layer Transformer18.5M
+Formula encoder 14 elements, count MLP1.8M
+Cross-attention after layers 2, 4, 6, 8, 10, 12; 12 heads; FFN 307242.5M
+Context projection Linear768768 0.6M
+Total 150.1M
+Table 7: Recoverability groups and per-example loss weights
+for posterior-aligned adaptation (Eq. (7)). A frozen hit is an
+InChIKey-14 match among the valid, formula-consistent out-
+puts in the default =100pool;  is the maximum posterior–
+oracle Tanimoto over the dataset-specific20-point density-
+band grid.
+Group Criterion CE  KL
+frozen-hit target in frozen=100pool0.05 2.0
+residual miss and≥0.40 1.0 1.0
+low-coverage miss and<0.40 0.0 0.5
+Misses with≥ 0.40areresidual; the remainder arelow-coverage.
+This grouping applies only during adaptation. The CE weight is
+largest for residual cases, small for frozen hits, and zero for low-
+coverage cases; the KL weight is nonzero for all three groups and
+largest for frozen hits (Table 7).
+Objective and optimization.For each example, we draw  uni-
+formly from its dataset-specific density-band interval and form
+ = 1[>] . Equation (7) combines group-weighted teacher-
+forced SAFE cross-entropy with a forward-KL anchor from the
+frozen teacher to the adapted student; both receive the same , and
+the KL is averaged over non-padding sequence positions. We opti-
+mize the LoRA parameters with AdamW (=( 0.9, 0.95), weight
+decay0.01), learning rate10−4,150warmup steps followed by co-
+sine decay, bfloat16 precision, gradient clipping at norm1.0, and
+maximum sequence length256. The global batch size is64(eight
+examples on each of eight NVIDIA A800 GPUs), without gradient ac-
+cumulation. Training runs for3000optimizer steps on NPLIB1 and
+4000on MassSpecGym. Based on held-out validation performance,
+we select the checkpoints at steps3000and2500, respectively.
+B.4 Density-Band Configuration
+We apply a shared active-bit density-ratio bandK=[ 0.95, 1.50] to
+both benchmarks. The endpoints were chosen empirically with ref-
+erence to validation-set metrics. The interval contains the density-
+match point (=1.00), extends mainly toward denser queries, and
+reaches only slightly into the sparse regime. Extending farther be-
+low=1.00would map to the flat, high-threshold region of () ,
+where small errors in the estimated active-bit count can produce
+large threshold shifts. We therefore share the band in density-ratio
+space while deriving the corresponding thresholds from each en-
+coder’s training split.
+We estimateenc and() from the corresponding encoder train-
+ing split alone, obtainingenc = 47.95active bits for NPLIB1 and
+42.03for MassSpecGym. Inverting the endpoints of K through
+Eq. (5) gives(1.50, 0.95)=( 0.062, 0.292) and(0.069, 0.274), respec-
+tively. At inference, we linearly interpolate =20thresholds be-
+tween these endpoints to form20query groups and draw =5
+sequences per group. Thus, the default candidate-pool size =
+×= 100denotes100decoder samples per spectrum before
+candidates are grouped by InChIKey-14 and ranked by generation
+frequency.
+B.5 Inference and Compute Benchmarking
+Posterior and generation.For each benchmark, the corresponding
+dataset-specific MIST [13] checkpoint released by FRIGID [2] pro-
+duces and remains frozen throughout our experiments. Given this
+posterior, MS-GPT constructs the dataset-specific threshold grid
+and samples SAFE sequences with temperature1.0, top- 50, and
+top- 0.95. Candidates are grouped by InChIKey-14 and ranked by
+generation frequency, with posterior similarity breaking ties. The
+default candidate-pool size is=100decoder samples per spectrum.
+Compute benchmarking.We measure per-spectrum GPU infer-
+ence time on a single NVIDIA RTX 6000 Ada GPU after a warmup
+period. All methods are compared at=100. To trace MS-GPT across
+candidate-pool sizes from100to1500, we keep the20query groups
+fixed and increase the number of samples per group. We measure
+MS-GPT, MS-BART, MIST+MolForge, and MADGEN directly; the
+FRIGID and DiffMS timings are taken from FRIGID [2], which re-
+ports measurements on the same GPU.
+B.6 Comparability of Reported MCES Distances
+The baseline Top- MCES values in Table 1 are taken from the
+respective papers. Their stopping thresholds, molecular preprocess-
+ing, failure handling, and solver time limits differ, as summarized
+in Table 8. These choices affect whether MCES returns an exact
+14
+MS-GPT for MS/MS De Novo Structure Elucidation
+Table 8: MCES configurations in the released baseline evaluators. PuLP denotes the first available solver; time limits apply to
+each molecular pair, and none denotes no explicit time limit. Bond sum denotes |1|+| 2|.†MADGEN assigns100to an invalid
+candidate and zero to an invalid target SMILES.
+Method Threshold Molecular preprocessing Fallback (Failed pair / No candidates) Solver (time limit)
+MADGEN [43] 20 raw SMILES100 † HiGHS (10s)
+MS-BART [14] 15 canonical SMILES15/100PuLP (none)
+DiffMS [3] 100 tautomer-canonicalized SMILES bond sum /100PuLP (none)
+FRIGID [2] 15 stereo-free, tautomer-canonicalized SMILES bond sum /100PuLP (600s)
+optimum or a lower bound, which molecular graphs are compared,
+and how failed comparisons are scored; the paper-reported values
+are therefore not strictly comparable.
+MCES settings for MS-GPT.Our Table 1 entries follow the DiffMS
+configuration. For MCES, the complete candidate pool is grouped by
+InChIKey-14 and ranked by generation frequency. After tautomer
+canonicalization and stereochemistry removal, candidate–target
+pairs are evaluated with threshold100and stronger-bound selection
+disabled, using the first available PuLP solver without an explicit
+time limit. Failed pairs receive the bond-count sum|true|+| pred|,
+and spectra without candidates receive100. MCES@ is the mini-
+mum over the top-candidates, averaged over each full test set.
+15
+Zhao et al.
+C Case Studies
+Under the fixed-grid inference and ranking protocol in Appen-
+dix B.5, Figures 13 and 14 examine representative successes and fail-
+ures as candidate-pool size increases. They show when candidate-
+pool scaling changes Top-1 and distinguish finite-sample compe-
+tition from frequency-dominated misranking, missing candidate
+support, posterior mismatch, and fingerprint resolution limits.
+C.1 Candidate-Pool Scaling and Candidate
+Recovery
+The stable rows in Figures 13(a) and 14(a) show that imperfect
+posterior evidence need not preclude an exact Top-1 prediction.
+WithFidelityvalues of0 .909and0 .800, respectively, both targets are
+Top-1 at=100and remain so through =1500. More revealingly,
+the stable and recovery rows on NPLIB1 share the sameFidelity,
+yet only the latter changes leader; fidelity alone therefore does not
+determine sensitivity to candidate-pool size.
+In the recovery rows, the decoys lead by only8 :5and41 :36at
+=100, while the targets have higher posterior similarity. Both
+targets become Top-1 at=200and remain there at =1500. These
+trajectories are consistent with finite-sample near-ties: additional
+draws can overturn a narrow frequency lead. The cases therefore
+complement the aggregate result in Appendix A.4: although larger
+pools primarily improve candidate-pool recall, they can also change
+Top-1 when the target is already present and the leading generation
+counts are close.
+C.2 Decoy Preference and Candidate Support
+The two NPLIB1 failures separate misranking from failure to gen-
+erate the target. In Figure 13(c), the target is absent at=100and
+reaches rank 2 by=200, but Top-1 never changes. Although the
+target is distinguishable from the decoy (Tani. = 0.83) and better
+aligned with the posterior (0.74versus0 .67), the decoy leads469 :70
+at=1500. Thus, a larger improves candidate-pool recall, while
+the decoy’s persistent frequency advantage preserves the wrong
+leader.
+In Figure 13(d), the target remains absent through=1500. The
+leading prediction replaces the seven-membered ring with a six-
+membered ring plus a separate [CH2], satisfying the elemental
+composition but exposing the lack of a hard connectivity constraint
+during token generation.
+C.3 Posterior Quality and Fingerprint
+Resolution
+Figure 14(d) exposes a low-fidelity posterior mismatch.Fidelityis
+0.070, yet a nearly unrelated prediction (Tani. = 0.06) reachesPost.
+= 0.87, while the target is never generated. The posterior is thus
+“confidently wrong” only operationally: the query band matches
+the wrong fingerprint neighborhood, and increasing reinforces
+the resulting prediction but cannot alter the underlying posterior
+mismatch.
+Figure 14(c) isolates a different failure: the query band reaches
+the oracle radius-2 fingerprint, but that representation itself is non-
+identifying.Fidelity,Post., andTani.are all1 .00, yet the target re-
+mains second at every candidate-pool size. The target and hydroxyl-
+relocation decoy have identical radius-2 Morgan fingerprints but
+become distinguishable at radius 3. Table 9 contrasts this pair with
+the NPLIB1 case in Figure 13(c), which is already distinguishable at
+radius 2.
+This non-identifiability persists even under the oracle radius-2
+fingerprint, making the failure orthogonal to the oracle-to-posterior
+gap and providing a concrete representational limit of the fixed-
+dimensional fingerprint posterior used by MS-GPT. A higher-radius
+or multiscale condition can encode this distinction, but whether
+the additional detail can be inferred reliably from spectra remains
+open.
+Table 9: Target–decoy Morgan Tanimoto similarity across
+fingerprint radii for Figures 14(c) and 13(c). The MassSpec-
+Gym pair is fingerprint-equivalent at radius 2 but becomes
+distinguishable at larger radii; the NPLIB1 pair is already
+distinguishable at radius 2.
+Spectrum Structural change=2=3=4
+MassSpecGymID
+0221321 Hydroxyl relocation 1.00 0.95 0.86
+CCMSLIB
+00000848359 Side-chain relocation 0.83 0.64 0.54
+16
+MS-GPT for MS/MS De Novo Structure Elucidation
+Figure 13: MS-GPT case studies on NPLIB1 across candidate-pool sizes . Each row compares the ground truth (blue) with Top-1
+predictions (green: exact; orange: decoy).FidelityandPost.are, respectively, the maximum target–query and prediction–query
+radius-2 Morgan similarities over the active-bit density band;Tani.is the prediction–target radius-2 Morgan similarity, andFreq.
+is the grouped generation count. For a repeated Top-1 structure, onlyFreq.is repeated because the other scores are unchanged.
+“Exact GT, ” “GT #, ” and “GT∅” denote an exact leading match, target rank, and target absence. The dashed box in (d) contains
+the separate[CH 2]component.
+17
+Zhao et al.
+Figure 14: MS-GPT case studies on MassSpecGym across candidate-pool sizes . Each row compares the ground truth (blue)
+with Top-1 predictions (green: exact; orange: decoy).FidelityandPost.are, respectively, the maximum target–query and
+prediction–query radius-2 Morgan similarities over the active-bit density band;Tani.is the prediction–target radius-2 Morgan
+similarity, andFreq.is the grouped generation count. For a repeated Top-1 structure, onlyFreq.is repeated because the other
+scores are unchanged. “Exact GT, ” “GT #, ” and “GT∅” denote an exact leading match, target rank, and target absence. The gold
+highlight marks the migrated hydroxyl group.
+18

@@ -1,0 +1,778 @@
+                  Predicting Good Probabilities With Supervised Learning
+
+
+Alexandru Niculescu-Mizil                                                                        ALEXN @ CS . CORNELL . EDU
+Rich Caruana                                                                                  CARUANA @ CS . CORNELL . EDU
+Department Of Computer Science, Cornell University, Ithaca NY 14853
+                        Abstract                                 such as bagged trees and neural nets have little or no bias
+                                                                 and predict well-calibrated probabilities.
+     We examine the relationship between the predic-
+     tions made by different learning algorithms and             After examining the distortion (or lack of) characteristic to
+     true posterior probabilities. We show that maxi-            each learning method, we experiment with two calibration
+     mum margin methods such as boosted trees and                methods for correcting these distortions.
+     boosted stumps push probability mass away from              Platt Scaling: a method for transforming SVM outputs
+     0 and 1 yielding a characteristic sigmoid shaped            from [−∞, +∞] to posterior probabilities (Platt, 1999)
+     distortion in the predicted probabilities. Mod-             Isotonic Regression: the method used by Zadrozny and
+     els such as Naive Bayes, which make unrealis-               Elkan (2002; 2001) to calibrate predictions from boosted
+     tic independence assumptions, push probabilities            naive bayes, SVM, and decision tree models
+     toward 0 and 1. Other models such as neural
+     nets and bagged trees do not have these biases              Platt Scaling is most effective when the distortion in the
+     and predict well calibrated probabilities. We ex-           predicted probabilities is sigmoid-shaped. Isotonic Regres-
+     periment with two ways of correcting the biased             sion is a more powerful calibration method that can correct
+     probabilities predicted by some learning meth-              any monotonic distortion. Unfortunately, this extra power
+     ods: Platt Scaling and Isotonic Regression. We              comes at a price. A learning curve analysis shows that Iso-
+     qualitatively examine what kinds of distortions             tonic Regression is more prone to overfitting, and thus per-
+     these calibration methods are suitable for and              forms worse than Platt Scaling, when data is scarce.
+     quantitatively examine how much data they need              Finally, we examine how good are the probabilities pre-
+     to be effective. The empirical results show that            dicted by each learning method after each method’s predic-
+     after calibration boosted trees, random forests,            tions have been calibrated. Experiments with eight classi-
+     and SVMs predict the best probabilities.                    fication problems suggest that random forests, neural nets
+                                                                 and bagged decision trees are the best learning methods for
+                                                                 predicting well-calibrated probabilities prior to calibration,
+1. Introduction                                                  but after calibration the best methods are boosted trees, ran-
+                                                                 dom forests and SVMs.
+In many applications it is important to predict well cali-
+brated probabilities; good accuracy or area under the ROC
+curve are not sufficient. This paper examines the prob-          2. Calibration Methods
+abilities predicted by ten supervised learning algorithms:
+                                                                 In this section we describe the two methods for mapping
+SVMs, neural nets, decision trees, memory-based learn-
+                                                                 model predictions to posterior probabilities: Platt Calibra-
+ing, bagged trees, random forests, boosted trees, boosted
+                                                                 tion and Isotonic Regression. Unfortunately, these methods
+stumps, naive bayes and logistic regression. We show how
+                                                                 are designed for binary classification and it is not trivial to
+maximum margin methods such as SVMs, boosted trees,
+                                                                 extend them to multiclass problems. One way to deal with
+and boosted stumps tend to push predicted probabilities
+                                                                 multiclass problems is to transform them to binary prob-
+away from 0 and 1. This hurts the quality of the probabili-
+                                                                 lems, calibrate the binary models, and recombine the pre-
+ties they predict and yields a characteristic sigmoid-shaped
+                                                                 dictions (Zadrozny & Elkan, 2002).
+distortion in the predicted probabilities. Other methods
+such as naive bayes have the opposite bias and tend to push
+predictions closer to 0 and 1. And some learning methods         2.1. Platt Calibration
+                                                                 Platt (1999) proposed transforming SVM predictions to
+Appearing in Proceedings of the 22 nd International Conference   posterior probabilities by passing them through a sigmoid.
+on Machine Learning, Bonn, Germany, 2005. Copyright 2005 by
+the author(s)/owner(s).
+                                                                 We will see in Section 4 that a sigmoid transformation is
+                                     Predicting Good Probabilities With Supervised Learning
+
+also justified for boosted trees and boosted stumps.
+                                                                                        Table 1. PAV Algorithm
+Let the output of a learning method be f (x). To get cali-           Algorithm 1. PAV algorithm for estimating posterior
+brated probabilities, pass the output through a sigmoid:             probabilities from uncalibrated model predictions.
+                                                                     1 Input: training set (fi , yi ) sorted according to fi
+                                      1                              2 Initialize m̂i,i = yi , wi,i = 1
+             P (y = 1|f ) =                                  (1)
+                              1 + exp(Af + B)                        3 While ∃ i s.t. m̂k,i−1 ≥ m̂i,l
+                                                                               Set wk,l = wk,i−1 + wi,l
+where the parameters A and B are fitted using maximum                          Set m̂k,l = (wk,i−1 m̂k,i−1 + wi,l m̂i,l )/wk,l
+likelihood estimation from a fitting training set (fi , yi ).                  Replace m̂k,i−1 and m̂i,l with m̂k,l
+Gradient descent is used to find A and B such that they              4 Output the stepwise const. function:
+are the solution to:                                                           m̂(f ) = m̂i,j , for fi < f ≤ fj
+               X
+  argmin{−           yi log(pi ) + (1 − yi )log(1 − pi )},   (2)
+     A,B         i                                                 where m is an isotonic (monotonically increasing) func-
+                                                                   tion. Then, given a train set (fi , yi ), the Isotonic Regres-
+where                            1                                 sion problem is finding the isotonic function m̂ such that
+                  pi =                                       (3)                                X
+                         1 + exp(Afi + B)                                       m̂ = argminz        (yi − z(fi ))2            (6)
+
+Two questions arise: where does the sigmoid train set come         One algorithm that finds a stepwise constant solution for
+from? and how to avoid overfitting to this training set?           the Isotonic Regression problem is pair-adjacent violators
+                                                                   (PAV) algorithm (Ayer et al., 1955) presented in Table 1.
+If we use the same data set that was used to train the model
+we want to calibrate, we introduce unwanted bias. For ex-          As in the case of Platt calibration, if we use the model train-
+ample, if the model learns to discriminate the train set per-      ing set (xi , yi ) to get the training set (f (xi ), yi ) for Isotonic
+fectly and orders all the negative examples before the posi-       Regression, we introduce unwanted bias. So we use an in-
+tive examples, then the sigmoid transformation will output         dependent validation set to train the isotonic function.
+just a 0,1 function. So we need to use an independent cali-
+bration set in order to get good posterior probabilities. This,
+                                                                   3. Data Sets
+however, is not a draw back, since the same set can be used
+for model and parameter selection.                                 We compare algorithms on 8 binary classification prob-
+                                                                   lems. ADULT, COV TYPE and LETTER are from UCI
+To avoid overfitting to the sigmoid train set, an out-of-
+                                                                   Repository (Blake & Merz, 1998). COV TYPE has been
+sample model is used. If there are N+ positive examples
+                                                                   converted to a binary problem by treating the largest class
+and N− negative examples in the train set, for each train-
+                                                                   as positive and the rest as negative. We converted LETTER
+ing example Platt Calibration uses target values y+ and y−
+                                                                   to boolean two ways. LETTER.p1 treats the letter ”O” as
+(instead of 1 and 0, respectively), where
+                                                                   positive and the remaining 25 letters as negative, yielding
+                     N+ + 1               1                        a very unbalanced problem. LETTER.p2 uses letters A-M
+              y+ =            ; y− =                    (4)
+                     N+ + 2           N− + 2                       as positives and N-Z as negatives, yielding a difficult, but
+For a more detailed treatment, and a justification of these        well balanced, problem. HS is the IndianPine92 data set
+particular target values see (Platt, 1999).                        (Gualtieri et al., 1999) where the difficult class Soybean-
+                                                                   mintill is the positive class. SLAC is a problem from the
+                                                                   Stanford Linear Accelerator. MEDIS and MG are medical
+2.2. Isotonic Regression
+                                                                   data sets. The data sets are summarized in Table 2.
+The sigmoid transformation works well for some learning
+methods, but it is not appropriate for others. Zadrozny                             Table 2. Description of problems
+and Elkan (2002; 2001) successfully used a more general
+method based on Isotonic Regression (Robertson et al.,              PROBLEM          # ATTR     TRAIN SIZE       TEST SIZE      % POZ
+1988) to calibrate predictions from SVMs, Naive Bayes,
+                                                                    ADULT           14/104          4000           35222         25%
+boosted Naive Bayes, and decision trees. This method is             COV TYPE          54            4000           25000         36%
+more general in that the only restriction is that the mapping       LETTER . P 1      16            4000           14000          3%
+function be isotonic (monotonically increasing). That is,           LETTER . P 2      16            4000           14000         53%
+given the predictions fi from a model and the true targets          MEDIS             63            4000            8199         11%
+yi , the basic assumption in Isotonic Regression is that:           MG               124            4000           12807         17%
+                                                                    SLAC              59            4000           25000         50%
+                       yi = m(fi ) + i                      (5)    HS               200            4000            4366         24%
+                                      Predicting Good Probabilities With Supervised Learning
+
+4. Qualitative Analysis of Predictions                                 for boosted trees after Platt Calibration (Figure 2) and Iso-
+                                                                       tonic Regression (Figure 3). The figures show that calibra-
+In this section we qualitatively examine the calibration of            tion undoes the shift in probability mass caused by boost-
+the different learning algorithms. For each algorithm we               ing: after calibration many more cases have predicted prob-
+use many variations and parameter settings to train differ-            abilities near 0 and 1. The reliability diagrams are closer
+ent models. For example, we train models using ten de-                 to diagonal, and the S-shape characteristic of boosted tree
+cision tree styles, neural nets of many sizes, SVMs with               predictions is gone. On each problem, transforming pre-
+many kernels, etc. After training, we apply Platt Scal-                dictions using Platt Scaling or Isotonic Regression yields
+ing and Isotonic Regression to calibrate all models. Each              a significant improvement in the predicted probabilities,
+model is trained on the same random sample of 4000 cases               leading to much lower squared error and log-loss. One
+and calibrated on independent samples of 1000 cases. For               difference between Isotonic Regression and Platt Scaling
+the figures in this section we select, for each problem, and           is apparent in the histograms: because Isotonic Regression
+for each learning algorithm, the model that has the best cal-          generates a piecewise constant function, the histograms are
+ibration before or after scaling.                                      coarse, while the histograms generated by Platt Scaling are
+On real problems where the true conditional probabilities              smoother. See (Niculescu-Mizil & Caruana, 2005) for a
+are not known, model calibration can be visualized with re-            more thorough analysis of boosting from the point-of-view
+liability diagrams (DeGroot & Fienberg, 1982). First, the              of predicting well-calibrated probabilities.
+prediction space is discretized into ten bins. Cases with              Figure 6 shows the prediction histograms for the ten learn-
+predicted value between 0 and 0.1 fall in the first bin, be-           ing methods on the SLAC problem before calibration, and
+tween 0.1 and 0.2 in the second bin, etc. For each bin, the            after calibration with Platt’s method. Reliability diagrams
+mean predicted value is plotted against the true fraction of           showing the fitted functions for Platt’s method and Iso-
+positive cases. If the model is well calibrated the points             tonic Regression also are shown. Boosted stumps and
+will fall near the diagonal line.                                      SVMs2 also exhibit distinctive sigmoid-shaped reliability
+We first examine the predictions made by boosted trees.                plots (second and third rows, respectively, of Figure 6).
+Figure 1 shows histograms of the predicted values (top                 Boosted stumps and SVMs exhibit similar behavior on the
+row) and reliability diagrams (middle and bottom rows) for             other seven problems. As in the case of boosted trees, the
+boosted trees on the eight test problems on large test sets            sigmoidal shape of the reliability plots co-occurs with the
+not used for training or calibration. An interesting aspect            concentration of mass in the center of the histograms of
+of the reliability plots in Figure 1 is that they display a sig-       predicted values, with boosted stumps being the most ex-
+moidal shape on seven of the eight problems1 , motivating              treme. It is interesting to note that the learning methods
+the use of a sigmoid to transform predictions into calibrated          that exhibit this behavior are maximum margin methods.
+probabilities. The reliability plots in the middle row of the          The sigmoid-shaped reliability plot that results from pre-
+figure show sigmoids fitted using Platt’s method. The reli-            dictions being pushed away from 0 and 1 appears to be
+ability plots in the bottom of the figure show the function            characteristic of max margin methods.
+fitted with Isotonic Regression.                                       Figure 4 which shows histograms of predicted values and
+Examining the histograms of predicted values (top row                  reliability plots for neural nets tells a very different story.
+in Figure 1), note that almost all the values predicted by             The reliability plots closely follow the diagonal line indi-
+boosted trees lie in the central region with few predictions           cating that neural nets are well calibrated to begin with and
+approaching 0 or 1. The one exception is LETTER.P1, a                  do not need post-training calibration. Only the COV TYPE
+highly skewed data set that has only 3% positive class. On             problem appears to benefit a little from calibration. On the
+this problem some predicted values do approach 0, though               other problems both calibration methods appear to be striv-
+careful examination of the histogram shows that even on                ing to approximate the diagonal line, a task that isn’t nat-
+this problem there is a sharp drop in the number of cases              ural to either of them. Because of this, scaling might hurt
+predicted to have probability near 0. This shifting of the             neural net calibration a little. The sigmoids trained with
+predictions toward the center of the histogram causes the              Platt’s method have trouble fitting the tails properly, effec-
+sigmoid-shaped reliability plots of boosted trees.                     tively pushing predictions away from 0 and 1 as can be seen
+                                                                       in the histograms in Figure 5. The histograms for uncali-
+To show how calibration transforms predictions, we plot                brated neural nets in Figure 4 look similar to the histograms
+histograms and reliability diagrams for the eight problems             for boosted trees after Platt Scaling in Figure 2, giving us
+    1
+      Because boosting overfits on the ADULT problem, the best         confidence that the histograms reflect the underlying struc-
+performance is achieved after only four iterations of boosting. If       2
+boosting is allowed to continue for more iterations, it will display       SVM predictions are scaled to [0,1] by (x − min)/(max −
+the same sigmoidal shape on ADULT as in the other figures.             min).
+                                                                                                                 Predicting Good Probabilities With Supervised Learning
+
+                                         COV_TYPE                                   ADULT                                  LETTER.P1                                LETTER.P2                                   MEDIS                                        SLAC                                     HS                                    MG
+                        0.25                                                                                                                                                                                                                                                                                                                                      0.25
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                        0.15                                                                                                                                                                                                                                                                                                                                      0.15
+
+                         0.1                                                                                                                                                                                                                                                                                                                                      0.1
+
+                        0.05                                                                                                                                                                                                                                                                                                                                      0.05
+
+                          0                                                                                                                                                                                                                                                                                                                                        0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                               0   0.2    0.4    0.6        0.8   1 0   0.2       0.4       0.6      0.8   1 0   0.2       0.4      0.6       0.8   1 0   0.2       0.4      0.6       0.8   1 0    0.2       0.4       0.6      0.8   1 0   0.2       0.4          0.6   0.8   1 0   0.2       0.4        0.6     0.8   1 0   0.2    0.4        0.6    0.8   1
+                                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                      Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                 Mean Predicted Value
+
+
+
+                                                                          Figure 1. Histograms of predicted values and reliability diagrams for boosted decision trees.
+                                         COV_TYPE                                   ADULT                                  LETTER.P1                                LETTER.P2                                   MEDIS                                        SLAC                                     HS                                    MG
+                        0.25                                                                                                                                                                                                                                                                                                                                      0.25
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                        0.15                                                                                                                                                                                                                                                                                                                                      0.15
+
+                         0.1                                                                                                                                                                                                                                                                                                                                      0.1
+
+                        0.05                                                                                                                                                                                                                                                                                                                                      0.05
+
+                          0                                                                                                                                                                                                                                                                                                                                        0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                               0   0.2    0.4    0.6        0.8   1 0   0.2       0.4       0.6      0.8   1 0   0.2       0.4      0.6       0.8   1 0   0.2       0.4      0.6       0.8   1 0    0.2       0.4       0.6      0.8   1 0   0.2       0.4          0.6   0.8   1 0   0.2       0.4        0.6     0.8   1 0   0.2    0.4        0.6    0.8   1
+                                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                      Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                 Mean Predicted Value
+
+
+
+                                                Figure 2. Histograms of predicted values and reliability diagrams for boosted trees calibrated with Platt’s method.
+                                         COV_TYPE                                   ADULT                                  LETTER.P1                                LETTER.P2                                   MEDIS                                        SLAC                                     HS                                    MG
+                        0.25                                                                                                                                                                                                                                                                                                                                      0.25
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                        0.15                                                                                                                                                                                                                                                                                                                                      0.15
+
+                         0.1                                                                                                                                                                                                                                                                                                                                      0.1
+
+                        0.05                                                                                                                                                                                                                                                                                                                                      0.05
+
+                          0                                                                                                                                                                                                                                                                                                                                        0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                               0   0.2    0.4    0.6        0.8   1 0   0.2       0.4       0.6      0.8   1 0   0.2       0.4      0.6       0.8   1 0   0.2       0.4      0.6       0.8   1 0    0.2       0.4       0.6      0.8   1 0   0.2       0.4          0.6   0.8   1 0   0.2       0.4        0.6     0.8   1 0   0.2    0.4        0.6    0.8   1
+                                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                      Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                 Mean Predicted Value
+
+
+
+                                         Figure 3. Histograms of predicted values and reliability diagrams for boosted trees calibrated with Isotonic Regression.
+
+
+ture of the problems. For example, we could conclude that                                                                                                                                          neural nets are similar to SVMs and boosted trees after they
+the LETTER and HS problems, given the available fea-                                                                                                                                               have been calibrated using Platt’s method.
+tures, have well defined classes with a small number of
+                                                                                                                                                                                                   Examining the histograms and reliability diagrams for lo-
+cases in the “gray” region, while in the SLAC problem the
+                                                                                                                                                                                                   gistic regression and bagged trees shows that they be-
+two classes have high overlap with significant uncertainty
+                                                                                                                                                                                                   have similar to neural nets. Both learning algorithms are
+for most cases. It is interesting to note that neural networks
+                                                                                                                                                                                                   well calibrated initially and post-calibration does not help
+with a single sigmoid output unit can be viewed as a linear
+                                                                                                                                                                                                   them on most problems. Bagged trees are helped a little
+classifier (in the span of it’s hidden units) with a sigmoid
+                                                                                                                                                                                                   by post-calibration on the MEDIS and LETTER.P2 prob-
+at the output that calibrates the predictions. In this respect
+                                                                                                                                                                                                   lems. While it is not surprising that logistic regression pre-
+                                                                                                                 Predicting Good Probabilities With Supervised Learning
+
+                                         COV_TYPE                                   ADULT                                  LETTER.P1                                LETTER.P2                                   MEDIS                                        SLAC                                     HS                                    MG
+                        0.25                                                                                                                                                                                                                                                                                                                                      0.25
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                        0.15                                                                                                                                                                                                                                                                                                                                      0.15
+
+                         0.1                                                                                                                                                                                                                                                                                                                                      0.1
+
+                        0.05                                                                                                                                                                                                                                                                                                                                      0.05
+
+                          0                                                                                                                                                                                                                                                                                                                                        0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                               0   0.2    0.4    0.6        0.8   1 0   0.2       0.4       0.6      0.8   1 0   0.2       0.4      0.6       0.8   1 0   0.2       0.4      0.6       0.8   1 0    0.2       0.4       0.6      0.8   1 0   0.2       0.4          0.6   0.8   1 0   0.2       0.4        0.6     0.8   1 0   0.2    0.4        0.6    0.8   1
+                                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                      Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                 Mean Predicted Value
+
+
+
+                                                                                            Figure 4. Histograms of predicted values and reliability diagrams for neural nets.
+                                         COV_TYPE                                   ADULT                                  LETTER.P1                                LETTER.P2                                   MEDIS                                        SLAC                                     HS                                    MG
+                        0.25                                                                                                                                                                                                                                                                                                                                      0.25
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                        0.15                                                                                                                                                                                                                                                                                                                                      0.15
+
+                         0.1                                                                                                                                                                                                                                                                                                                                      0.1
+
+                        0.05                                                                                                                                                                                                                                                                                                                                      0.05
+
+                          0                                                                                                                                                                                                                                                                                                                                        0
+                           1                                                                                                                                                                                                                                                                                                                                      1
+
+                         0.8                                                                                                                                                                                                                                                                                                                                      0.8
+
+
+
+
+Fraction of Positives                                                                                                                                                                                                                                                                                                                                                    Fraction of Positives
+                         0.6                                                                                                                                                                                                                                                                                                                                      0.6
+
+                         0.4                                                                                                                                                                                                                                                                                                                                      0.4
+
+                         0.2                                                                                                                                                                                                                                                                                                                                      0.2
+
+                           0                                                                                                                                                                                                                                                                                                                                      0
+                               0   0.2    0.4    0.6        0.8   1 0   0.2       0.4       0.6      0.8   1 0   0.2       0.4      0.6       0.8   1 0   0.2       0.4      0.6       0.8   1 0    0.2       0.4       0.6      0.8   1 0   0.2       0.4          0.6   0.8   1 0   0.2       0.4        0.6     0.8   1 0   0.2    0.4        0.6    0.8   1
+                                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                      Mean Predicted Value                     Mean Predicted Value                     Mean Predicted Value                 Mean Predicted Value
+
+
+
+                                                    Figure 5. Histograms of predicted values and reliability diagrams for neural nets calibrated with Platt’s method.
+
+
+dicts such well-calibrated probabilities, it is interesting that                                                                                                                                   (more accentuated on the LETTER problems and less so on
+bagging decision trees also yields well-calibrated models.                                                                                                                                         COV TYPE, MEDIS and HS). Methods such as bagging
+Given that bagged trees are well calibrated, we can deduce                                                                                                                                         and random forests that average predictions from a base
+that regular decision trees also are well calibrated on aver-                                                                                                                                      set of models can have difficulty making predictions near 0
+age, in the sense that if decision trees are trained on dif-                                                                                                                                       and 1 because variance in the underlying base models will
+ferent samples of the data and their predictions averaged,                                                                                                                                         bias predictions that should be near zero or one away from
+the average will be well calibrated. Unfortunately, a sin-                                                                                                                                         these values. Because predictions are restricted to the in-
+gle decision tree has high variance and this variance affects                                                                                                                                      terval [0,1], errors caused by variance tend to be one-sided
+it’s calibration. Platt Scaling is not able to deal with this                                                                                                                                      near zero and one. For example, if a model should predict
+high variance, but Isotonic Regression can help fix some                                                                                                                                           p = 0 for a case, the only way bagging can achieve this is
+of the problems created by variance. Rows five, six and                                                                                                                                            if all bagged trees predict zero. If we add noise to the trees
+seven in Figure 6 show the histograms (before and after                                                                                                                                            that bagging is averaging over, this noise will cause some
+calibration) and reliability diagrams for logistic regression,                                                                                                                                     trees to predict values larger than 0 for this case, thus mov-
+bagged trees, and decision trees on the SLAC problem.                                                                                                                                              ing the average prediction of the bagged ensemble away
+                                                                                                                                                                                                   from 0. We observe this effect most strongly with random
+Random forests are less clear cut. RF models are well
+                                                                                                                                                                                                   forests because the base-level trees trained with random
+calibrated on some problems, but are poorly calibrated on
+                                                                                                                                                                                                   forests have relatively high variance due to feature subset-
+LETTER.P2, and not well calibrated on HS, COV TYPE,
+                                                                                                                                                                                                   ting. Post-calibration seems to help mitigate this problem.
+MEDIS and LETTER.P1. It is interesting that on these
+problems, RFs seem to exhibit, although to a lesser ex-                                                                                                                                            Because Naive Bayes makes the unrealistic assumption that
+tent, the same behavior as the max margin methods: pre-                                                                                                                                            the attributes are conditionally independent given the class,
+dicted values are slightly pushed toward the middle of the                                                                                                                                         it tends to push predicted values toward 0 and 1. This is the
+histogram and the reliability plots show a sigmoidal shape                                                                                                                                         opposite behavior from the max margin methods and cre-
+                                             Predicting Good Probabilities With Supervised Learning
+             0.25
+                                                                          Returning to Figure 6, we see that the histograms of the pre-
+              0.2
+
+
+             0.15
+                                                                          dicted values before calibration (first column) from the ten
+  BST-DT
+              0.1                                                         different models display wide variation. The max margin
+             0.05                                                         methods (SVM, boosted trees, and boosted stumps) have
+                0
+             0.25
+                                                                          the predicted values massed in the center of the histograms,
+              0.2                                                         causing a sigmoidal shape in the reliability plots. Both
+                                                                          Platt Scaling and Isotonic Regression are effective at fitting
+  BST-STMP
+             0.15
+
+
+              0.1
+                                                                          this sigmoidal shape. After calibration the prediction his-
+             0.05
+
+
+                0
+                                                                          tograms extend further into the tails near predicted values
+             0.25
+                                                                          of 0 and 1.
+              0.2
+
+
+             0.15                                                         For methods that are well calibrated (neural nets, bagged
+  SVM
+              0.1
+                                                                          trees, random forests, and logistic regression), calibration
+             0.05
+                                                                          with Platt Scaling actually moves probability mass away
+                0
+             0.25                                                         from 0 and 1. It is clear from looking at the reliability di-
+              0.2
+                                                                          agrams for these methods that the sigmoid has difficulty
+             0.15
+  ANN
+              0.1
+                                                                          fitting the predictions in the tails of these well-calibrated
+             0.05
+                                                                          methods.
+                0
+             0.25                                                         Overall, if one examines the probability histograms before
+              0.2
+                                                                          and after calibration, it is clear that the histograms are much
+  LOGREG
+             0.15
+                                                                          more similar to each other after Platt Scaling. Calibration
+              0.1
+
+
+             0.05
+                                                                          significantly reduces the differences between the probabil-
+                0
+                                                                          ities predicted by the different models. Of course, calibra-
+             0.25
+                                                                          tion is unable to fully correct the predictions from the infe-
+              0.2
+
+
+             0.15
+                                                                          rior models such as decision trees and naive bayes.
+  BAG-DT
+              0.1
+
+
+             0.05
+
+
+                0
+                                                                          5. Learning Curve Analysis
+             0.25
+
+
+              0.2                                                         In this section we present a learning curve analysis of the
+  DT
+             0.15
+                                                                          two calibration methods, Platt Scaling and Isotonic Regres-
+              0.1
+                                                                          sion. The goal is to determine how effective these calibra-
+             0.05
+
+
+                0
+                                                                          tion methods are as the amount of data available for cali-
+             0.25
+                                                                          bration varies. For this analysis we use the same models as
+              0.2
+                                                                          in Section 4, but here we vary the size of the calibration set
+             0.15
+  RF
+              0.1
+                                                                          from 32 cases to 8192 cases by factors of two. To measure
+             0.05
+                                                                          calibration performance we examine the squared error of
+                0
+             0.25
+                                                                          the models.
+              0.2
+                                                                          The plots in Figure 7 show the average squared error over
+             0.15
+  KNN
+              0.1
+                                                                          the eight test problems. For each problem, we perform ten
+             0.05
+                                                                          trials. Error bars are shown on the plots, but are so nar-
+                0                                                         row that they may be difficult to see. Calibration learning
+             0.25
+
+
+              0.2
+                                                                          curves are shown for nine of the ten learning methods (de-
+             0.15
+                                                                          cision trees are left out).
+  NB
+              0.1
+
+
+             0.05
+                                                                          The nearly horizontal lines in the graphs show the squared
+               0
+                                                                          error prior to calibration. These lines are not perfectly
+                                                                          horizontal only because the test sets change as more data
+             Figure 6. Histograms and reliability diagrams for SLAC.
+                                                                          is moved into the calibration sets. Each plot shows the
+                                                                          squared error after calibration with Platt’s method or Iso-
+ates reliability plots that have an inverted sigmoid shape.               tonic Regression as the size of the calibration set varies
+While Platt Scaling is still helping to improve calibration,              from small to large. When the calibration set is small (less
+it is clear that a sigmoid is not the right transformation to             than about 200-1000 cases), Platt Scaling outperforms Iso-
+calibrate Naive Bayes models. Isotonic Regression is a bet-               tonic Regression with all nine learning methods. This hap-
+ter choice to calibrate these models.                                     pens because Isotonic Regression is less constrained than
+                                                        Predicting Good Probabilities With Supervised Learning
+
+                               BST-DT                                                                  RF                                                                 ANN
+      0.38                                                                   0.38                                                                0.38
+                                                         Unscaled                                                            Unscaled                                                            Unscaled
+                                                             Platt                                                               Platt                                                               Platt
+                                                          Isotonic                                                            Isotonic                                                            Isotonic
+
+      0.36                                                                   0.36                                                                0.36
+
+
+
+
+      0.34                                                                   0.34                                                                0.34
+
+
+
+
+      0.32                                                                   0.32                                                                0.32
+
+
+
+
+       0.3                                                                    0.3                                                                 0.3
+
+
+
+
+      0.28                                                                   0.28                                                                0.28
+
+
+             10     100                          1000                10000          10   100                          1000               10000          10   100                          1000               10000
+                          Calibration Set Size                                                 Calibration Set Size                                                Calibration Set Size
+                                BAG-DT                                                                 SVM                                                                 KNN
+      0.38                                                                   0.38                                                                0.38
+                                                         Unscaled                                                            Unscaled                                                            Unscaled
+                                                             Platt                                                               Platt                                                               Platt
+                                                          Isotonic                                                            Isotonic                                                            Isotonic
+
+      0.36                                                                   0.36                                                                0.36
+
+
+
+
+      0.34                                                                   0.34                                                                0.34
+
+
+
+
+      0.32                                                                   0.32                                                                0.32
+
+
+
+
+       0.3                                                                    0.3                                                                 0.3
+
+
+
+
+      0.28                                                                   0.28                                                                0.28
+
+
+             10     100                          1000                10000          10   100                          1000               10000          10   100                          1000               10000
+                          Calibration Set Size                                                 Calibration Set Size                                                Calibration Set Size
+                              BST-STMP                                                              LOGREG                                                                  NB
+      0.38                                                                   0.38                                                                0.38
+                                                         Unscaled                                                            Unscaled                                                            Unscaled
+                                                             Platt                                                               Platt                                                               Platt
+                                                          Isotonic                                                            Isotonic                                                            Isotonic
+
+      0.36                                                                   0.36                                                                0.36
+
+
+
+
+      0.34                                                                   0.34                                                                0.34
+
+
+
+
+      0.32                                                                   0.32                                                                0.32
+
+
+
+
+       0.3                                                                    0.3                                                                 0.3
+
+
+
+
+      0.28                                                                   0.28                                                                0.28
+
+
+             10     100                          1000                10000          10   100                          1000               10000          10   100                          1000               10000
+                          Calibration Set Size                                                 Calibration Set Size                                                Calibration Set Size
+
+
+
+                  Figure 7. Learning Curves for Platt Scaling and Isotonic Regression (averages across 8 problems).
+
+
+Platt Scaling, so it is easier for it to overfit when the calibra-                                          even when the calibration set is small. In Section 4 we saw
+tion set is small. Platt’s method also has some overfitting                                                 that a sigmoid is a good match for boosted trees, boosted
+control built in (see Section 2). As the size of the calibra-                                               stumps, and SVMs. As expected, for these methods Platt
+tion set increases, the learning curves for Platt Scaling and                                               Scaling performs better than Isotonic Regression for small
+Isotonic Regression join, or even cross. When there are                                                     to medium sized calibration (less than 1000 cases), and is
+1000 or more points in the calibration set, Isotonic Regres-                                                virtually indistinguishable for larger calibration sets.
+sion always yields performance as good as, or better than,
+                                                                                                            As expected, calibration improves the performance of
+Platt Scaling.
+                                                                                                            Naive Bayes models for almost all calibration set sizes,
+For learning methods that make well calibrated predictions                                                  with Isotonic Regression outperforming Platt Scaling when
+such as neural nets, bagged trees, and logistic regression,                                                 there is more data. For the rest of the models: KNN, RF and
+neither Platt Scaling nor Isotonic Regression yields much                                                   DT (not shown) post-calibration helps once the calibration
+improvement in performance even when the calibration set                                                    sets are large enough.
+is very large. With these methods calibration is not benefi-
+cial, and actually hurts performance when the the calibra-                                                  6. Empirical Comparison
+tion sets are small.
+                                                                                                            As before, for each learning algorithm we train differ-
+For the max margin methods, boosted trees, boosted
+                                                                                                            ent models using different parameter settings and calibrate
+stumps and SVMs, calibration provides an improvement
+                                                                          Predicting Good Probabilities With Supervised Learning
+
+                0.38
+                                       Uncalibrated                                                           bayes make predictions with the opposite distortion. And
+                                Isotonic Regression
+                                        Platt Scaling
+                                                                                                              methods such as neural nets and bagged trees predict well-
+                0.36
+                                                                                                              calibrated probabilities. We examined the effectiveness of
+                                                                                                              Platt Scaling and Isotonic Regression for calibrating the
+                0.34
+                                                                                                              predictions made by different learning methods. Platt Scal-
+
+Squared Error
+                                                                                                              ing is most effective when the data is small, but Isotonic
+                0.32
+                                                                                                              Regression is more powerful when there is sufficient data to
+                                                                                                              prevent overfitting. After calibration, the models that pre-
+                 0.3
+                                                                                                              dict the best probabilities are boosted trees, random forests,
+                                                                                                              SVMs, uncalibrated bagged trees and uncalibrated neural
+                0.28
+                                                                                                              nets.
+                0.26
+                       BST-DT      SVM         RF        ANN     BAG-DT   KNN   BST-STMP   DT   LOGREG   NB   ACKNOWLEDGMENTS
+                 0.7
+                                       Uncalibrated
+                                Isotonic Regression
+                                        Platt Scaling
+                                                                                                              Thanks to B. Zadrozny and C. Elkan for the Isotonic Re-
+                0.65
+                                                                                                              gression code, C. Young et al. at Stanford Linear Acceler-
+                 0.6                                                                                          ator for the SLAC data, and A. Gualtieri at Goddard Space
+                                                                                                              Center for help with the Indian Pines Data. This work was
+                0.55
+                                                                                                              supported by NSF Award 0412930.
+Log-Loss
+                 0.5
+
+
+
+                0.45
+                                                                                                              References
+                 0.4                                                                                          Ayer, M., Brunk, H., Ewing, G., Reid, W., & Silverman, E.
+                                                                                                                (1955). An empirical distribution function for sampling
+                0.35
+                                                                                                                with incomplete information. Annals of Mathematical
+                 0.3                                                                                            Statistics, 5, 641–647.
+                       BST-DT       RF        SVM       BAG-DT    ANN     KNN   BST-STMP   DT   LOGREG   NB
+
+                                                                                                              Blake, C., & Merz, C. (1998). UCI repository of machine
+                            Figure 8. Performance of learning algorithms
+                                                                                                                learning databases.
+
+  each model with Isotonic Regression and Platt Scaling.                                                      DeGroot, M., & Fienberg, S. (1982). The comparison and
+  Models are trained on 4k samples and calibrated on inde-                                                      evaluation of forecasters. Statistician, 32, 12–22.
+  pendent 1k samples. For each data set, learning algorithm,                                                  Gualtieri, A., Chettri, S. R., Cromp, R., & Johnson, L.
+  and calibration method, we select the model with the best                                                     (1999). Support vector machine classifiers as applied
+  performance using the same 1k points used for calibration,                                                    to aviris data. Proc. Eighth JPL Airborne Geoscience
+  and report it’s performance on the large final test set.                                                      Workshop.
+  Figure 8 shows the squared error (top) and log-loss (bot-                                                   Niculescu-Mizil, A., & Caruana, R. (2005). Obtaining cal-
+  tom) for each learning method before and after calibra-                                                       ibrated probabilities from boosting. Proc. 21th Confer-
+  tion. Each bar averages over five trials on each of the eight                                                 ence on Uncertainty in Artificial Intelligence (UAI ’05).
+  problems. Error bars representing 1 standard deviation for                                                    AUAI Press.
+  the means are shown. The probabilities predicted by four
+  learning methods — boosted trees, SVMs, boosted stumps,                                                     Platt, J. (1999). Probabilistic outputs for support vector ma-
+  and naive bayes — are dramatically improved by calibra-                                                       chines and comparison to regularized likelihood meth-
+  tion. Calibration does not help bagged tress, and actually                                                    ods. Advances in Large Margin Classifiers (pp. 61–74).
+  hurts neural nets. Before calibration, the best models are                                                  Robertson, T., Wright, F., & Dykstra, R. (1988). Order
+  random forests, bagged trees, and neural nets. After cali-                                                    restricted statistical inference. New York: John Wiley
+  bration, however, boosted trees, random forests, and SVMs                                                     and Sons.
+  predict the best probabilities.
+                                                                                                              Zadrozny, B., & Elkan, C. (2001). Obtaining calibrated
+                                                                                                                probability estimates from decision trees and naive
+  7. Conclusions                                                                                                bayesian classifiers. ICML (pp. 609–616).
+  In this paper we examined the probabilities predicted by                                                    Zadrozny, B., & Elkan, C. (2002). Transforming classi-
+  ten different learning methods. Maximum margin meth-                                                          fier scores into accurate multiclass probability estimates.
+  ods such as boosting and SVMs yield characteristic dis-                                                       KDD (pp. 694–699).
+  tortions in their predictions. Other methods such as naive
+

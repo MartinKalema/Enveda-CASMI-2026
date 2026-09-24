@@ -1,0 +1,803 @@
+                                    communications chemistry                                                                                                                        Article
+
+
+
+                                                                                                                                                 https://doi.org/10.1038/s42004-024-01189-0
+
+
+                                    Structural annotation of unknown
+                                    molecules in a miniaturized mass
+                                    spectrometer based on a transformer
+                                    enabled fragment tree method
+                                                                                                                                                                             Check for updates
+                                                       1                 1                    1             1                2                    1                1
+                                    Yiming Yang         , Shuang Sun , Shuyuan Yang , Qin Yang , Xinqiong Lu , Xiaohao Wang , Quan Yu                               ,
+                                                       3
+                                    Xinming Huo             & Xiang Qian 1
+
+
+
+1234567890():,;   1234567890():,;
+                                    Structural annotation of small molecules in tandem mass spectrometry has always been a central
+                                    challenge in mass spectrometry analysis, especially using a miniaturized mass spectrometer for on-
+                                    site testing. Here, we propose the Transformer enabled Fragment Tree (TeFT) method, which
+                                    combines various types of fragmentation tree models and a deep learning Transformer module. It is
+                                    aimed to generate the speciﬁc structure of molecules de novo solely from mass spectrometry spectra.
+                                    The evaluation results on different open-source databases indicated that the proposed model
+                                    achieved remarkable results in that the majority of molecular structures of compounds in the test can
+                                    be successfully recognized. Also, the TeFT has been validated on a miniaturized mass spectrometer
+                                    with low-resolution spectra for 16 ﬂavonoid alcohols, achieving complete structure prediction for 8
+                                    substances. Finally, TeFT conﬁrmed the structure of the compound contained in a Chinese medicine
+                                    substance called the Anweiyang capsule. These results indicate that the TeFT method is suitable for
+                                    annotating fragmentation peaks with clear fragmentation rules, particularly when applied to on-site
+                                    mass spectrometry with lower mass resolution.
+
+                                    The analysis of small molecular compounds’ structure in mass spectrometry        can contribute signiﬁcantly to expanding the acceptance and utilization of
+                                    and predicting the molecule’s structure to be measured from tandem mass          these medicines by a broader population. Due to the chemical diversity of
+                                    spectrometry spectra are primary research targets in analytical chemistry.       these compounds’ structures and the limited mass resolution of miniatur-
+                                    This objective is especially relevant to discovering new homologous deri-        ized mass spectrometers, on-site determination of the structures of unfa-
+                                    vatives, natural product research, non-targeted metabolomics, drug               miliar substances faces signiﬁcant challenges. It is necessary to establish a
+                                    research, food safety, pharmaceutical ingredient analysis, and drug              model using low-resolution mass spectrometry spectra to predict the
+                                    detection1–5. Especially in on-site testing, the timely identiﬁcation of new     molecule’s structure.
+                                    drugs and psychoactive substances via miniaturized mass spectrometers is                One common approach to automatically interpret MSn spectra is to
+                                    increasingly needed. Usually, new psychoactive substances have similar           search in a mass spectrometry database13–16. This methodology involves
+                                    chemical structures to existing drugs, and a series of derivatives are pro-      comparing the mass spectra of compounds under speciﬁc conditions with a
+                                    duced through some chemical modiﬁcations6–8. The rapid use of on-site            database containing a large number of reference mass spectra. Through an
+                                    mass spectrometers for the detection of such substances’ structures is crucial   algorithmic calculation of similarity, the molecule corresponding to the
+                                    in preventing them from entering widespread circulation in the market            most similar spectrum is identiﬁed in the database. McLafferty et al. pro-
+                                    without permission. Meanwhile, within the ﬁeld of traditional Chinese            posed a probability-based matching system that utilizes peak occurrence
+                                    medicine9–12, the rapid comprehension of the chemical composition and            probability and empirical correction to accurately sort candidate molecule
+                                    action mechanisms of herbal medicines through on-site mass spectrometers         lists17. Similarly, Roman Mylonas et al. introduced the X-Rank algorithm to
+
+
+
+                                    1
+                                     Shenzhen International Graduate School, Tsinghua University, Shenzhen 518055, China. 2CHIN Instrument (Hefei) Co., Ltd., Hefei 231200, China. 3Key Laboratory
+                                    of Sensing Technology and Biomedical Instruments of Guangdong Province, School of Biomedical Engineering, Shenzhen Campus of Sun Yat-sen University,
+                                    Shenzhen 518107, China.      e-mail: huoxm@mail.sysu.edu.cn; qian.xiang@sz.tsinghua.edu.cn
+
+
+                                    Communications Chemistry | (2024)7:109                                                                                                                      1
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                    Article
+
+
+
+
+             HV                                               Transformer
+                                                                                        Simulated
+                                                                 Encoder              Fragmentation
+
+                  a
+                                                                 Decoder
+
+                                                                                                           Similarity Score
+                                                             Fragment Tree
+                                     c
+                                                             Molecular formula
+                                                                recognition           Generate FT
+
+                                                              Weight sorting
+                               Adjust auxiliary
+                                 AC signals
+                  b                                                               TeFT Model                                                    d
+
+Fig. 1 | A conceptual overview of TeFT. In the on-site application, miniaturized      scoring process against the fragmentation tree. The SMILES tree with the highest
+mass spectrometry is used to get MSn spectra. Using the Transformer and Fragment      score provides possible annotations for each peak in the spectrum. a Electrospray
+tree generation approach, a range of potential SMILES strings and the fragment tree   ionization. b Miniaturized ion trap. c MSn spectrum. d Candidate annotation of
+were predicted. Through the simulation of fragmentation, several SMILES frag-         fragmentation peaks.
+mentation trees are generated and then subjected to a comparative analysis and
+
+
+
+rank peak intensities of mass spectra, establish correlations between dif-            mass spectrometry36. This model combines ﬁngerprint prediction with
+ferent mass spectra, determine the probability of matching with mass                  neural networks for the annotation of molecular structures. The deep
+spectra from a reference library, and enable cross-mass spectrometry plat-            learning model is limited by the computing resources of hardware platforms
+form recognition and search18. In 2016, Christoph Ruttkies proposed the               and the limited availability of MS2 spectra, and its testing performance varies
+MetFrag model, combining database search algorithms and fragment pre-                 across different network architectures. MassGenie utilizes a network with
+diction algorithms for identifying the structure of small molecules from              over 400 million nodes, completing training on the DGX A100 8-GPU
+tandem mass spectrometry data. This method aids in the identiﬁcation of               system. However, considering the on-site applications with a miniaturized
+compounds not yet included in mass spectrometry databases. It involves                Mass Spectrometer platform poses challenges in achieving large-scale model
+ﬁltering and scoring candidate structures based on matched peaks’ mass-to-            training similar to MassGenie.
+charge ratio, intensity, and bond dissociation energy, thereby enhancing the                This paper proposed a so-called “Transformer enabled Fragment Tree
+ability to recognize unknown compounds19,20. The SIRIUS series                        (TeFT)” framework to identify the unknown molecular structures for tan-
+methods21–23, proposed by Sebastian Böcker et al., are considered to be a             dem mass spectrometry; it was composed of a simulated semantic fragment
+more effective mass spectrometry database search algorithm. This method               tree model (SMILES tree) generated through the deep learning Transformer
+combines high-resolution isotope pattern analysis, fragment tree (FT), and            module37 and the FT38–41 directly generated through the original MSn
+CSI: FingerID21 to assist in searching molecular structure databases. One             spectral data. By aligning and comparing the similarity of the two trees, the
+signiﬁcant limitation of mass spectrometry library search techniques is their         molecular structure of the tested chemical substance with the highest pos-
+inability to identify unknown natural products and drug metabolites.                  sibility can be predicted. This method can be embedded into any tandem
+Meanwhile, in the case of low-resolution spectra acquired from a minia-               mass spectrometry systems with fragmentation function; however, it is
+turized mass spectrometer used for on-site testing, it is difﬁcult to provide         particularly suitable for miniaturized mass spectrometry for on-site appli-
+corresponding databases for searching.                                                cations where the spectral resolution is limited. Furthermore, a relatively
+      In addition, machine learning and the deep learning model have been             lightweight Transformer module with 65 million nodes was adopted in the
+applied to analytical chemistry and drug structure design for a long time24–30.       current work, thus, the computational complexity is also suitable for on-site
+One of the great advantages of deep learning models is that they can generate         applications.
+molecular structures from mass spectrometry spectra without being given                     Figure 1 illustrates the conceptual workﬂow of the proposed method.
+explicit rules. The deep learning model encodes and decodes chemical                  All the experiments were applied on a miniaturized ion trap mass spec-
+substances through methods such as SMILES (simpliﬁed molecular-input                  trometry with a self-aspiration capillary electrospray ionization source
+line-entry system)31 strings and molecular graph construction32,33, which can         (SACESI) that we have previously developed42–45. MSn spectra were obtained
+then transform the annotation of mass spectrometry structure into language            using high-resolution isolation and collision-induced dissociation (CID)
+translation or graph neural network problems. Böcker’s research team                  sequences by carefully controlling the frequency and amplitude of the
+proposed a model called CANOPUS that combines SVM and deep neural                     auxiliary AC signal applied to the ion trap46. Experimental details can be
+networks34. DNN predicted compound categories from ﬁngerprints and                    found in the method section.
+completed compound classiﬁcation. Aditya et al. proposed MassGenie, a                       The original MSn spectral data are sorted according to peak intensities,
+Transformer-Based deep learning method35. This method transforms the                  and several fragments with the highest intensity are selected as inputs for the
+molecular recognition problem into a language translation problem, where              deep learning Transformer module. The Transformer module consists of
+the source language is a list of high-resolution mass spectra peaks, and the          several encoder and decoder layers, utilizing a large number of open-source
+translation language is the SMILES strings of the molecule. Meanwhile, the            libraries to learn the potential relationship between molecular SMILES
+DarkNPS model is based on the LSTM model for automatic structural                     strings and tandem mass spectrometry data with the assistance of attention
+analysis of new psychoactive substances8. In 2022, Michael et al. constructed         mechanisms. Inputting an MSn spectral data into the Transformer, the
+the model MSNovelist using an encoder-decoder neural network to achieve               module will output a list of SMILES strings for the molecule, corresponding
+de novo prediction of the structure of unknown compounds from tandem                  to the possible chemical structure of the unknown substance. It’s worth
+
+
+Communications Chemistry | (2024)7:109                                                                                                                                2
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                Article
+
+
+
+
+Fig. 2 | The Tanimoto similarity of the best incorrect candidate to correct structure for TeFT, SIRIUS4, and MetFrag in different datasets. a Test set. b CASMI 2017
+challenge.
+
+
+noting that due to the low resolution of the original spectra, the reduction in    mathematical constructs. This method enables the mapping of molecules
+model parameters, and the adoption of a more lightweight model archi-              into a vector space by considering their distinctive features, including
+tecture, the outputs of the model are not unique across multiple runs,             functional groups, atomic sequences, and various topological structures.
+necessitating the sorting of results. Next, the candidate substances in the list   Molecular ﬁngerprinting is widely employed to facilitate similarity com-
+undergo the simulated fragmentation to generate a series of SMILES trees.          parisons among molecules48. In this study, we employed MACCS and
+During the process of simulated fragmentation, we adopted the general              Morgan ﬁngerprints to create molecular ﬁngerprints. The performance of
+fragmentation rules that often occur in chemical bonds in mass spectro-            the two datasets is depicted in Fig. 2, illustrating the distribution of mole-
+meters (as listed in Supplementary Table S1); we also provide an interface         cular ﬁngerprint similarity between the model’s best candidate output and
+for adding speciﬁc new rules into the fragmentation process by SMART               the actual substance. The predicted molecular ﬁngerprint similarity data for
+(SMILES Arbitrary Target Speciﬁcation). The resulting SMILES trees are             all substances is available in Supplementary Data 1. In the test set, the
+composed of tree nodes with the SMILES strings of molecules or fragments           Tanimoto similarity method revealed that the Transformer model correctly
+and the loss of each fragmentation formula as edges. The SMILES tree               identiﬁed 30% (195/660) of the actual structures, all with a Tanimoto
+represents the most possible dissociation scenarios of the speciﬁc molecule        similarity value of 1. The percentage of Tanimoto similarity greater than 0.9
+in tandem mass spectrometry.                                                       was 47% (311/660), while the percentage greater than 0.8 was 67%
+     Also, the traditional FT algorithm generates the corresponding FTs            (439/660). In comparison, we used SIRIUS4 and MetFrag to search 660
+from the original MSn spectral data directly. After guessing the formula of        mass spectra and select the substance with the highest ranking as the pre-
+each fragment, we calculate a reasonable loss for each fragmentation peak in       diction result. The results showed that SIRIUS4 correctly predicted the
+the MSn spectrum and add corresponding weights. By comparing each node             entire structure of 27.6% of the substance, while 39% had ﬁngerprint
+and corresponding losses between the SMILES tree and FT, we can score the          similarity greater than 0.9. The predicted results of the MetFrag model are
+similarity of the two trees. Our results indicated that the SMILES tree can        relatively close to those of SIRIUS4. This suggests that the Transformer
+determine the most comparable outcomes to the tested substance, including          model efﬁciently employs the spectrum’s structural data.
+the structural annotations of individual molecules. It can be postulated that            The second benchmark comprised 93 positive-mode MS2 spectra from
+the SMILES tree with the highest evaluation score is highly probable to be         the CASMI 2017 contest (http://www.casmi-contest.org/2017/index.
+the tested substance. Meanwhile, the possible dissociation pathways of the         shtml), a typical method for evaluating model performance. The same
+substance contained in the SMILES tree with the highest score also provide         process as in the previous test set was used to evaluate the MS2 spectra. Of the
+possible annotations for each fragmentation peak in the spectrum.                  93 substances, 12% predicted all structures correctly and 22% accurately
+     Compared to library searching methods such as the SIRIUS4 and                 predicted most structures. Notably, different molecular ﬁngerprint simi-
+MetFrag, the proposed model achieved better results in that the majority of        larity computation methods (Dice similarity) can increase the percentage of
+molecular structures of compounds in the test can be successfully recog-           structures with a ﬁngerprint similarity greater than 0.8 to 78%, and a
+nized. Additionally, 23 molecule experiments were conducted via minia-             similarity greater than 0.9 to 39%. Similarly, SIRIUS4 prediction results
+turized linear ion trap mass spectrometers, and the complete structures of         show that 43% accurately predicted most structures and The MetFrag model
+ten ﬂavonoids and two stilbenes were successfully predicted by the model.          predicted the majority of structures for 17.2% of the substances.
+Finally, to demonstrate TeFT on real-drug data, the model identiﬁed one of               By comparing with the SIRIUS4 and MetFrag, we can ﬁnd that the
+the main components of traditional Chinese medicine Anweiyang capsule.             Transformer model can generate de novo chemical structures solely from
+                                                                                   tandem mass spectrometry and generate candidate lists of substances that
+Results                                                                            are more similar to authentic compounds. The Wilcoxon signed-rank test
+Model validation                                                                   was employed for non-parametric statistical analysis, and the ﬁnal p values
+We tested the Transformer model’s accuracy by utilizing two separate               are reported in Table 1. These results indicate a signiﬁcant difference in the
+databases. We randomly extracted 660 non-repetitive MS2 spectra from the           testing performance of the TeFT model compared to the SIRIUS4 model
+mass spectrometry library and used them as the test set. For every MS2             and the MetFrag. Additionally, in Supplementary Fig. S4, we provided the
+spectrum, we ran the model 100 times to predict various candidate sub-             top-5 accuracy results for two benchmark methods and the TeFT model.
+stances. After eliminating invalid SMILES strings, we then assessed the            The test results indicate that, compared to the other two models, the TeFT
+similarity between the predicted results and the molecular ﬁngerprints of          model demonstrates superior predictive capabilities on the test set. The top-
+actual structures, using the Tanimoto similarity methods in RDKit47.               k rankings also show that the TeFT model’s predicted results consistently
+Molecular ﬁngerprinting is a technique for representing molecules as               rank at the forefront, afﬁrming the rationality of the model’s ranking
+
+
+Communications Chemistry | (2024)7:109                                                                                                                            3
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                                                  Article
+
+algorithm. On the CASMI 2017 dataset, the predictive ability of the TeFT                                           27.9% of substances in the fragment tree scoring list, while MetFrag had
+model is slightly below SIRIUS4, comparable to MetFrag, but the overall                                            26.7% (ranked top 1). The Transformer model demonstrated higher
+predictive accuracy of TeFT is much higher than the other two methods.                                             ﬂexibility in generating substances and produced more similar molecules.
+The majority of results’ similarities predicted by TeFT are above 0.8.                                             Fragment tree similarity scores also indicated a certain level of reliability. It is
+Therefore, the model exhibits robust predictive capabilities across different                                      essential to note that only the TeFT model is feasible for low-quality reso-
+datasets. For some mass spectrometry databases that lack annotations, the                                          lution spectra.
+TeFT model can provide references for possible molecular structures.
+     To validate the effectiveness of the fragment tree scoring mechanism,                                         Model performance in miniaturized linear ion trap mass
+we use the SIRIUS4 and MetFrag methods as replacements for the Trans-                                              spectrometer
+former component of TeFT. We evaluated their similarity with the pre-                                              To evaluate the model’s predictive ability for various drug types, we pur-
+dictions of SIRIUS4 and MetFrag. The results are provided in the                                                   chased 23 substances, including ﬂavanols, stilbenes, ﬂavones, and Rotun-
+Supplementary Table S6. Among the substances ranked ﬁrst in the original                                           dine. Fig. 3 provides an illustration of the prediction process of the entire
+SIRIUS4 scoring, 56% were also ranked ﬁrst in the fragment tree scoring,                                           model using Galangin as an example. All information regarding the tested
+while MetFrag had a proportion of 16%. Additionally, SIRIUS4 retrieved                                             substances and the detailed test results are presented in Supplementary
+                                                                                                                   Data 2. The Transformer model generated a series of candidate substances.
+Table 1 | The p values resulting from the Wilcoxon signed-rank                                                     By simulating their decomposition into SMILES trees and generating FT,
+non-parametric statistical test on the similarity results                                                          the model scored the similarity between these trees and identiﬁed the closest
+between TeFT and SIRIUS4, MetFrag                                                                                  substance structure from the results and it provides potential structural
+                                                                                                                   annotations for the fragmentation peak. The experimental results are pre-
+P values                                          SIRIUS4                                         MetFrag
+                                                                                                                   sented in Table 2. Out of the 16 ﬂavanol drugs, eight achieved precise
+TeFT                 Test                         3.8 × 10−13                                     8.2 × 10−9       structural prediction, with a molecular ﬁngerprint similarity of 1 (three
+                     CASMI 2017                   4.4 × 10−6                                      2.7 × 10−11      ranked ﬁrst). Thus, by employing the FT similarity algorithm, we can reli-
+                                                                                                                   ably predict and determine all the genuine structures of the substance,
+
+
+                                                                                                                        271
+
+
+
+
+                                                                Relative abundance(%)
+                                                                                        100
+
+                                                                                              153
+                                                                                                165
+                                                                                        50
+                                                                                                         215 242
+
+
+                                                                                         0
+                                                                                         140            210              280
+                                                                                                        m/z
+
+                                                 Transformer                                                                     Fragment Tree
+
+
+
+                                                                                                                                    C15H10O5
+                                                     …
+                                                                                                                    C8H4O4          C13H10O3          C14H9O4
+
+                                                                                                                    C7H4O4                                   271：O=c1cc(-
+                                                                                                                                                             c2cccc(O)c2)oc2cc(O)c
+                                                                                                                                          Similarity Score   c(O)c12
+                                                                                                                                                             242：
+                                                                                                                                                             O=c1cc(C2=CCC=C2)o
+                                   Parent                       …                                              Parent                                        c2cc(O)cc(O)c12
+                                                                                                                                                               …
+
+
+                                                                                         O=C1CC(c2ccc(O)cc2)Oc2cc(O)cc(O)c21
+
+
+                                                                                                                   O=C1CC(C2=C[C+]
+                                                                                        O=C1CCOc2cc(O)cc
+                                                                                                                   C=C2)Oc2cc(O)cc(O
+                                                                                              c21
+                                                                                                                         )c21
+
+                                                                                          CCC(=O)c1ccc(
+                                                                                             O)cc1
+
+
+
+
+                                                           SMILES Tree
+
+Fig. 3 | Mass spectrometry data prediction process (taking Galangin as an                                          ﬂavonoids in mass spectrometry, resulting in the creation of a SMILES tree. Sub-
+example). Four fragment peaks in the MS2 spectra along with the parent ion peaks                                   sequently, a similarity score is assigned by comparing the SMILES tree to the frag-
+m/z = 271 of Galangin, were fed into two distinct models: the Transformer model                                    mentation tree. The highest score achieved designates the most probable substance,
+and the fragmentation tree generation model. The Transformer model, in its pre-                                    along with its potential SMILES expression corresponding to the
+dictive role, generates a list of potential molecules. For each molecule in this list, it                          fragmentation peak.
+then conducts simulating fragmentation based on the potential cleavage patterns of
+
+
+
+Communications Chemistry | (2024)7:109                                                                                                                                                               4
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                                         Article
+
+Table 2 | Test results for four types of substances
+                                                                                                                                 1.0
+                       Amount               Minimum                   Quantity of completely
+                                            similarity                similar substances                                         0.8
+ Flavanols             16                   0.96                      8
+
+
+
+                                                                                                                      Quantile
+ Stilbenes             4                    0.93                      2                                                          0.6
+ Flavones              2                    0.98                      1
+ Others                1                    1                         1                                                          0.4
+                                                                                                                                                                    Flavanols
+The minimum similarity refers to the molecular ﬁngerprint similarity between the worst-predicted
+                                                                                                                                                                    Stilbenes
+result and the real molecule among all predicted results in that category. The number of completely                              0.2
+similar substances refers to the quantity of substances in that category for which the predicted result
+                                                                                                                                                                    Flavones
+is identical to the real molecule.                                                                                                                                  Others
+                                                                                                                                 0.0
+                                                                                                                                    0      1              2             3
+alongside possible structural annotations of each fragment, with the correct                                                                       Rank
+answer being ranked ﬁrst among candidate substances. The remaining
+substances, including ﬂavanones and stilbenes, have similarly obtained an                                 Fig. 4 | The distribution of ranking scores based on the predictive scoring of MS2
+accurate prediction. The structure of one ﬂavanone and two stilbenes has                                  spectra for four classes of substances tested on-site using the TeFT model. By
+                                                                                                          employing a fragment tree scoring mechanism, the results were ranked, showcasing
+been completely identiﬁed. It is worth mentioning that concerning the other
+                                                                                                          the distribution of ranking positions for the most similar substances. This scoring
+substances tested, their molecular ﬁngerprint similarity is mainly distributed
+                                                                                                          method ensures that the most similar substances consistently occupy the top three
+around 0.97 (0.93 being the worst outcome). The distribution of ranking                                   positions among the candidate substance.
+scores based on the fragment tree scoring mechanism of TeFT for four
+classes of drugs is illustrated in Fig. 4. Figure 4 indicates that this scoring
+approach guaranteed that the most similar substances consistently occupy                                  substance in the candidate list was formononetin. Consequently, we
+the top three positions among the candidate substances.                                                   hypothesize that Anweiyang capsules contain ﬂavonoids that comprise
+     The experimental study indicated that, based on the predicted outcome                                formononetin. Relevant literature has proved that formononetin is indeed
+of the Transformer model, the top three substances that were most similar to                              one of the main components of the Anweiyang Capsule49. For other com-
+the tested substance were identiﬁed by SMILES tree generation and sub-                                    ponents, the TeFT model can provide a series of predicted molecular
+sequent similarity scoring with the FT. This methodology enables the                                      structures. However, due to the lack of clear evidence in other literature and
+selection of the most similar candidate substance to the original mass                                    existing resources to conﬁrm the substances corresponding to the remaining
+spectrum, while also providing a potential structural interpretation for the                              peaks, the predicted structures for m/z = 262 and 249, as Fig. 5a shows are
+fragmentation spectrum. Speciﬁcally, Simulated fragmentation can break                                    provided for reference purposes only. We compared the TeFT model pre-
+up the redundant parts of the measured molecular results to make them                                     dictions based on the miniaturized MS method with the test results from
+closer to the original molecule. Moreover, this approach provides an                                      commercial high-resolution MS (Thermo Fisher Q-Extractive Orbitrap)
+alternative means of comparing substance similarity, eschewing the use of                                 using the same extracted solution. High-resolution mass spectra have been
+molecular ﬁngerprints and possessing a certain level of credibility.                                      provided in the Supplementary Fig. S5. We observed that the molecular
+     Furthermore, the experimental results demonstrate the applicability of                               formulas of the top two structures predicted by the model were consistent
+the TeFT model on a low-resolution mass spectrometry platform. Despite                                    with the measured molecular formulas from the commercial high-
+the low mass resolution of the mass spectrometry, the model’s reliability in                              resolution MS results. Our predictive results exhibit molecular formulas
+making structural predictions and small molecule annotations remains                                      that match the measurements obtained from high-resolution mass spec-
+unchanged. Accordingly, these ﬁndings signiﬁcantly ease the processing of                                 trometry with very high mass accuracy (the errors are less than 0.01). For the
+mass spectrometry spectra acquired by miniaturized mass spectrometers                                     peak at m/z = 262, our predictive model calculated a theoretical molecular
+and broaden their application scope in on-site detection.                                                 mass of 262.191 (C15H24N3O+), which aligns precisely with the high-
+                                                                                                          resolution measurement result of 262.191. The peak at m/z = 249 exhibits a
+Determination of unknown drug ingredients                                                                 comparable predictive accuracy, with the predicted molecular formula
+The TeFT model employed in this study can identify unknown components                                     being C16H13N2O+ and the theoretical molecular weight being 249.102,
+in drugs. Anweiyang Capsule, widely used for the treatment of gastric and                                 which aligns closely with the high-resolution measurement result of
+duodenal ulcers, is primarily composed of ﬂavonoids extracted from                                        249.111. Because even small variations of m/z value can indicate different
+liquorice. Following several preprocessing steps in the experimental pro-                                 molecular formulas, high-resolution MS peaks can be used to determine the
+cedure (details provided in the Methods), the ﬂavonoids contained within                                  molecular formulas of the analytes in practical applications. This, to some
+the capsules can be successfully extracted and subsequently subjected to                                  extent, corroborates the accuracy of our model predictions based on low-
+analysis using a miniaturized ion trap mass spectrometry.                                                 resolution MS data. However, fully structural accuracies of the predicted
+      Upon obtaining the full spectrum of the substance, as Fig. 5a shows, the                            molecules should be further veriﬁed using multiple analytical methods in
+next step involved the isolation and fragmentation of the marker peak with                                the future.
+an m/z value of 269. Fig. 5b illustrates that the MS2 spectrogram of the                                        The experiment illustrated that the model can generate detailed
+substance contains a total of three fragmentation peaks: 213, 237, and 254.                               structures of ﬂavonoids found in unknown drugs and provide dependable
+This spectrogram was then fed into the TeFT model, which processed it to                                  structural annotations for drug fragmentation peaks, using tandem mass
+generate a series of SMILES trees, each accompanied by a similarity score of                              spectrometry data alone.
+two trees. The possible structural annotations for the three fragmentation
+peaks and the parent ion peak are depicted in Fig. 5c. These scored SMILES                                Discussion
+trees provided valuable insights into the structural characteristics of the                               We propose a novel prediction model, TeFT, designed for de novo structure
+substance. The highest-scoring SMILES tree supplied complete annotations                                  generation from low-resolution tandem mass spectrometry (MSn) spectra
+for three peaks in the fragmentation spectrum (i.e., the predicted molecular                              and partial structural annotation of mass spectrometry peaks. TeFT com-
+formula of the fragmentation tree is identical to the actual molecular for-                               bines the deep learning Transformer model with a modiﬁed fragmentation
+mula), and incomplete annotations for the remaining peak (albeit with the                                 tree generation algorithm, incorporating an extensible fragmentation rule
+same type and number of elements, except for H). The best-scoring                                         library to ensure versatility for various substances. By simulating molecular
+
+
+Communications Chemistry | (2024)7:109                                                                                                                                                     5
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                                                        Article
+
+Fig. 5 | Experimental determination of unknown
+drug components. a The detection spectrum of                                              a                                                                    b
+substances in the Anweiyang capsule. b Its frag-                                                               262                                                                254
+
+
+
+
+                                                                 Relative abundance(%)                                                Relative abundance(%)
+                                                                                         100                                                                  100
+mentation spectrum. c The possible structural                                                                                                                                                 m/z 269
+annotations corresponding to each spectral peak
+                                                                                                        249                                                                237
+inferred by the TeFT model.
+                                                                                                                269
+                                                                                         50                                                                   50     213
+                                                                                                                                                                                        269
+
+
+
+                                                                                          0                                                                    0
+                                                                                          200            250            300                                    200               250          300
+                                                                                                         m/z                                                                     m/z
+                                                           c
+
+
+
+
+                                                                                                                              C16H12O4
+                                                                                                               CH3                                                     C2O2
+                                                                                                                                  CH4O
+
+                                                                                           C15H9O4                            C15H8O3                                                  C14H12O2
+
+
+
+
+fragmentation based on deep learning predictions and scoring the similarity                                Finally, simulated fragmentation was performed on all candidate
+with fragmentation trees, TeFT can identify the most probable structures                             substances in the Transformer prediction list, generating a series of SMILES
+from the multiple results predicted by the Transformer model. We found                               fragment trees. By comparing the similarity between the SMILES fragment
+that the similarity scores between the two fragmentation trees can serve as a                        trees of each predicted molecule and the molecular fragment trees generated
+novel metric for assessing molecular similarity and maintaining a high level                         from tandem mass spectrometry, substance similarity was ranked. The
+of conﬁdence.                                                                                        SMILES fragment tree with the highest similarity score is considered to most
+      Speciﬁcally, we adopted a rule-embedded Transformer model.                                     likely contain the substance under test. The closest subtree to the molecular
+Experimental results from on-site mass spectrometry indicate that due to                             fragment tree can be found in the highest-scoring SMILES fragment tree,
+the limitations of spectral resolution, mass accuracy, and model archi-                              containing structures with the highest similarity to the substance under test.
+tecture, the Transformer model does not yield unique output for the same                             Additionally, the possible dissociation pathways of each fragment peak in
+input. During several different inference processes, we may obtain several                           the mass spectrum are provided by the highest-scoring SMILES tree,
+similar but not entirely identical molecular representations. These mole-                            facilitating structural annotation.
+cules have very close molecular weights and highly similar structures.                                     Experimental results demonstrate that the multi-type fragment tree
+Therefore, further ﬁltering is required to eliminate this “ambiguity.” To                            similarity scoring mechanism ensures conﬁdent ranking of generated
+enable similarity ranking of candidate substances, this study established a                          results, where higher fragment tree similarity indicates a higher likelihood of
+similarity scoring mechanism using both molecular fragment tree and                                  the molecule being the substance under test or a part of it, offering a novel
+SMILES fragment tree models.                                                                         method for comparing molecular similarity. For complex or poorly pre-
+      Firstly, a molecular fragment tree model was constructed based on                              dicted molecules, the model’s prediction effectiveness can be enhanced by
+tandem mass spectrometry spectra. In the molecular fragment tree, each                               repeating predictions, thereby improving the model’s ability to recognize
+node corresponds to a molecular formula of a fragment peak in the spec-                              spectra.
+trum, with edges connecting pairs of nodes indicating lost functional groups.                              We validate the model’s performance on different datasets, especially
+The molecular fragment tree generates the maximum weighted fragment                                  for predicting the structures of various drugs using miniaturized linear ion
+tree using a combination of chemical and probabilistic models, representing                          trap mass spectrometers. It’s worth noting that compared to other mass
+the most likely fragmentation pathways and outcomes for the parent ion.                              spectrometry prediction models, for instance, SIRIUS4, which includes CSI:
+      Subsequently, based on the molecular fragment tree model, we designed a                        FingerID, demands a higher level of mass resolution (The mass deviation
+SMILES fragment tree model using the Recap method. The SMILES fragment                               should be within 20 ppm, which can be challenging for miniaturized mass
+tree model simulates the fragmentation of molecules according to possible                            spectrometers), TeFT is the ﬁrst model designed for miniaturized mass
+fragmentation rules in the mass spectrometer, incorporating structural                               spectrometers. The tolerance of the Transformer model for mass resolution
+information of substance fragments. The SMILES fragment tree integrates                              allows us to achieve structure prediction. While this might result in more
+molecule representation and fragmentation rules, with nodes labeled with                             candidate substances, the inclusion of domain-speciﬁc fragmentation rules
+SMILES strings of fragments and edges indicating potential fragmentation                             can effectively aid in simulating the fragmentation of these substances, and
+patterns in the mass spectrum, labeled with molecular formulas of the lost                           then rank them according to the similarity score of two trees. When con-
+structures. The SMILES fragment tree represents possible dissociation sce-                           structing the training dataset, we retained some highly similar molecules,
+narios of the molecule in the mass spectrum.                                                         which did not lead to data leakage. For deep learning models, the input
+
+
+Communications Chemistry | (2024)7:109                                                                                                                                                                  6
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                            Article
+
+consists of the spectra of molecules, and structural similarity between         performance in this application scenario. Although the use of pre-training
+molecules does not necessarily imply high similarity in their tandem spectra.   models and ﬁne-tuning techniques is not the primary focus of this research,
+For instance, benzoic acid and para-benzoic acid exhibit highly similar         future studies could further explore the application of molecular pre-
+molecular structures, but their spectra differ signiﬁcantly. Similarly, for     training models in the ﬁeld of mass spectrometry prediction.
+luteolin and kaempferol, experimental evidence shows that luteolin contains
+fragmentation peaks at m/z = 153,161,199,213,223, while kaempferol peaks        Methods
+at m/z = 153,165,213,241,258, with only m/z = 153 being identical. Even         Dataset
+slight structural differences can lead to signiﬁcant variations in the tandem   The training set utilized for the Transformer model was created by compiling
+spectra of substances. Typically, secondary fragmentation spectra of sub-       open-source spectrometry databases GNPS, HMDB (5.0), and MoNA53–55.
+stances, after excluding miscellaneous peaks, consist of 3–5 fragment peaks.    The training set underwent ﬁltration following predeﬁned criteria, including
+The differences between the two peaks represent considerable variations         the imposition of constraints such as limiting the molecular weight to less
+between spectra. Therefore, to enable the model to better understand the        than 500 Da and permitting only the presence of the ten elements C, H, O, N,
+relationship between spectra and molecular structures, we retained similar      P, S, Cl, Br, I, and F, which were suitable for applications of our miniaturized
+molecules for training purposes.                                                ion trap mass spectrometry. Given that a single molecule can be represented
+      While our model may not exhibit exceptional performance advantages        by multiple SMILES strings, the training set standardized the SMILES
+in predicting high-quality resolution spectra compared to other deep            representations for all molecules and removed duplicate entries. Conse-
+models, its focus lies in predicting tandem spectra with low resolution and     quently, the ﬁnalized training set encompassed 220,638 distinct molecules,
+accuracy. This capability enables effective on-site mass spectrum recogni-      each paired with its corresponding mass spectra in positive ion mode.
+tion. Models like MSNovelist rely on predicting molecular ﬁngerprints for
+structure prediction, which imposes high requirements on mass accuracy.         Instrumentation
+Similarly, the MassGenie model is geared towards recognizing spectra with       The drug fragmentation experiment was conducted on a custom-made
+high resolution and accuracy. Therefore, we devised a recognition model         small linear ion trap mass spectrometer with a continuous atmospheric
+tailored for low-resolution spectra, effectively meeting the needs of on-site   pressure interface. Sample ions are introduced from the sampling tube into
+mass spectrometry and expanding its application scope.                          the ﬁrst vacuum chamber, where they undergo assistance via an ion funnel
+      However, this work has limitations, as we only trained TeFT on spectra    for transmission. Subsequently, they proceed into the second vacuum
+recorded in positive ion mode (H+), restricting its applicability. Addi-        chamber through a sampling cone, and they undergo quality analysis within
+tionally, using low-resolution mass spectrometry to generate fragmentation      the ion trap. To achieve resonant excitation of ions, a pair of AC voltages
+tree models often results in a higher number of candidate results. We           with equal magnitude but opposite phases is applied to the electrodes within
+addressed this by limiting the types and numbers of elements, but challenges    the ion trap. This voltage is commonly referred to as the auxiliary AC
+in ﬁnding the correct fragmentation tree still exist.                           excitation signal. The experimental instrument utilized in this study is a
+      In other studies, the application of Transformer models in various        hyperbolic linear ion trap, characterized by hyperbolic size parameters with
+molecular structure generation tasks, such as reaction prediction50, has been   a radius of x = 4 mm and y = 4.25 mm. The RF voltage and auxiliary AC
+explored. Reaction prediction is treated as a machine translation problem       excitation signal are applied to two pairs of hyperbolic electrodes. For a
+between SMILES strings representing reactants, reagents, and products. In       detailed description of the instrumentation, our previous work provided a
+such cases, using independent multi-head attention molecular transformer        more detailed description of it42–46. The MS2 spectrum of each substance was
+models has shown promising results. However, in our study, the Trans-           measured experimentally, and the top ﬁve to six fragmentation peaks and
+former model applied is speciﬁcally designed for generating the complete        their ﬁve nearby peak points were selected as experimental data and input
+structure of the target substance based on MS2 spectra. The input infor-        into the prediction model.
+mation for the Transformer consists solely of MS2 spectra, without addi-
+tional contextual information. Experimental results indicate that the           Chemical samples and preprocessing
+model’s predictions for molecular structures are not always unique. To          The chemical samples used in this study included ﬂavanols, stilbenes, ﬂa-
+address this, a subsequent fragment tree model and simulated fragment           vones, and Rotundine. All the samples were purchased from Aladdin Bio-
+similarity scoring are employed after the Transformer model, enabling the       chemical Technology Co., Shanghai, China and Macklin Biochemical
+identiﬁcation of the most similar substances. This approach achieves de         Technology Co., Shanghai, China. All drugs were diluted in methanol to
+novo generation of the structure of the target substance.                       ﬁnal concentrations ranging from 1 to 100 mg/L.
+      Additionally, pre-trained models like ChemBERTa51 have found                    In the drug ingredient identiﬁcation experiment, the Anweiyang capsules
+extensive applications in tasks such as molecular property prediction,          used in the experiment were purchased from Huizhou Jiuhui Pharmaceutical
+classiﬁcation, and medicinal chemistry. Through ﬁne-tuning, these models        Co., Ltd. We employ ultrasound-assisted extraction (UAE) as a crucial tech-
+can effectively predict speciﬁc downstream tasks, including drug property       nique to extract ﬂavonoids from the drugs56. Flavonoids are extracted using a
+prediction. However, research on establishing large-scale self-supervised       methanol aqueous solution. The process involves grinding the capsule powder
+pre-training models for mass spectrometry prediction is limited. Some           and 70% methanol solution is used to perform sonication. An ultrasound
+studies have employed pre-trained models for extracting molecular features,     process is operating at 180 W for 45 min. Upon completion of the ultrasound
+which are subsequently combined with MS/MS datasets to accomplish mass          process, the solution is ﬁltered through a nylon membrane, which was found
+spectrum prediction across multiple datasets52. In contrast to those            that drug residue would remain or be adsorbed on the Polyether sulfone Nylon
+approaches, this study is speciﬁcally tailored for predicting mass spectrum     syringe membrane ﬁlter (Φ25 mm, pore size: 0.45 µm, Shanghai ANPEL
+data with low-quality resolution in a miniaturized mass spectrometer,           Laboratory Technologies Inc.) and subsequently subjected to experimentation
+building upon dataset predictions. In this study, we adopted a lightweight      using miniaturized mass spectrometry.
+Transformer architecture to meet the requirements of on-site detection and
+achieved promising results on a miniaturized mass spectrometer with low         The training stage of the transformer model
+resolution. The application scenario of our model demands lightweight           As illustrated in Fig. 6, our study adopted the Transformer model, dis-
+requirements, making existing models more suitable for on-site detection        tinguished by its encoder-decoder architecture exclusively reliant on atten-
+compared to pre-trained models. These models meet the practical demands         tion mechanisms, which captured the overarching interdependence between
+of real-world applications. Additionally, existing models have already          input MSn spectral data and output SMILES string. The model comprised six
+demonstrated excellent performance in spectrum prediction tasks. There-         encoder layers and six decoder layers. In the encoder layers, two sub-layers
+fore, it is challenging to ascertain whether pre-trained models offer better    were integrated: one housing the multi-head self-attention mechanism with
+
+
+Communications Chemistry | (2024)7:109                                                                                                                        7
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                                               Article
+
+                    a
+                                                   MSn spectral data
+
+
+                                                       Transformer
+                                                                                                                                       …
+                                        Input                              Decoder
+
+                                                                          Feed Forward
+
+
+                                                                     Multi-Head Attention
+                                                                                                                 Candidate SMILES Trees
+                                     Encoder                         Masked Multi-Head
+                                                                         Attention
+                                    Feed Forward
+                                                                                                                          Simulated
+                                                                                                                        Fragmentation
+                                 Multi-Head Attention
+                                                                            Output
+                                                                                                                        SMILES Tree
+
+
+                                                                                                                  General Fragmentation Rule
+                                                 CC(=O)OCCCCCC
+
+                                                            …                                                               Recap
+
+                                                C1=CC=C(C=C1)OCC
+                                                                                                                Specialized Fragmentation Rule
+
+                                            Candidate SMILES Strings
+
+
+
+
+                b                                                                                   d
+                        MS2 spectrum:
+
+                        m/z:      152.881,164.8616,215.1101,242.0477,271.0368…
+
+                        Index:    [15288,16486,21511,24205,27104…]
+
+                                        One-Hot Encoding
+               c
+
+                    SMILES:                      C O C 1 = C C = C ( C = C 1 )
+
+                    Split:             <SOS>       C    O   C   1     =    ...   <PAD>      <EOS>
+
+
+                    Index in dictionary:    [ 1 , 14 , 16 , 14 , 5 , 33...0, 2]
+
+                                                 One-Hot Encoding
+
+Fig. 6 | Procedure for data processing and generating SMILES trees following the             c The SMILES string is segmented into tokens and subsequently transformed into vec-
+input of MSn spectrum into a transformer model. a Detailed architecture of the               tors, with each vector corresponding to the token’s index within the dictionary. d Four
+Transformer and SMILES tree model in TeFT. b Convert MSn spectrum into vectors.              randomly chosen examples of incorrect predictions (top candidate) from the dataset.
+
+
+eight parallel attention heads, and the other hosting the feed-forward layer.                of m/z values, we use truncated values to construct a one-hot matrix. This
+Meanwhile, the decoder layers incorporated three sub-layers. All sub-layers                  encoding method effectively preserves the ordering and relationships
+and embedding layers generated output dimensions of d = 512.                                 between numerical values. Supplementary experiments for other numerical
+      The input data comprises a peak list, limited to a maximum of 100                      encoding methods are provided in Supplementary Note 3. During the
+peaks selected based on their ion intensities. To transform MSn spectral data                model’s training stage, it is essential to split the SMILES strings of the
+into suitable inputs for the Transformer, initially, we retain solely the mass-              molecules. Canonical SMILES strings were divided into a list of distinct
+to-charge ratio (m/z) data while omitting the abundance data. This step is                   atomic types (e.g., C, N, O, P, etc.) and associated connectors (such as “[”,
+taken because abundance data is inﬂuenced by numerous factors that do not                    “(”, “=”, etc.). Tokenize individual atoms and connectors to form token
+facilitate model learning. Then, the m/z data, preserved in ﬂoating-point                    sequences, which were standardized to commence with the start token
+format, is truncated to two decimal places. Following this, it is multiplied by              (“<SOS>”) and terminate with the end token (“<EOS>”). Additionally, they
+a factor of 100, transforming it into integer values. This process serves the                were padded with the padding token (“<PAD>”) to achieve a ﬁxed length of
+purpose of upholding the model’s training accuracy at 0.01 Da. Abundance                     100. Compose atomic types, connectors, and special tokens into a dictionary
+data is not directly input into the Transformer model, but that doesn’t imply                comprising 44 distinct elements and identify the corresponding indices of
+that abundance data is disregarded. Before removing the abundance data,                      the segmented elements within the dictionary to construct the SMILES
+we select several peaks with relatively high abundances from the MS2                         vector. Additionally, we compared the impact of two molecular repre-
+spectrum as inputs to the model. Typically, noise does not exhibit such high                 sentation methods, SMILES and SELFIES, on the model performance, with
+intensity, and we consider these peaks to be the most likely fragments of the                results provided in Supplementary Note 2. Finally, both “m/z” vectors and
+substance. Subsequently, the abundance data is removed. For the encoding                     “SMILES” vectors were transformed into one-hot encoded matrices.
+
+
+Communications Chemistry | (2024)7:109                                                                                                                                            8
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                             Article
+
+     The training was executed using the SGD optimizer, with a batch size of       Table 3 | Similarity scoring rules for SMILES tree and
+150 and a learning rate of 0.001. Our model was trained on a machine               fragment tree
+equipped with an RTX3090 GPU, and the entire training process was
+                                                                                   Object                    Event                                        Score
+completed in 19 h, utilizing 7289MB of RAM. During the testing phase, we
+compared various decoding methods and ultimately selected greedy                   Parent                    All-atom matching                            +6
+decoding to generate the ﬁnal results. Further details can be found in the                                   Nonhydrogen atom matching                    +3
+Supplementary Note 4.                                                                                        Mismatching                                  0
+                                                                                   Fragment                  All-atom matching                            +5
+The inference stage
+                                                                                                             Nonhydrogen atom matching                    +2
+During the inference stage, following the same preprocessing and peak
+selection procedures of the input mass spectrometry data for an unknown                                      Mismatching                                  0
+substance, the model generates the candidate SMILES strings. The TeFT              Loss                      All-atom matching                            +4
+model, based on the Transformer architecture, generates a series of candi-                                   Nonhydrogen atom matching                    +1.5
+date molecules after making multiple predictions on the same mass spec-
+                                                                                                             Mismatching                                  0
+trum. Unlike the MassGenie model, our model does not produce a unique
+answer. We speculate that this phenomenon occurs due to limitations
+imposed by the quality resolution of the input spectrum and constraints on         ﬁltering, and weight calculation. Molecular formula recognition entails
+the parameters of the Transformer model. Throughout the testing phase, we          computing all potential element combinations within a speciﬁc mass
+conducted 100 iterations of the model, which ultimately resulted in several        deviation range. Subsequently, candidate molecular formulas are subjected
+potential SMILES results. These representations collectively form a SMILES         to speciﬁc ﬁltering rules. It is noteworthy that decreasing the resolution of
+list, which is subsequently sent to the SMILES tree generation model. This         the mass spectrometry spectrum upsurges the number of potential mole-
+model entails an inference process applied to the SMILES list to discern the       cular formulas. To cater to miniaturized linear ion trap mass spectrometers’
+most plausible molecular structure.                                                data processing needs, we have devised an algorithm that builds upon the
+       The creation of the SMILES tree model involves implementing the             original method to generate FT from low-resolution mass spectrometry
+RECAP57 method in the RDKit toolkit. The RECAP method breaks down                  data. This algorithm retains the fundamental FT calculation procedure, and
+molecules into fragments by simulating the process of chemical reactions. In       it involves narrowing down potential molecular formulas by restricting the
+comparison to the traditional RECAP method, the Recap approach used in             kinds and quantities of elements during molecular formula identiﬁcation.
+this study is a customized version. Within the framework of the RECAP              To address any system errors or measurement inaccuracies encountered in
+method, we specify reaction rules for molecules based on common frag-              small mass spectrometers, we implement error correction by employing
+mentation patterns observed in mass spectrometry. By simulating the                multiple measurement averaging and deconvolution integration techniques
+decomposition of molecules according to these rules, we make informed              on the spectrogram data. The details of the deconvolution method can be
+conjectures about the way molecules undergo fragmentation in the mass              found in Supplementary Note 1. The processed spectrogram typically
+spectrometer. Mass spectrometry frequently involves chemical bond dis-             satisﬁes the criteria for generating more precise FTs.
+sociation and rearrangement in tandem setups, with the dissociation taking
+various forms, including homolytic, heterolytic, or hemi-heterolytic, while        Similarity score
+rearrangement encompasses both breakdown and the re-formation of                   This study introduces an extension to the alignment scoring mechanism of
+chemical bonds. This simulation was executed utilizing SMARTS, a reaction          traditional FTs that allows for calculating the similarity between SMILES
+representation based on SMILES. SMARTS enables molecular structure                 trees and traditional FTs. This method enables the identiﬁcation of the
+transformation by specifying the reaction template, making it applicable for       fragmentation pattern that is closest to the molecular FT in the SMILES tree,
+substructure matching and chemical reactions.                                      thus identifying structures with high similarity to the tested molecule, and
+       The above procedures can generate “Node Tree” data, representing the        achieving substance recognition and spectral structure annotation.
+SMILES tree. In this tree, each node signiﬁes a potential fragment, and the             When aligning FTs, the ﬁnal score of the tree is mainly determined by
+directed edges linking pairs of nodes denote potential mass spectrometry           the matching scores of losses and fragments. During this process, scores are
+fragmentation losses, annotated with the molecular formulas of the struc-          assigned by comparing the similarities and differences in the types and
+tures lost after fragmentation. Currently, we have achieved partial dis-           numbers of loss elements between each node’s molecular elements and two
+sociation and rearrangement for speciﬁc chemical bonds commonly found              nodes. The scoring rules are shown in Table 3. In the scoring rules, we have
+in various substances, such as C-C, C-O, and C-N bonds. Additionally, we           appropriately reduced the score of loss matching to avoid the impact of
+have integrated well-documented chemical bond rearrangement reactions              possible long-chain losses on the overall score.
+like the McLafferty rearrangement58 and RDA rearrangement59, which are                  We standardize the scores obtained by using perfect matching as the
+observed in tandem mass spectrometry. Furthermore, we have expanded the            denominator. The higher the score, the greater the similarity. We use the
+dissociation method database by incorporating speciﬁc dissociation rules           similarity score of the FT as a new indicator to evaluate the degree of
+tailored for ﬂavanols60 and stilbene61 substances, facilitating their structural   molecular similarity while maintaining high credibility.
+identiﬁcation in analyses. A full list of dissociation and rearrangement rules
+adopted in our experiments can be found in Supplementary Table S1. Our             Molecular re-prediction
+method offers the ﬂexibility to incorporate fragmentation rules for various        The SMILES tree with the highest similarity score often provides crucial
+types of substances, rendering the database highly extensible. In the process      structural information, and when representing molecules using SMILES
+of fragmentation, the substance searches for matching fragmentation rules          strings, it is possible to arbitrarily specify the starting atom. This feature
+within the rule database until no further matching chemical structures are         allows us to make supplementary predictions based on the SMILES strings
+identiﬁed. To prevent unlimited program execution times, we have imposed           of fragments when the model’s overall structure prediction for the substance
+a limitation of 1500 nodes for the total count of SMILES tree nodes.               is less accurate, thereby substantially improving the model’s molecular
+                                                                                   recognition capabilities. During the iterative prediction phase, we utilize
+Generate fragment tree                                                             SMILES fragment strings. The model can predict and extend the structure at
+Software applications such as SIRIUS utilize high-resolution mass spec-            the end of the sequence while preserving the integrity of the fragment
+trometry to produce FT. The FT generation algorithm encompasses several            structure. Details of the repeated predictions have been added to Supple-
+processes, including molecular formula recognition, molecular formula              mentary Note 5.
+
+
+Communications Chemistry | (2024)7:109                                                                                                                           9
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                           Article
+
+Data availability                                                                     ionization tandem mass spectrometry. Rapid Commun. Mass
+The experimental data from the public database used in this study can be              Spectrom. 21, 715–729 (2007).
+downloaded from the following website. GNPS dataset: https://gnps-              13.   Hertz, H. S., Hites, R. A. & Biemann, K. Identiﬁcation of mass spectra
+external.ucsd.edu/gnpslibrary/ALL_GNPS.json, HMDB 5.0: https://hmdb.                  by computer-searching a ﬁle of known spectra. Anal. Chem. 43,
+ca/downloads, MoNA: https://mona.ﬁehnlab.ucdavis.edu/downloads. Fil-                  681–691 (1971).
+tered public data used for training and evaluating the TeFT model can be        14.   Stein, S. E. & Scott, D. R. Optimization and testing of mass spectral
+downloaded alongside our code included at https://github.com/thumingo/                library search algorithms for compound identiﬁcation. J. Am. Soc.
+TeFT.git. In the article, the original data for Fig. 2 is provided in Supple-         Mass Spectrom. 5, 859–866 (1994).
+mentary Data 1. The detailed data for Fig. 3 and Table 2 in the main text is    15.   Kind, T. et al. Identiﬁcation of small molecules using accurate mass
+provided in Supplementary Data 2. In Supplementary Information, the                   MS/MS search. Mass Spectrom. Rev. 37, 513–532 (2018).
+detailed data for Supplementary Fig. S1 and Supplementary Fig. S4 is            16.   Smith, C. A. et al. METLIN: a metabolite mass spectral database. Ther.
+available in Supplementary Data 3 and Supplementary Data 4. Supple-                   Drug Monit. 27, 747–751 (2005).
+mentary Data 1–4 are located in the ﬁle “Supplementary Data.xlsx”.              17.   McLafferty, F. W. & Stauffer, D. B. Retrieval and interpretative
+                                                                                      computer programs for mass spectrometry. J. Chem. Inf. Comput.
+Code availability                                                                     Sci. 25, 245–252 (1985).
+TeFT is available on GitHub (https://github.com/thumingo/TeFT.git). The         18.   Mylonas, R. et al. X-Rank: a robust algorithm for small molecule
+model, evaluation code and train code are implemented in Pytorch, version             identiﬁcation using tandem mass spectrometry. Anal. Chem. 81,
+1.12.0 on Python 3.7.13. The version of RDKit is 2020.09.1.0.                         7604–7610 (2009).
+                                                                                19.   Ruttkies, C., Neumann, S. & Posch, S. Improving MetFrag with
+Received: 30 October 2023; Accepted: 26 April 2024;                                   statistical learning of fragment annotations. BMC Bioinformatics 20,
+                                                                                      1–14 (2019).
+                                                                                20.   Ruttkies, C., Schymanski, E. L., Wolf, S., Hollender, J. & Neumann, S.
+References                                                                            MetFrag relaunched: incorporating strategies beyond in silico
+1.  Bittremieux, W., Wang, M. & Dorrestein, P. C. The critical role that              fragmentation. J. Cheminform. 8, 1–16 (2016).
+    spectral libraries play in capturing the metabolomics community             21.   Böcker, S., Letzel, M. C., Lipták, Z. & Pervukhin, A. SIRIUS:
+    knowledge. Metabolomics 18, 94 (2022).                                            decomposing isotope patterns for metabolite identiﬁcation.
+2. Wolf, S., Schmidt, S., Müller-Hannemann, M. & Neumann, S. In silico                Bioinformatics 25, 218–224 (2009).
+    fragmentation for computer assisted identiﬁcation of metabolite mass        22.   Dührkop, K. et al. SIRIUS 4: a rapid tool for turning tandem mass spectra
+    spectra. BMC Bioinformatics 11, 1–12 (2010).                                      into metabolite structure information. Nat. Methods 16, 299–302 (2019).
+3. Dunn, W. B. et al. Mass appeal: metabolite identiﬁcation in mass             23.   Dührkop, K., Shen, H., Meusel, M., Rousu, J. & Böcker, S. Searching
+    spectrometry-focused untargeted metabolomics. Metabolomics 9,                     molecular structure databases with tandem mass spectra using CSI:
+    44–66 (2013).                                                                     FingerID. Proc. Natl Acad. Sci. USA 112, 12580–12585 (2015).
+4. Dunn, W. B. et al. Procedures for large-scale metabolic proﬁling of serum    24.   Segler, M. H., Kogej, T., Tyrchan, C. & Waller, M. P. Generating
+    and plasma using gas chromatography and liquid chromatography                     focused molecule libraries for drug discovery with recurrent neural
+    coupled to mass spectrometry. Nat. Protoc. 6, 1060–1083 (2011).                   networks. ACS Cent. Sci. 4, 120–131 (2018).
+5. Nash, W. J. & Dunn, W. B. From mass to metabolite in human                   25.   Huber, F. et al. Spec2Vec: Improved mass spectral similarity scoring
+    untargeted metabolomics: Recent advances in annotation of                         through learning of structural relationships. PLoS Comput. Biol. 17,
+    metabolites applying liquid chromatography-mass spectrometry                      e1008724 (2021).
+    data. Trends Anal. Chem. 120, 115324 (2019).                                26.   Huber, F., van der Burg, S., van der Hooft, J. J. & Ridder, L.
+6. Peacock, A. et al. New psychoactive substances: challenges for drug                MS2DeepScore: a novel deep learning similarity measure to compare
+    surveillance, control, and public health responses. Lancet 394,                   tandem mass spectra. J. Cheminform. 13, 84 (2021).
+    1668–1684 (2019).                                                           27.   Wei, J. N., Belanger, D., Adams, R. P. & Sculley, D. Rapid prediction of
+7. Bijlsma, L. et al. Mass spectrometric identiﬁcation and structural                 electron–ionization mass spectrometry using neural networks. ACS
+    analysis of the third-generation synthetic cannabinoids on the UK                 Cent. Sci. 5, 700–708 (2019).
+    market since the 2013 legislative ban. Forensic Toxicol. 35,                28.   Litsa, E. E., Chenthamarakshan, V., Das, P. & Kavraki, L. E. An end-to-
+    376–388 (2017).                                                                   end deep learning framework for translating mass spectra to de-novo
+8. Skinnider, M. A. et al. A deep generative model enables automated                  molecules. Commun. Chem. 6, 132 (2023).
+    structure elucidation of novel psychoactive substances. Nat. Mach.          29.   Goldman S, Wohlwend J, Stražar M, Haroush G, Xavier RJ, Coley CW.
+    Intell. 3, 973–984 (2021).                                                        Annotating metabolite mass spectra with domain-inspired chemical
+9. Fu, S., Cheng, R., Deng, Z. & Liu, T. Qualitative analysis of chemical             formula transformers. Nat. Mach. Intell. 5, 965–979 (2023).
+    components in Lianhua Qingwen capsule by HPLC-Q exactive-orbitrap-          30.   Shi, Y.-F. et al. Machine learning for chemistry: basics and
+    MS coupled with GC-MS. J. Pharm. Anal. 11, 709–716 (2021).                        applications. Engineering 27, 70–83 (2023).
+10. Xu, Y., Zhang, L., Wang, Q., Luo, G. & Gao, X. An integrated strategy       31.   Weininger, D. SMILES, a chemical language and information system.
+    based on characteristic fragment ﬁlter supplemented by multivariate               1. Introduction to methodology and encoding rules. J. Chem. Inf.
+    statistical analysis in multi-stage mass spectrometry chromatograms               Comput. Sci. 28, 31–36 (1988).
+    for the large-scale detection and identiﬁcation of natural plant-derived    32.   Samanta, B. et al. Nevae: a deep generative model for molecular
+    components in rat: the rhubarb case. J. Pharm. Biomed. Anal. 174,                 graphs. J. Mach. Learn. Res. 21, 4556–4588 (2020).
+    89–103 (2019).                                                              33.   Collins, E. M. & Raghavachari, K. A fragmentation-based graph embedding
+11. Shi, Y.-H. et al. Quantitative and chemical ﬁngerprint analysis for the           framework for QM/ML. J. Phys. Chem. A 125, 6872–6880 (2021).
+    quality evaluation of Isatis indigotica based on ultra-performance          34.   Dührkop, K. et al. Systematic classiﬁcation of unknown metabolites
+    liquid chromatography with photodiode array detector combined with                using high-resolution fragmentation mass spectra. Nat. Biotechnol.
+    chemometric methods. Int. J. Mol. Sci. 13, 9035–9050 (2012).                      39, 462–471 (2021).
+12. Guo, H., Liu, A. H., Ye, M., Yang, M. & Guo, D. A. Characterization of      35.   Shrivastava, A. D. et al. MassGenie: a transformer-based deep
+    phenolic compounds in the fruits of Forsythia suspensa by high‐                   learning method for identifying small molecules from their mass
+    performance liquid chromatography coupled with electrospray                       spectra. Biomolecules 11, 1793 (2021).
+
+
+Communications Chemistry | (2024)7:109                                                                                                                      10
+https://doi.org/10.1038/s42004-024-01189-0                                                                                                             Article
+
+36. Stravs, M. A., Dührkop, K., Böcker, S. & Zamboni, N. MSNovelist: de           58. McLafferty, F. W. Mass spectrometric analysis. molecular
+    novo structure generation from mass spectra. Nat. Methods 19,                     rearrangements. Anal. Chem. 31, 82–87 (1959).
+    865–870 (2022).                                                               59. Tureček, F. & Hanuš, V. Retro‐Diels‐Alder reaction in mass
+37. Vaswani A, et al. Attention is all you need. NIPS'17: Proceedings of the          spectrometry. Mass Spectrom. Rev. 3, 85–152 (1984).
+    31st International Conference on Neural Information Processing                60. Tsimogiannis, D., Samiotaki, M., Panayotou, G. & Oreopoulou, V.
+    Systems, 6000–6010 (2017).                                                        Characterization of ﬂavonoid subgroups and hydroxy substitution by
+38. Rasche, F. et al. Identifying the unknowns by aligning fragmentation              HPLC-MS/MS. Molecules 12, 593–606 (2007).
+    trees. Anal. Chem. 84, 3417–3426 (2012).                                      61. Hu, Y. et al. Structural characterization of trace stilbene glycosides in
+39. Hufsky, F., Rempt, M., Rasche, F., Pohnert, G. & Böcker, S. De novo               Lysidice brevicalyx Wei using liquid chromatography/diode-array
+    analysis of electron impact mass spectra using fragmentation trees.               detection/electrospray ionization tandem mass spectrometry. J.
+    Anal. Chim. Acta X 739, 67–76 (2012).                                             Chromatogr. 878, 1–7 (2010).
+40. Hufsky, F., Scheubert, K. & Böcker, S. Computational mass spectrometry
+    for small-molecule fragmentation. Trends Anal. Chem. 53, 41–48 (2014).        Acknowledgements
+41. Böcker, S. & Dührkop, K. Fragmentation trees reloaded. J.                     This work was supported by the National Natural Science Foundation of
+    Cheminform. 8, 1–26 (2016).                                                   China (No. 22374164) and the Shenzhen Natural Science Foundation (No.
+42. Huo, X. et al. Discontinuous subatmospheric pressure interface                JCYJ20200109142824889 and No. RCBS20210609104339043).
+    reduces the gas ﬂow effects on miniature CAPI mass spectrometer.
+    Anal. Chem. 92, 3707–3715 (2020).                                             Author contributions
+43. Zhang, X. et al. Characterisation and optimisation of ion discrimination      Yiming Yang: Investigation, methodology, algorithm design, writing—
+    in a mini ion funnel for a miniature mass spectrometer. Anal. Methods         original draft preparation, data processing. Shuang Sun: Resources.
+    11, 2551–2558 (2019).                                                         Shuyuan Yang: Algorithm design, resources. Qin Yang: Resources.
+44. Sun, S. et al. Capillary self-aspirating electrospray ionization (CSESI)      Xinqiong Lu: Resources. Xiaohao Wang, Quan Yu, Xinming Huo:
+    for convenient and versatile mass spectrometry analysis. Talanta 266,         Supervision. Xiang Qian: Writing—review & editing, methodology,
+    125008 (2024).                                                                conceptualization, and supervision.
+45. Xu, X. et al. Data-driven and coarse-to-ﬁne baseline correction for signals
+    of analytical instruments. Anal. Chim. Acta X 1157, 338386 (2021).            Competing interests
+46. Ding, X. et al. SWIFTSIN: a high-resolution ion isolation waveform for        The authors declare no competing interests.
+    the miniaturized linear ion trap mass spectrometer by coarse to ﬁne
+    excitation. Anal. Chem. 95, 2348–2355 (2023).                                 Additional information
+47. Landrum, G. RDKit: a software suite for cheminformatics, computational        Supplementary information The online version contains
+    chemistry, and predictive modeling. Greg. Landrum 8, 31 (2013).               supplementary material available at
+48. Cereto-Massagué, A. et al. Molecular ﬁngerprint similarity search in          https://doi.org/10.1038/s42004-024-01189-0.
+    virtual screening. Methods 71, 58–63 (2015).
+49. Wen-ting, W. et al. Identiﬁcation of chemical constituents in                 Correspondence and requests for materials should be addressed to
+    Anweiyang capsules and determination of three components. Chin.               Xinming Huo or Xiang Qian.
+    Tradit. Pat. Med. 38, 2176–2179 (2016).
+50. Schwaller, P. et al. Molecular transformer: a model for uncertainty-          Peer review information Communications Chemistry thanks Matteo
+    calibrated chemical reaction prediction. ACS Cent. Sci. 5,                    Manica, Xuejin Zhang and the other, anonymous, reviewer(s) for their
+    1572–1583 (2019).                                                             contribution to the peer review of this work. A peer review ﬁle is available.
+51. Chithrananda, S., Grand, G. & Ramsundar, B. ChemBERTa: large-
+    scale self-supervised pretraining for molecular property prediction.          Reprints and permissions information is available at
+    Preprint at arXiv:201009885 (2020).                                           http://www.nature.com/reprints
+52. Young A, Röst H, Wang B. Tandem mass spectrum prediction for
+    small molecules using graph transformers. Nat. Mach. Intell. 6,               Publisher’s note Springer Nature remains neutral with regard to
+    404–416 (2024).                                                               jurisdictional claims in published maps and institutional afﬁliations.
+53. Wishart, D. S. et al. HMDB 5.0: the human metabolome database for
+    2022. Nucleic Acids Res. 50, D622–D631 (2022).                                Open Access This article is licensed under a Creative Commons
+54. Wang, M. et al. Sharing and community curation of mass                        Attribution 4.0 International License, which permits use, sharing,
+    spectrometry data with global natural products social molecular               adaptation, distribution and reproduction in any medium or format, as long
+    networking. Nat. Biotechnol. 34, 828–837 (2016).                              as you give appropriate credit to the original author(s) and the source,
+55. Vaniya, A., Mehta, S., Wohlgemuth, G. & Fiehn, O. MassBank of North           provide a link to the Creative Commons licence, and indicate if changes
+    America: using untargeted metabolomics and multistage                         were made. The images or other third party material in this article are
+    fragmentation mass spectral libraries to annotate natural products in         included in the article’s Creative Commons licence, unless indicated
+    plants. Berichte aus dem Julius Kühn-Institut (2019).                         otherwise in a credit line to the material. If material is not included in the
+56. Tzanova, M., Atanasov, V., Yaneva, Z., Ivanova, D. & Dinev, T.                article’s Creative Commons licence and your intended use is not permitted
+    Selectivity of current extraction techniques for ﬂavonoids from plant         by statutory regulation or exceeds the permitted use, you will need to
+    materials. Processes 8, 1222 (2020).                                          obtain permission directly from the copyright holder. To view a copy of this
+57. Lewell, X. Q., Judd, D. B., Watson, S. P. & Hann, M. M.                       licence, visit http://creativecommons.org/licenses/by/4.0/.
+    RECAPRetrosynthetic combinatorial analysis procedure: a powerful
+    new technique for identifying privileged molecular fragments with             © The Author(s) 2024
+    useful applications in combinatorial chemistry. J. Chem. Inf. Comput.
+    Sci. 38, 511–522 (1998).
+
+
+
+
+Communications Chemistry | (2024)7:109                                                                                                                       11
+

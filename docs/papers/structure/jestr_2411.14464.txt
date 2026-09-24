@@ -1,0 +1,1058 @@
+arXiv:2411.14464v3  [q-bio.QM]  7 Jun 2025
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 1 — #1
+i
+i
+i
+i
+i
+i
+Bioinformatics
+doi.10.1093/bioinformatics/xxxxxx
+Advance Access Publication Date: Day Month Y ear
+Original Article
+System Biology
+JESTR: Joint Embedding Space Technique for
+Ranking Candidate Molecules for the Annotation of
+Untargeted Metabolomics Data
+Apurva Kalia 1, Yan Zhou Chen 1, Dilip Krishnan 2 and Soha Hassoun 1,3,∗
+1Department of Computer Science, T ufts University , Medford, MA 02155, USA
+2Google Research
+3Department of Chemical and Biological Engineering, T ufts University , Medford, MA 02155, USA.
+∗ T o whom correspondence should be addressed.
+Associate Editor: XXXXXXX
+Received on XXXXX; revised on XXXXX; accepted on XXXXX
+Abstract
+Motivation: A major challenge in metabolomics is annotation: assigning molecular structures to mass
+spectral fragmentation patterns. Despite recent advances in molecule-to-spectra and in spectra-to-
+molecular ﬁngerprint prediction (FP), annotation rates remain low.
+Results: We introduce in this paper a novel tool (JESTR) for annotation. Unlike prior approaches that
+explicitly construct molecular ﬁngerprints or spectra, JESTR leverages the insight that molecules and
+their corresponding spectra are views of the same data and effectively embeds their representations in
+a joint space. Candidate structures are ranked based on cosine similarity between the embeddings of
+query spectrum and each candidate. We evaluate JESTR against mol-to-spec, spec-to-FP , and spec-
+mol matching annotation tools on four datasets. On average, for rank@[1-20], JESTR outperforms other
+tools by 55.5% - 302.6%. We further demonstrate the strong value of regularization with candidate
+molecules during training, boosting rank@1 performance by 5.72% across all datasets and enhancing the
+model’s ability to discern between target and candidate molecules. When comparing JESTR’s performance
+against that of publicly available pretrained models of SIRIUS and CFM-ID on appropriate subsets of
+MassSpecGym dataset, JESTR outperforms these tools by 31% and 238%, respectively . Through JESTR,
+we offer a novel promising avenue towards accurate annotation, therefore unlocking valuable insights into
+the metabolome.
+Availability: Code and dataset available at https://github.com/HassounLab/JESTR1/
+Contact: soha.hassoun@tufts.edu
+Supplementary information: Available at Bioinformatics online
+1 Introduction
+Analyzing biological samples using untargeted metabolomics , where
+masses of thousands of metabolites within a biological sample are detected,
+presents unprecedented opportunities to characterize the metabolome.
+Annotation, the process of assigning chemical structures to metabolomics
+measurements, however is riddled with uncertainty. Naïvely, one can
+presume that the measured mass could be used to determine a metabolite’s
+molecular structure. However, a particular molecular mass can map
+to possibly thousands of candidate molecular structures that share
+the same chemical formula. For example, there are 44,374 known
+molecular structures in PubChem that are associated with chemical
+formula C12H18N2O2). Advanced computational methods promise
+solutions to address the challenges of annotation uncertainty. IPA
+(Del Carratore et al. , 2019) and ipaPy2 (Del Carratore et al. , 2023)
+enhance conﬁdence in metabolite identiﬁcation by integrating additional
+data such as isotope patterns and adduct formation, to provide statistically
+rigorous probability estimates for each annotation. Mummichog (Li et al.,
+2013) shifts the focus from individual metabolites to entire metabolic
+pathways, leveraging peak co-occurrence to infer biological relevance
+© The Author 2022. Published by Oxford University Press. All rights reserved. For permissions, please e-mail: journals.permissions@oup.com 1
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 2 — #2
+i
+i
+i
+i
+i
+i
+2 Kalia et al.
+even when exact structures remain unknown. PUMA (Hosseiniet al., 2020)
+further advances annotation by applying probabilistic modeling, predicting
+pathway activity and assigning chemical identities based on generative
+inference. Together, these tools improve annotation accuracy, enhance
+biological interpretation, and enable a more comprehensive understanding
+of the metabolome. Despite these advances based on analyzing the ionized
+metabolites, annotation rates remain low.
+With advances in instrumentation, it is now possible to not only
+measure the mass of ionized molecules, but to also measure masses of
+ionized molecular fragments. Combining liquid chromatography (LC)
+with mass spectrometry (MS) or combining two such analysis steps
+(tandem MS/MS) have now become dominant in metabolomics. The
+measured mass spectrum is a collection of peaks (Figure 1A). Each peak is
+represented by its mass-to-charge (m/z) ratio, where the charge is known
+and is often +1 or -1, and a relative intensity. Even for an experienced
+analytical chemist, assigning a chemical structure to LC-MS or MS/MS
+spectra is an unsolved problem as the spectrum provides a partial view on
+the measured molecule. Indeed, only ions that are formed by the loss or a
+gain of a charge can be detected by mass spectrometry.
+Several techniques address the spectra annotation problem. The go-
+to technique is “spec-to-spec” comparison (Figure 1B) of the measured
+query spectra against spectra that are cataloged in spectral reference
+libraries (Kind et al. , 2018). Searching spectral libraries using learned
+embeddings, e.g., Spec2V ec (Huberet al., 2021), MSBERT (Zhang et al.,
+2024), DreaMS (Bushuiev et al., 2024a), can improve search performance.
+However, despite embedding advances and growth in spectral libraries,
+e.g., GNPS (Wang et al. , 2016), NIST (NIST, 2020), MoNA (MoNA,
+2024), annotation rates remain extremely low due to the imitated coverage
+of spectral libraries in comparison to the space of all potential molecules. In
+addition, measured spectra vary tremendously under differing instrument
+settings, e.g., ionization energy, solvent type, and adduct formation
+(additional functional groups attached or removed from the ionized
+molecule). A molecule therefore may have many corresponding spectra,
+which further limits library coverage. A recent search of spectra within
+15,327 datasets (Wang et al. , 2016) deposited in the MassIVE (Mass
+Spectrometry Interactive Virtual Environment) database against 586,647
+reference spectra cataloged in the GNPS reference library yielded a positive
+identiﬁcation rate of 2.3% (Martin et al., 2024) (Figure 1C).
+Two types of supervised predictive annotation techniques have
+emerged. “Mol-to-spec” techniques (Figure 1D) utilize combinatorial
+fragmentation approaches, e.g., MetFrag (Wolf et al. , 2010; Ruttkies
+et al. , 2016) and CFM-ID (Wang et al. , 2021), MLPs (Wei et al. ,
+2019), or GNNs (Zhu et al. , 2020; Li et al. , 2024; Y oung et al. , 2021),
+to translate a molecular structure into a predicted spectrum. Candidate
+molecular structures are retrieved by either chemical formula, if available,
+or molecular mass from large molecular databases such as PubChem,
+or more biologically relevant, smaller, databases. The candidate with
+the most similar spectrum to the query spectrum is ranked highest and
+used as the annotation. In contrast, “spec-to-mol” techniques (Figure
+1E) aim to generate de novo molecular candidates that potentially match
+the query spectrum, e.g., MSNovelist (Stravs et al. , 2022), Spec2Mol
+(Litsa et al., 2023), MS2Mol (Butler et al., 2023). For example, MS2Mol
+uses sequence-to-sequence transformers to translate spectra into de novo
+molecular structures in the form of SMILES strings. Due to their current
+limited capabilities, de novo generation is presently of limited use in the
+metabolomics community. An alternative and earlier approach is “spec-to-
+FP” (Figure 1F), where a molecular ﬁngerprint (FP) vector is predicted for
+the query spectrum, e.g., Sirius (Dührkop et al., 2019), MIST (Goldman
+et al., 2023). Here, the predicted ﬁngerprint is compared against those of
+the candidate molecular structures, and the best match, via Tanimoto or
+cosine similarity, is declared the annotation result. Despite recent advances
+in all such techniques, annotation rates remain low as the reconstruction
+of spectrum, ﬁngerprint, or molecular structure is a difﬁcult task.
+We address in this paper the problem of assigning chemical structures
+from a candidate set to spectral data. The novelty in our approach lies
+in avoiding the explicit generation of molecular ﬁngerprints and spectra
+(Figure 2A), and in considering a molecule and its spectra as views of the
+same object (Figure 2B). One way of avoiding the explicit construction
+was recently suggested by ChemEmbed (Faizan-Khan et al., 2025), which
+trains a spectra encoder to predict the Mol2V ec molecular embeddings
+(Jaeger et al. , 2018), effectively deﬁning the embeddings based on
+the Mol2V ec embedding space. The molecule-spectra multi-modal view
+insight allows us to embed molecules and their matching spectra close
+in the molecule-spectrum joint embedding space. Our approach avoids
+the need for any kind of reconstruction to intermediate forms such as
+ﬁngerprints or spectra and therefore removes any reconstruction loss that
+would invariably creep into the ranking pipeline with any reconstruction
+based approach. The ranking of candidate structures can be attained
+by comparing their embeddings against that of the query spectrum and
+selecting the candidate with the highest cosine similarity. The idea of
+learning joint embedding spaces from multiple views of the data dates back
+to the seminal work on Siamese Networks (Chopra et al. , 2005). More
+recently, CLIP (Contrastive Language-Image Pre-training) was trained
+to create a shared embedding space for both images and text, enabling
+the model to match relevant images and captions without the need for
+direct labeling or supervised training on speciﬁc dataset (Radford et al. ,
+2021). As we embed molecules and spectra in a joint embedding space,
+our method is termed Joint Embedding Space Technique for Ranking
+candidate molecules, JESTR. We use CMC, Contrastive Multiview Coding
+(Tian et al. , 2020), to learn view-invariant information across different
+views of the data and produce embeddings in a joint embedding space.
+CMC utilizes Normalized Temperature-scaled Cross-Entropy (InfoNCE)
+Loss, which incentivizes the model to distinguish true positive pairs
+from all possible negative pairs in a batch by maximizing the similarity
+between positive pairs while minimizing similarity with negatives. To
+assess the closeness of a given pair, CMC relies on a temperature-
+scaled cosine similarity as a discriminating function. The temperature is
+a model hyperparameter that controls the sharpness of similarity scores,
+where lower values sharpens the distinction between positive and negative
+pairs. In contrast, the recent contrastive-learning based joint-embedding
+model CMSSP (Chen et al. , 2024) applies cross-entropy loss to the dot
+product of spectral and molecular embeddings after softmax, aiming for
+high embedding similarity for positives and low embedding similarity for
+negatives. Broadly speaking, in all contrastive learning approaches, e.g.,
+(Chen et al., 2020; Tian et al., 2020; Khosla et al., 2020), the key question
+is how to generate the paired views (either appearing naturally or generated
+via data augmentation); and how to ensure that paired views end up close
+together in the joint embedding space.
+Another novelty of our approach lies in utilizing regularization on
+additional data consisting of millions of molecules with the same chemical
+formulas as those in the training dataset. While this form of data
+augmentation does not contribute directly to additional labeled training
+data (Tian and Zhang, 2022), the additional data is utilized to distinguish
+target molecules from their candidates. Here, regularization is used as a
+ﬁne-tuning strategy towards the end of training. When combined with
+contrastive loss, regularization with additional data provides two key
+beneﬁts: it improves model generalization by training on a larger, more
+diverse set of molecules, and it enhances representation learning for
+both molecule and spectra embeddings by using non-congruent pairs as
+additional data during training.
+We conduct experiments and analysis to answer the following research
+questions. (Q1) Does JESTR’s implicit annotation method (with and
+without regularization) outperform prior explicit methods (mol-to-spec
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 3 — #3
+i
+i
+i
+i
+i
+i
+JESTR 3
+Fig. 1. Current annotation workﬂows. A. Example spectrum measured using LC-MS or MS/MS, where x-axis represent the mass-to-charge ratio and the y-axis represent the relative intensity
+of each peak. B. Reference library search using spec-to-spec comparison. C. Current annotation rates using state-of-the-art library search are low despite growth in reference databases. D.
+Mol-to-spec predictive approach mimics the mass spectrometry fragmentation process. E. Spec-to-mol involves de novo molecular generation from spectra and forms an inverse problem.
+F. Spec-to-FP approach predicts a molecular ﬁngerprint and identiﬁes the candidate structure that most likely matches the predicted ﬁngerprint.
+and spec-to-fp)? (Q2) Is learning the molecule-spectrum joint embedding
+space effective for distinguishing target molecules among their respective
+candidate sets? We compare JESTR against state-of-the-art mol-to-spec
+technique, ESP (Li et al., 2024), spec-to-FP technique, MIST (Goldman
+et al. , 2023), and the recent mol-spec matching technique, CMSSP
+(Chen et al. , 2024). We conduct the evaluation using four datasets:
+the NPLIB1 dataset that was previously released with the CANOPUS
+tool (Dührkop et al. , 2021), the well-curated, available-for-purchase
+NIST2020 dataset, and user-deposited data from MassBank of North
+America (MoNA) (MoNA, 2024), and the recently released benchmarking
+datasets, MassSpecGym dataset (Bushuiev et al., 2024b). Additionally, to
+ensure a fair evaluation against SIRIUS and CFM-ID, we identify subsets
+of the MassSpecGym test set that are disjoint from their pretraining data
+and use these subsets to assess the performance of JESTR relative to these
+tools.
+The contributions of this paper are:
+• Novel implicit formulation of the annotation problem to avoid explicit
+prediction of spectra and ﬁngerprints that has dominated the ﬁeld since
+earliest attempts in solving the problem (Heinonen et al., 2012). Our
+formulation is grounded in the novel insight that molecules and spectra
+are views of the same object, similar to recent advances in linking
+text/image data.
+• Demonstrating that contrastive learning is effective in creating a
+molecular-spectra joint embedding space, and that cosine similarity
+of the embeddings is sufﬁcient for ranking candidate molecules. That
+is, there is no need for an explicit (learnable) downstream ranking task.
+• Fine-tuning the implicit model via regularization using the candidate
+sets of the training molecules improves the rank @1 performance in
+the range of 0.51% to 37.05% when compared to a baseline that does
+not utilize regularization.
+• Demonstrating that JESTR outperforms ESP and MIST on all ranking
+metrics and all datasets with the exception of rank@1 for the MoNA
+dataset. For rank@[1-20], JESTR outperforms ESP by 55.45%, MIST
+by 56.6%, and CMSSP by 302.56% across four datasets. On carefully
+selected subsets of the MassSpecGym dataset, JESTR outperforms
+SIRIUS and CFM-ID on rank@1 by 31% and 238%, respectively.
+These remarkable improvements are achieved even though JESTR
+does not utilize the additional data in the form of chemical formulae
+labels for spectra peaks that are currently used by MIST.
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 4 — #4
+i
+i
+i
+i
+i
+i
+4 Kalia et al.
+Fig. 2. Novelty of the JESTR annotation approach. A. JESTR avoids the explicit generation of spectra, molecules, and ﬁngerprints, and ranks the candidate molecules against the query
+spectrum based on their joint-space embeddings. B. JESTR learns to place representations of matching molecule-spectrum pairs close in the joint embedding space relative to non-matching
+pairs. Further, JESTR utilizes additional molecules beyond those in the training set to learn to distinguish target molecules in the training dataset from candidate molecules (those with
+similar molecular formulas). During ranking, the candidate whose embeddings have the maximum cosine similarity to spectrum embedding is chosen as the highest ranked molecule for
+that spectrum.
+2 Methods
+The JESTR model architecture (Figure 3) consists of a molecular encoder
+and a spectral encoder. They are trained to create embeddings in a
+molecule-spectrum joint embedding space. To place views of the same
+object close to each other in the embedding space, we use the CMC
+contrastive learning loss (Tian et al., 2020). To improve performance, we
+utilize regularization. At inference, when provided a candidate set for the
+query spectrum, the cosine similarity is computed between each candidate
+and the query spectrum. The candidates are then ranked based on their
+cosine similarities. Ranking results are reported using rank@k, which is
+deﬁned as the percentage of target molecules that are ranked at rank k or
+better.
+2.1 Encoders
+The molecular encoder is implemented using a multi-layer Graph Neural
+Network (GNN) encoder. Molecular structures are encoded as graphs,
+where node features are include atom type, atomic mass, valence, if the
+atom is in a ring , formal charge, radical electrons, chirality, degree, number
+of hydrogens and aromaticity. Edge features are the bond type, whether
+the bond is part of a ring, conjugacity and one hot encoding of the stereo
+conﬁguration of the bond. The encoder consists of Graph Convolutional
+Networks (GCNs) (Kipf and Welling, 2016) that aggregate information
+at each node. The GCNs are followed by a pooling layer and two fully
+connected layers to generate the ﬁnal molecular embeddings, zmol, for a
+given molecule graph c:
+zmol = M LP× 2(M AXP OOL(GCN (c))) (1)
+To prepare the spectrum for its encoder, peak m/z values of the spectra
+are discretized into bins that are 1 Da wide. Peaks with m/z values larger
+than 1000 Da were dropped. The intensity are normalized to a max value
+of 999 - a common practice in normalizing spectral data (e.g., for the NIST
+datasets). For multiple peaks falling within the same bin, peak intensities
+within each bin are summed to generate the overall intensity value for that
+bin. A 1000-dimension binned vector therefore encodes the spectrum. A
+log10/3 transformation is applied to this binned vector to ensure that a few
+peaks and/or a long tail do not dominate the embedding vector. This 1000-
+dimension encoded vector was passed through a 3-layer MLP to obtain the
+Fig. 3. Overview of the JESTR model architecture. The model is trained to minimize the
+contrastive and regularization losses. The embeddings produced by the encoders are used
+to compute the cosine similarity in the joint embedding space between a molecule and a
+spectrum.
+ﬁnal spectral embedding, zspec:
+zs = 1
+3 log10({Σ Ii, ∀ i, n < (mz)i < (n + 1), f or n in 0.. 999})
+(2)
+where Ii is the intensity of the i-th peak and mzi is the m/z value of the
+i-th peak.
+zspec = M LP× 3(zs) (3)
+2.2 Contrastive learning of spectral and molecular views
+We consider two views of each data item: a molecular and a spectral
+view. Each data item will have one molecular view but may have multiple
+spectral views as measurements may be collected under different mass
+spectrometry instrumentation conditions. Matching molecule-spectrum
+views arise from a molecule and its spectrum, while non-matching views
+arise between a molecule and any of its non-matching spectra. The
+objective of contrastive learning on multi-views (Chopraet al., 2005; Chen
+et al., 2020; Tian et al., 2020; Khosla et al., 2020) is to learn embeddings
+that separate samples from matching and non-matching distributions, and
+to ensure that paired views are close in the joint embedding space.
+As in CMC (Tian et al., 2020), we use a discriminator function, h, to
+measure the closeness of spectral and molecular embeddings using their
+cosine similarity, modulated by a temperature parameter τ. Thus, given
+a embedding for spectrum n, and an embedding for molecule m, we can
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 5 — #5
+i
+i
+i
+i
+i
+i
+JESTR 5
+deﬁne h as:
+h(zn
+spec, z m
+mol) = exp(
+zn
+spec.z m
+mol
+∥znspec∥. ∥zm
+mol∥ . 1
+τ ) (4)
+The hyper-parameter τ controls the importance of non-matching pairs in
+pushing the embeddings apart in the joint embedding space. To ensure that
+the discriminator assigns high values for matching pairs and low values
+for non-matching pairs, we deﬁne a contrastive loss, Lcontrastive , over
+a batch of size k as:
+Lcontrastive = 1
+k
+k∑
+n=1
+
+−E[log
+hθ (zn
+spec, z n
+mol)
+k∑
+m=1
+hθ (znspec, z m
+mol)
+]
+
+ (5)
+This loss effectively ensures that the cosine similarity between each
+matching pair, (zn
+spec, z n
+mol), is highest among all possible pairings,
+(zn
+spec, z m
+mol), within the batch.
+2.3 Regularization
+As candidate molecules typically have the same molecular formula as the
+target molecule, we fetch such candidates from the PubChem database, and
+utilize regularization to train the model to better distinguish between target
+molecules and their candidates. Our regularization objective is therefore to
+push candidates away from the spectra, and hence from the corresponding
+target, in the joint embedding space. Training using regularization is
+implemented by introducing an additional loss to minimize the cosine
+similarity between the embeddings of each spectrum and the candidate
+molecules of the corresponding target. Candidate sets are sorted by their
+Tanimoto similarity to their respective target molecule. For each spectrum
+within a training batch, we chose a set of candidates given by the batch
+parameter, kaug. Candidates selected for regularization in each batch are
+therefore the kaug most similar candidates, and are taken sequentially
+in each training epoch. Figure S1 in the Supplementary Information
+demonstrates the batching process for computing the regularization and
+contrastive losses. We then explored when and how to incorporate the
+regularization loss with our contrastive loss. Since our ﬁnal ranking
+predictions are made using the molecular-spectral similarity in the joint
+space, the regularization attempts to push the most similar candidates away
+from the target molecule by minimizing a regularization loss function
+in addition to the contrastive loss. The regularization loss function
+minimizes the cosine similarity between the most similar candidates and
+the associated spectra - and hence the associated target molecules. The
+regularization loss, Lregularization , is deﬁned as:
+Lregularization = 1
+k
+k∑
+n=1
+1
+kaug
+kaug∑
+m=1
+(cosine_sim(zn
+spec, z m
+cand))
+(6)
+The total training loss, Ltotal, is the sum of the two losses weighted by
+hyper-parameters α and β :
+Ltotal = α ∗ Lcontrastive + β ∗ Lregularization (7)
+We explored values for the α and β parameters, and we observed that
+utilizing regularization as a ﬁne tuning strategy towards the end of the
+training provided the best performance. Regularization was turned on for
+the last 3% of the training epochs. The weight given to regularization loss
+was 10% to ensure that the matching pairs are not pushed too far apart
+during regularization. Therefore, α = 1 . 0, β = 0 . 0 for ﬁrst 97% epochs
+and α = 0. 9, β = 0. 1 for last 3% of epochs. Implementation details and
+various hyperparameters are provided in Section S2 of Supplementary
+Information.
+3 Results
+3.1 Datasets
+Four datasets were used to evaluate JESTR. The NPLIB1 dataset, or the
+CANOPUS dataset, was ﬁrst utilized by the CANOPUS tool to predict
+compound classes, e.g., benzenoids, phenol ethers, and others, from
+spectra, thus providing partial annotation on spectra in cases when spec-
+to-spec comparisons in reference spectral databases yield unsatisfactory
+matches (Dührkop et al. , 2021). This dataset was created by selecting
+spectra from the NIST2020 (NIST, 2020), GNPS (Wang et al. , 2016)
+and MoNA (MoNA, 2024) databases. The selection ensured a desired
+distribution of compound classes. This dataset was recently renamed to
+NPLIB1 (Goldman et al. , 2023) to distinguish it from the CANOPUS
+tool. We utilized the NPLIB1 data as assembled by MIST (Goldman et al.,
+2023). This dataset comprised 8,030 spectra measured under positive
+mode (positively charged, with an H adduct, [M+H]+) belonging to
+7,131 unique target molecules. We utilize the same data split as proposed
+by MIST, where the split was structure-disjoint such that a molecule
+with the same InChiKeys did not appear both in the training and test
+sets. Therefore, 714 molecules and their 819 spectra were utilized for
+testing. Two additional datasets were utilized to explore training JESTR
+on larger datasets. The NIST2020 dataset is well-curated spectral database
+released by the National Institute of Standards and Technology. NIST2020
+comprises a variety of molecules from human, bacteria, environmental,
+plant, and food samples. A variety of instruments and settings are used
+to measure spectra for each compound. The measurements are repeated
+and a consensus spectrum is created for each measurement. The NIST
+datasets are available under a commercial license, and we had access to
+the NIST2020 version of this dataset. The MassBank of North America
+(MoNA) is a collaborative database, with contributions by users. Both
+experimental and in-silico spectra are accepted. Here, we only retrieved
+the experimental dataset. Statistics for the three datasets is provided in
+Table 1. The number of unique molecules is largest in NIST2020, while
+the number of spectra per molecule is the lowest in NPLIB1. The splits
+for the NIST2020 and MoNA were created ensuring that no molecules
+overlapped between the training and test sets.
+The fourth dataset is the recent MassSpecGym (Bushuiev et al. ,
+2024b) dataset, which was developed as a benchmark set for candidate
+ranking, spectra simulation and molecular generation tasks. The spectra
+consisted of a mix of H and Na adducts, with a total of 231,104 spectra
+for 32,010 molecules. of high-quality labeled MS/MS spectra collected
+from public repositories such as MoNA, MassBank, and GNPS, as well
+as newly measured in-house data. The dataset includes 231,000 spectra
+corresponding to 29,000 unique molecular structures, making it the largest
+publicly available MS/MS benchmark. To ensure rigorous evaluation and
+prevent data leakage, the dataset is split using Maximum Common Edge
+Subgraph (MCES) distance, which clusters structurally similar molecules
+together in the same fold. Unlike InChIKey-based splits, this approach
+ensures that molecules in the test set have a signiﬁcant structural difference
+from those in the training set. For the test split, an MCES distance threshold
+of > 10 was used. Hence, the MassSpecGym test set is more challenging
+than all other test splits.
+For all datasets except MassSpecGym, we select candidates for each
+target molecule in the training and test data by retrieving molecules from
+PubChem (Kimet al., 2019), by matching formulae of the target molecules.
+The average candidate sets for the target molecules range from 1,322
+to 2,494 molecules, and for regularization, the average candidate sets
+for training molecules ranged from a 1,390 to 2,322 (Table 1). For the
+MassSpecGym dataset, we utilize the candidate sets provided with the
+released benchmark. Two types of candidates are provided: either based
+on mass, or on formula of the precursor ion. The maximum number of
+candidates for each test spectrum is 256.
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 6 — #6
+i
+i
+i
+i
+i
+i
+6 Kalia et al.
+Table 1. Spectra, molecule, and candidate statistics for the three datasets.
+Total Train Test
+Maximum # Average # Maximum # Average #
+Dataset Spectra Molecules Spectra Molecules of candidates of candidates Spectra Molecules of candidates of candidates
+NPLIB1 8,030 7,131 7,211 6,417 44,374 2,220 819 714 25,929 2,274
+NIST2020 291,515 22,001 262,408 19,800 42,542 1,390 29,107 2,201 42,376 1,322
+MoNA 35,752 6,767 32,216 6,090 42,542 2,322 3,536 677 32,364 2,494
+MassSpecGym 231,104 32,010 194,119 28,840 48,184 2,720 17,556 3,170 256 185
+Table 2. Ranking results for the NPLIB1, NIST2020, MoNA, and the MassSpecGym datasets. Ranking performance of ESP , MIST, CMSSP , JESTR, and JESTRNR,
+where regularization is removed.
+Explicit-construction approaches Implicit/Matching approaches
+Dataset Rank ESP MIST CMSSP
+(retrained)
+CMSSP
+(pretrained)
+JESTR JESTRNR
+NPLIB1
+@1 23.69 27.96 13.92 54.09 45.76 41.06
+@5 44.69 62.39 32.97 67.40 81.53 81.12
+@20 60.20 82.05 49.08 74.48 95.77 96.13
+NIST2020
+@1 20.47 20.95 1.90 2.45 38.62 36.38
+@5 30.12 57.36 3.95 4.01 59.64 56.45
+@20 48.76 78.83 5.34 4.86 81.03 77.94
+MoNA
+@1 19.37 32.30 3.44 7.64 26.56 19.38
+@5 38.37 54.93 7.13 11.49 64.21 52.82
+@20 53.04 75.28 10.03 12.82 91.16 83.88
+MassSpecGym
+Candidates by Mass
+@1 10.71 14.64 2.60 3.85 15.13 15.62
+@5 24.84 34.87 5.50 5.44 36.75 37.47
+@20 42.66 59.15 8.70 7.71 60.32 60.55
+MassSpecGym
+Candidates by formula
+@1 11.05 9.57 2.30 3.61 11.85 11.82
+@5 27.42 22.11 5.10 5.66 32.95 33.48
+@20 52.20 41.10 8.70 8.53 61.46 61.46
+3.2 Other annotation tools
+We selected three recent annotation tools to provide a comparative
+evaluation for JESTR: ESP (Li et al., 2024), MIST (Goldman et al., 2023)
+and CMSSP (Chen et al., 2024). ESP and MIST are recent representative
+methods in the mol-to-spec and spec-to-mol categories, respectively,
+following the approach of explicit generation of intermediate forms, while
+CMSSP is the only model other than JESTR that matches spectrum and
+candidates directly in the embedding space. The ESP model utilizes a
+GNN-based molecular encoder and an MLP on the molecular ﬁngerprint.
+ESP is trained to learn a weighting between the molecular and ﬁngerprint
+representations to predict the spectra. The best ESP performing model on
+rank@1 was the version that utilized the ﬁngerprint and modeled peak
+co-dependencies, ESP MLP-PD. MIST ﬁrst assigns chemical formulas
+to peaks within each spectrum using SIRIUS (Dührkop et al. , 2019),
+and represents a spectrum as a set of chemical formulas. MIST trains
+a transformer model to learn peak embeddings and to predicts ﬁngerprint.
+MIST also featurizes pairwise neutral losses and predicts substructure
+fragments as an auxiliary task. CMSSP is similar to JESTR in utilizing
+contrastive learning in a joint embedding space, but utilizes a discriminator
+function based on the dot product.
+To streamline the comparison using the same data splits for all datasets,
+we trained MIST and ESP on all datasets, and conﬁrmed the results with the
+respective teams. We evaluated CMSSP on all test datasets using CMSSP’s
+pretrained released weights. The released CMSSP was previously trained
+on MS/MS spectra from two public databases, GNPS and MassBank,
+and was supplemented by 1,906 spectra independently acquired in-house.
+To ensure that there is no data leakage between the training set and test
+set molecules, we also publish results by retraining CMSSP on the same
+training-test split as was used when reporting performance for the other
+models. ESP was trained for 100 epochs with a learning rate of 0.001 and
+batch size of 32. Adam was used as the optimizer with L2 norm of 10− 6.
+MIST was trained for 500 epochs with a learning rate of 0.00057 and batch
+size of 32. For CMSSP , we evaluate the model using the released pretrained
+weights and also using retrained models on the speciﬁc datasets.
+3.3 JESTR vs explicit-construction models
+Given a query spectrum, the primary task of JESTR is to identify the target
+molecule among a set of candidates. Candidate ranking was therefore
+selected as the performance metric. The rank@1, rank@5 and rank@20
+indicates the percentage of target molecules that were correctly ranked
+within the top 1, 5 and 20 candidates, respectively.
+JESTR is compared against ESP and MIST (Table 2). For the NPLIB1
+dataset, JESTR outperforms ESP and MIST on all reported ranks. For
+rank@1, JESTR outperforms ESP by 93.2%, and MIST by 64.1%. Further,
+JESTR achieves 95.8% rank@20, while the maximum performance of ESP
+and MIST is at 60.2% and 82.1%, respectively. We plot the detailed ranks
+for the NPLIB1 dataset (Figure 4A). At all ranks, JESTR provides superior
+performance to both ESP and MIST. For the NIST2020 dataset, JESTR
+outperforms all other models. Speciﬁcally, JESTR outperforms MIST at
+rank@1 by 83.8%. Detailed ranks for NIST2020 is provided in Figure
+S2A in the Supplementary Information. For the MoNA dataset, JESTR
+consistently outperforms ESP . MIST only outperforms JESTR at rank@1
+by 17.6%, but not on rank@5, rank@20, or any other rank, as provided
+in Figure S3A in the Supplementary Information. On the MassSpecGym
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 7 — #7
+i
+i
+i
+i
+i
+i
+JESTR 7
+Fig. 4. Results on NPLIB1. A. Rank@k results for JESTR , with and without regularization, ESP MLP-PD, and MIST. B. Distribution of cosine similarities of query spectra and
+target/candidate molecules with contrastive learning using JESTR.
+dataset, JESTR achieves 15.62% rank@1 using candidates by mass, a
+45.9% improvement over ESP and 6.7% improvement over MIST. Using
+candidates by formula, JESTR achieves 11.85% rank@1, surpassing ESP
+by 7.2% and MIST by 23.8%.
+Examining the overall performance of JESTR against ESP and MIST,
+over the four datasets, on average for rank@[1-20], JESTR outperforms
+ESP by 55.5% and MIST by 56.6%. JESTR’s performance was worse
+on the MoNA dataset when compared to NPLIB1 and NIST2020. We
+suspect that JESTR’s performance on MoNA was low for two reasons.
+First, MoNA has the fewest number of molecules, thus providing the
+lowest molecular diversity among the three datasets. Second, MoNA data is
+uploaded by users and may not have undergone consistent curation efforts.
+The NIST2020 dataset is well curated; however, it has the highest ratio
+of spectra per molecule, an average of 13.25 spectra per molecule, versus
+1.13 and 5.28 spectra per molecule for NPLIB1 and MoNA, respectively.
+As such, we suspect that JESTR ﬁnds it hard to place all the spectra
+embeddings closer to the molecule in the joint space for NIST2020 and
+MoNA. A combination of high molecule to spectra ratio, lower diversity
+of molecules and inconsistent spectra curation makes JESTR perform
+the lowest on MoNA. MIST, with additional information in the form of
+subformulae annotation on peaks, does a better job at distinguishing among
+various spectra of the same molecule for MoNA, thereby attaining a better
+rank@1 score on this dataset. However, MIST loses its advantage over
+JESTR starting with rank@2.
+As SIRIUS and CFM-ID are widely used within the community,
+we benchmark JESTR’s performance against their publicly available
+pretrained models. To ensure a fair evaluation, we focus our evaluation
+on the MassSpecGym benchmark dataset using candidates by formula.
+Among the datasets, MassSpecGym offers the most equitable basis
+for comparison, as the distribution of MCES distances between the
+pretrained molecules in SIRIUS and CFM-ID and the test molecules
+in MassSpecGym closely matches that of the dataset’s train/test split
+(Figures S6-S8). However, because some test molecules were included
+in the training of SIRIUS and CFM-ID, these models may beneﬁt from an
+advantage not available to JESTR. To address this, we report results on
+both the full test set and a ﬁltered subset excluding any molecules seen
+during baseline model pretraining.
+For SIRIUS, we create a custom database containing all candidates
+in the test dataset. We use the GUI version 6.1.0 and ensure the correct
+adduct and instrument setting for each spectrum is used. Out of 17,556
+test spectra, SIRIUS assigned at least one structure to 7,766 spectra, with
+3,342 of those with the target molecule ranked in position 1, that is a
+19.04% rank@1 performance compared to JESTR at 11.85%. Excluding
+test spectra whose molecules were in SIRIUS’s training set yields 1,281
+spectra correctly annotated out of 12,314 spectra, a 10.41% rank@1 vs
+13.65% for JESTR. This result translates to a 31.12% improvement over
+SIRIUS, indicating that JESTR generalizes better than SIRIUS on unseen
+molecules.
+For CFM-ID, per the authors’ recommendation, we combine 3 spectra
+of low (<20eV), medium ( g 20eV and <40eV), and high ( g 40eV)
+collision energies per test molecule. Spectra are chosen randomly within
+the threshold, and we skip a spectrum of a speciﬁc collision energy
+threshold if there is not a spectrum whose collision energy falls within the
+threshold. Since JESTR is not designed to rank based on a set of spectra,
+we report the averages for best (lowest rank) and median performance
+across the chosen spectra. Out of 3,170 merged spectra, CFM-ID correctly
+annotates 62 spectra, achieving 1.96% rank@1 vs 14.10% rank@1 based
+on the best performance and 6.56% rank@1 based on the median rank for
+JESTR. Removing test spectra whose molecules were in the training set
+yields 60 spectra correctly annotated out of 3,004 spectra, a 2.00% rank@1
+vs 14.61% rank@1 based on the best rank and 6.76% rank@1 based on
+the median rank for JESTR. Based on the median rank, JESTR provides a
+238.00% improvement over CMF-ID.
+The MassSpecGym benchmark dataset is notably more difﬁcult than
+other datasets for all models, as molecules in the test set drastically differ
+from those in the training set. Nevertheless, JESTR’s superior performance
+against explicit-construction models highlights the effectiveness of an
+implicit model using the joint embedding space for ranking candidate
+molecules.
+3.4 JESTR vs implicit models
+Similar to JESTR, CMSSP learns a joint embedding space for spectra
+annotation using contrastive learning. We report CMSSP’s performance
+when training on individual datasets and using the released model weights,
+as training CMSSP on individual datasets shows low performance. JESTR
+signiﬁcantly outperforms CMSSP across all datasets except for rank@1
+on the NPLIB1 dataset against the pretrained CMSSP model (Table 2).
+The strong performance of CMSSP likely results from similarities, or
+potentially data leakage, between our NPLIB1 test set and CMSSP training
+data.
+We suspect CMSSP performed poorly when it was retrained because
+of its large model architecture, requiring the training of a large number
+of parameters. Speciﬁcally, CMSSP uses a GNN-based encoder for the
+molecule together with an MLP for the molecular ﬁngerprint while using
+a transformer-based encoder with 8 attention heads for the spectra. Two
+other differences between CMSSP and JESTR is the loss function and
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 8 — #8
+i
+i
+i
+i
+i
+i
+8 Kalia et al.
+Table 3. Ranking result on the NPLIB1 dataset, contrasting the CMSSP architecture against the JESTR architecture with varying losses: cross entropy (CE) and
+InfoNCE losses, and ranking with dot product (DP) and cosine similarity.
+CMSSP Architecture JESTR Architecture
+CE loss CE loss CE loss InfoNCE loss
+Rank (%) DP ranking DP ranking cosine ranking cosine ranking
+rank@1 13.92 3.20 10.84 45.76
+rank@5 32.97 16.38 40.39 81.53
+rank@20 49.08 37.68 67.12 95.77
+the use of the dot product vs cosine similarity to evaluate embedding
+similarities. We evaluate the impact of these differences on the NPLIB1
+dataset (Table 3). We ﬁrst train the JESTR architecture with CMSSP’s cross
+entropy (CE) loss and the dot product. Performance drops substantially
+when swapping the CMSSP architecture for JESTR’s architecture. Based
+on performance, the CMSSP architecture is more suited for using CE
+loss and the dot-product when compared to the JESTR architecture.
+Maintaining the CE loss, we then evaluate the effect of swapping the
+cosine ranking to replace the dot-product ranking. Using cosine similarity
+for ranking surpasses using the dot product and improves rank@5 and
+rank@20 performance over the CMSSP model by 22.5% and 36.8%,
+respectively, even though it was trained using the dot product. Cosine
+similarity explicitly normalizes the embedding magnitudes, yielding a
+competitive edge: similarity comparisons rely purely on embedding
+direction rather than magnitude. Embeddings with artiﬁcially large
+magnitudes are prevented from dominating similarity scores. InfoNCE
+with temperature-scaled cosine similarity is more suitable for a contrastive
+learning framework, as the normalization from cosine similarity reduces
+the inﬂuence of magnitude differences and the temperature scaling
+allows for ﬁne-grained control over the distribution of similarities. The
+combination of a simple architecture and InfoNCE with temperature-
+scaled cosine similarity provides JESTR a superior performance compared
+to CMSSP .
+3.5 Joint-space embeddings distinguish target molecules
+from their candidates
+The contrastive loss used in training JESTR ensures that the embeddings
+for matched spectrum-molecule pairs are placed close to each other in
+the joint embedding space, while non-matching spectrum-molecule pairs
+are placed further away. Figure 4B shows the distribution on spectrum-
+molecule cosine similarities for matching and non-matching pairs in the
+NPLIB1 test set. The corresponding distributions for NIST2020 and
+MoNA datasets are shown in Figure S2B and S3B respectively in the
+Supplementary Information. While any molecule other than the target can
+be considered a non-matching partner for the query spectrum, Figure 4B
+only considers candidate molecules (same chemical formula as the target)
+as the non-matching partner. It is clear that JESTR well discriminates
+between target and candidate molecules.
+3.6 Ablation study - removing regularization
+To assess the value of regularization, the model was retrained without.
+Regularizing the training loss with molecular candidates improves rank@1
+by 11.4%, 6.0% and 37.1% on the NPLIB1, NIST2020 and MoNA
+datasets, respectively. Improvements using regularization are evident at
+almost all ranks and all datasets (Table 2B). For rank@20 on NPLIB1, the
+results drop by 0.3% since the rank@20 result for NPLIB1 is high even
+without regularization, where even a small change in a few targets changes
+the result slightly. On the MassSpecGym dataset, regularization did not
+consistently boost model performance. Speciﬁcally, we observe a slight
+decrease in performance across all rank@k’s when evaluating candidates
+by mass, and similarly, a modest reduction in rank@5 performance when
+using candidates by formula. We suspect that the challenging split within
+this dataset limits the generalizability beneﬁts provided by regularization.
+To further demonstrate the value of regularization, we performed
+additional analysis on the NPLIB1 dataset. With regularization, the number
+of target molecules ranked @1 increases signiﬁcantly, from 301 to 375,
+causing a ripple effect in improving other rank@k numbers (Figure
+5A). Further, we examined the Tanimoto similarity between molecules
+in the training set and their candidates. We retrieved 15. 86 million
+candidates from PubChem based on the chemical formulas of the target
+molecules in the training set. The majority of these candidates show low
+Tanimoto similarity with the target molecules (Figure 5B). Hence, our ﬁne-
+tuning regularization strategy and sorting the candidates by their cosine
+similarity to the target effectively prioritizes regularization with the most
+similar candidates. We approximately utilized 7 million candidates for
+regularization during the last 3% of training epochs. Upon examining
+the cosine similarity distributions on the embeddings of candidate and
+target molecules (Figure 5C), we see that our regularization strategy
+reduces the average cosine similarity between targets and their candidates.
+Regularization is therefore effective, enabling the model to discriminate
+between a target molecule and its candidates. Similar analysis for the
+NIST2020 and MoNA datasets is shown in Figures S4 and S5 in the
+Supplementary Information.
+4 Conclusion
+JESTR offers a novel implicit annotation paradigm that avoids the
+explicit generation of spectra, ﬁngerprints, or molecular structures. As
+molecules and spectra are views of the same object, embedding these
+views in a joint embedding space using contrastive learning provides
+a performance advantage. Evaluation across diverse datasets, such as
+NPLIB1, NIST2020, MoNA, and MassSpecGym, demonstrates clear
+performance advantages over current explicit annotation techniques,
+highlighting the robustness of implicit models using the joint embedding
+approach. Moreover, investigation on the contrastive loss used by
+JESTR reveals that InfoNCE with temperature-scaled cosine similarity is
+advantageous for contrasting views and learning to distinguish matching
+pairs from non-matching pairs. Analysis of JESTR’s performance on these
+datasets reveals that dataset diversity, quality, and spectra-to-molecule
+ratios impact performance. Further, our results showed enhanced value in
+utilizing candidate molecules during training for regularization, improving
+performance by an average of 5.72% for all datasets. Nonetheless,
+the minimal improvement in performance with regularization on the
+MassSpecGym benchmark suggests that the effectiveness of regularization
+may vary depending on data splits and generalization difﬁculty between
+the train and test set. The overall JESTR results are promising and
+vouch for the potential of implicit annotation approaches. We expect to
+attain further improvements by utilizing additional knowledge in the form
+of subformulae annotation on spectral peaks and by utilizing enhanced
+molecular and spectral encoders.
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 9 — #9
+i
+i
+i
+i
+i
+i
+JESTR 9
+Fig. 5. Regularization analysis for JESTR for NPLIB1. A. Regularization improves rank@k by signiﬁcantly placing more targets at rank 1. B. Distribution on Tanimoto similarities on the
+ECFP ﬁngerprints between target and candidates in the training set. C. Distribution on cosine similarities, with and without regularization, of the target and candidates within the test set.
+Funding
+Research reported in this publication was supported by the National Intitute
+of General Medical Sciences of the National Institutes of Health under
+award number R35GM148219. The content is solely the responsibility of
+the authors and does not necessarily represent the ofﬁcial views of the
+NIH.
+References
+Bushuiev, R., Bushuiev, A., Samusevich, R., Brungs, C., Sivic, J., and
+Pluskal, T. (2024a). Emergence of molecular structures from repository-
+scale self-supervised learning on tandem mass spectra.ChemRxiv. 2024;
+doi:10.26434/chemrxiv-2023-kss3r-v2 T .
+Bushuiev, R., Bushuiev, A., de Jonge, N., Y oung, A., Kretschmer, F.,
+Samusevich, R., Heirman, J., Wang, F., Zhang, L., Dührkop, K.,
+et al. (2024b). Massspecgym: A benchmark for the discovery and
+identiﬁcation of molecules. Advances in Neural Information Processing
+Systems, 37, 110010–110027.
+Butler, T., Frandsen, A., Lightheart, R., Bargh, B., Taylor, J., Bollerman,
+T., Kerby, T., West, K., V oronov, G., Moon, K.,et al. (2023). Ms2mol:
+A transformer model for illuminating dark chemical space from mass
+spectra. ChemRxiv. 2023; doi:10.26434/chemrxiv-2023-vsmpx-v3.
+Chen, L., Xia, B., Wang, Y ., Huang, X., Gu, Y ., Wu, W., and Zhou,
+Y . (2024). Cmssp: A contrastive mass spectra-structure pretraining
+model for metabolite identiﬁcation. Analytical Chemistry , 96(42),
+16871–16881.
+Chen, T., Kornblith, S., Norouzi, M., and Hinton, G. (2020). A
+simple framework for contrastive learning of visual representations.
+In International conference on machine learning , pages 1597–1607.
+PMLR.
+Chopra, S., Hadsell, R., and LeCun, Y . (2005). Learning a similarity metric
+discriminatively, with application to face veriﬁcation. In 2005 IEEE
+computer society conference on computer vision and pattern recognition
+(CVPR’05), volume 1, pages 539–546. IEEE.
+Del Carratore, F., Schmidt, K., Vinaixa, M., Hollywood, K. A.,
+Greenland-Bews, C., Takano, E., Rogers, S., and Breitling, R. (2019).
+Integrated probabilistic annotation: a bayesian-based annotation method
+for metabolomic proﬁles integrating biochemical connections, isotope
+patterns, and adduct relationships. Analytical chemistry , 91(20),
+12799–12807.
+Del Carratore, F., Eagles, W., Borka, J., and Breitling, R. (2023). ipapy2:
+Integrated probabilistic annotation (ipa) 2.0—an improved bayesian-
+based method for the annotation of lc–ms/ms untargeted metabolomics
+data. Bioinformatics, 39(7), btad455.
+Dührkop, K., Fleischauer, M., Ludwig, M., Aksenov, A. A., Melnik, A. V .,
+Meusel, M., Dorrestein, P . C., Rousu, J., and Böcker, S. (2019). Sirius
+4: a rapid tool for turning tandem mass spectra into metabolite structure
+information. Nature methods, 16(4), 299–302.
+Dührkop, K., Nothias, L.-F., Fleischauer, M., Reher, R., Ludwig,
+M., Hoffmann, M. A., Petras, D., Gerwick, W. H., Rousu, J.,
+Dorrestein, P . C., et al. (2021). Systematic classiﬁcation of unknown
+metabolites using high-resolution fragmentation mass spectra. Nature
+biotechnology, 39(4), 462–471.
+Faizan-Khan, M., Giné, R., Badia, J. M., Pérez-Ribera, M., Junza,
+A., Vinaixa, M., Sales-Pardo, M., Guimerà, R., and Y anes, O.
+(2025). Chemembed: A deep learning framework for metabolite
+identiﬁcation using enhanced ms/ms data and multidimensional
+molecular embeddings. bioRxiv, pages 2025–02.
+Goldman, S., Wohlwend, J., Stražar, M., Haroush, G., Xavier, R. J., and
+Coley, C. W. (2023). Annotating metabolite mass spectra with domain-
+inspired chemical formula transformers. Nature Machine Intelligence ,
+5(9), 965–979.
+Heinonen, M., Shen, H., Zamboni, N., and Rousu, J. (2012). Metabolite
+identiﬁcation and molecular ﬁngerprint prediction through machine
+learning. Bioinformatics, 28(18), 2333–2341.
+Hosseini, R., Hassanpour, N., Liu, L.-P ., and Hassoun, S. (2020). Pathway-
+activity likelihood analysis and metabolite annotation for untargeted
+metabolomics using probabilistic modeling. Metabolites, 10(5), 183.
+Huber, F., Ridder, L., V erhoeven, S., Spaaks, J. H., Diblen, F., Rogers,
+S., and V an Der Hooft, J. J. (2021). Spec2vec: Improved mass spectral
+similarity scoring through learning of structural relationships. PLoS
+computational biology, 17(2), e1008724.
+Jaeger, S., Fulle, S., and Turk, S. (2018). Mol2vec: unsupervised
+machine learning approach with chemical intuition. Journal of chemical
+information and modeling , 58(1), 27–35.
+Khosla, P ., Teterwak, P ., Wang, C., Sarna, A., Tian, Y ., Isola, P .,
+Maschinot, A., Liu, C., and Krishnan, D. (2020). Supervised contrastive
+learning. Advances in neural information processing systems , 33,
+18661–18673.
+Kim, S., Chen, J., Cheng, T., Gindulyte, A., He, J., He, S., Li, Q.,
+Shoemaker, B. A., Thiessen, P . A., Y u, B., et al. (2019). Pubchem
+2019 update: improved access to chemical data. Nucleic acids research,
+47(D1), D1102–D1109.
+Kind, T., Tsugawa, H., Cajka, T., Ma, Y ., Lai, Z., Mehta, S. S.,
+Wohlgemuth, G., Barupal, D. K., Showalter, M. R., Arita, M., et al.
+(2018). Identiﬁcation of small molecules using accurate mass ms/ms
+search. Mass spectrometry reviews, 37(4), 513–532.
+i
+i
+“0_main” — 2025/6/10 — 0:41 — page 10 — #10
+i
+i
+i
+i
+i
+i
+10 Kalia et al.
+Kipf, T. N. and Welling, M. (2016). Semi-supervised classiﬁcation with
+graph convolutional networks. arXiv preprint arXiv:1609.02907 .
+Li, S., Park, Y ., Duraisingham, S., Strobel, F. H., Khan, N., Soltow, Q. A.,
+Jones, D. P ., and Pulendran, B. (2013). Predicting network activity
+from high throughput metabolomics. PLoS computational biology, 9(7),
+e1003123.
+Li, X., Zhou Chen, Y ., Kalia, A., Zhu, H., Liu, L.-p., and Hassoun, S.
+(2024). An ensemble spectral prediction (ESP) model for metabolite
+annotation. Bioinformatics, 40(8), btae490.
+Litsa, E. E., Chenthamarakshan, V ., Das, P ., and Kavraki, L. E. (2023).
+An end-to-end deep learning framework for translating mass spectra to
+de-novo molecules. Communications Chemistry, 6(1), 132.
+Martin, M., Bittremieux, W., and Hassoun, S. (2024). Molecular structure
+discovery for untargeted metabolomics using biotransformation rules
+and global molecular networking. bioRxiv, pages 2024–02.
+MoNA (2024). MassBank of North America. https://mona.
+fiehnlab.ucdavis.edu/.
+NIST (2020). NIST20: Updates to the nist tandem and electron ionization
+spectral libraries. https://www.nist.gov/programs-
+projects/tandem-mass-spectral-library/ .
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G., Agarwal,
+S., Sastry, G., Askell, A., Mishkin, P ., Clark, J., et al. (2021).
+Learning transferable visual models from natural language supervision.
+In International Conference on Machine Learning , pages 8748–8763.
+PMLR.
+Ruttkies, C., Schymanski, E. L., Wolf, S., Hollender, J., and Neumann,
+S. (2016). Metfrag relaunched: incorporating strategies beyond in silico
+fragmentation. Journal of cheminformatics, 8, 1–16.
+Stravs, M. A., Dührkop, K., Böcker, S., and Zamboni, N. (2022).
+Msnovelist: de novo structure generation from mass spectra. Nature
+Methods, 19(7), 865–870.
+Tian, Y . and Zhang, Y . (2022). A comprehensive survey on regularization
+strategies in machine learning. Information Fusion, 80, 146–166.
+Tian, Y ., Krishnan, D., and Isola, P . (2020). Contrastive multiview coding.
+In Computer Vision–ECCV 2020: 16th European Conference, Glasgow,
+UK, August 23–28, 2020, Proceedings, Part XI 16 , pages 776–794.
+Springer.
+Wang, F., Liigand, J., Tian, S., Arndt, D., Greiner, R., and Wishart, D. S.
+(2021). Cfm-id 4.0: more accurate esi-ms/ms spectral prediction and
+compound identiﬁcation. Analytical chemistry, 93(34), 11692–11700.
+Wang, M., Carver, J. J., Phelan, V . V ., Sanchez, L. M., Garg, N., Peng,
+Y ., Nguyen, D. D., Watrous, J., Kapono, C. A., Luzzatto-Knaan, T.,
+et al. (2016). Sharing and community curation of mass spectrometry
+data with global natural products social molecular networking. Nature
+biotechnology, 34(8), 828–837.
+Wei, J. N., Belanger, D., Adams, R. P ., and Sculley, D. (2019).
+Rapid prediction of electron–ionization mass spectrometry using neural
+networks. ACS central science, 5(4), 700–708.
+Wolf, S., Schmidt, S., Müller-Hannemann, M., and Neumann, S. (2010).
+In silico fragmentation for computer assisted identiﬁcation of metabolite
+mass spectra. BMC bioinformatics, 11, 1–12.
+Y oung, A., Wang, B., and Röst, H. (2021). Massformer: Tandem mass
+spectrum prediction for small molecules using graph transformers.arXiv
+preprint arXiv:2111.04824.
+Zhang, H., Y ang, Q., Xie, T., Wang, Y ., Zhang, Z., and Lu, H. (2024).
+Msbert: Embedding tandem mass spectra into chemically rational space
+by mask learning and contrastive learning.Analytical Chemistry, 96(42),
+16599–16608.
+Zhu, H., Liu, L., and Hassoun, S. (2020). Using graph neural networks
+for mass spectrometry prediction. arXiv preprint arXiv:2010.04661.
+JESTR: Joint Embedding Space Technique for Ranking
+Candidate Molecules for the Annotation of Untargeted
+Metabolomics Data
+Supplementary Information
+Apurva Kalia 1, Yan Zhou Chen 1, Dilip Krishnan 2, and Soha Hassoun 1,3
+1Department of Computer Science, Tufts University, Medford , MA 02155, USA
+2Google Research
+3Department of Chemical and Biological Engineering, Tufts Un iversity, Medford, MA
+02155, USA.
+S1 Batching strategy for contrastive learning and regularization
+During contrastive learning, each batch of size k contains k target molecules. In each training epoch, the
+spectrum corresponding to any given target molecule is chosen sequen tially from the list of paired spectra.
+The batch size k was set to 32. The value of the temperature hyper-parameter τ was set to 0.05. For all
+experiments, contrastive learning was stopped at 1000 epochs, where i t was observed that the contrastive
+loss stopped reducing signiﬁcantly. The batch size for the candidate s, kaug, was set to 32.
+During regularization, for each training molecule in the batch, a set of most similar candidates for that
+molecule are used to calculate the regularization loss. This is done seq uentially for every mini-batch in the
+epoch. A diagram outlining our batching strategy is shown in Figure S1.
+S2 Implementation details for JESTR
+JESTR was trained on NVIDIA A100 GPU with 40GB of graphics RAM and 256GB of CPU RAM. Adam
+(Kingma and Ba, 2014) was used as the optimizer. We used grid search over the ranges of the tuned
+parameters. The values of the parameters that achieved the best perfor mance were selected and used to
+train and test the model for all datasets (Table S1).
+Table S1: Tuning of various hyperparameters for JESTR model using grid search.
+Hyperparameter Values searched Final value
+Contrastive Learning Rate 5e-6, 5e-5, 5e-4 5e-4
+Contrastive Batch Size 32, 64, 128 32
+Early Stopping Epochs 20, 40, 80 80
+Regularization loss weight 0.1, 0.3, 0.5 0.1
+% epochs used for regularization 3, 10, 20 3
+We also looked at the training and inference times of all the models (T able S2). The runtimes were
+measured on a Linux machine with 48 CPU cores with 196GB RAM and 6 nVidia A5000 GPUs with 24GB
+RAM. JESTR uses a GNN encoder for the molecules and an MLP encoder for th e spectra. MIST uses MLP
+and transformers as its encoders for spectra, while ESP uses MLP and GNN as encoders for spectra and
+molecules, respectively. From a computational complexity of the mod el architecture, the three models are
+similar. The training time depends largely on the amount of training eac h model undergoes.
+S1
+Table S2: Training time and inference time for the 3 models on the NPLIB 1 dataset. The runtimes were
+measured on the same machine. JESTR takes longer to train because the tr aining is run for a larger number
+of epochs.
+Model Training Time Epochs Inference Time
+JESTR 6 hours 800 1.5 hours
+MIST 1.2 hours 50 20 minutes
+ESP 1.3 hours 100 1.2 hours
+S3 JESTR ranks and target-candidate separation on NIST2020
+and MoNA
+We look at how JESTR separates target and candidate molecules for diﬀeren t datasets in Figures (S2 and
+S3)
+S4 Regularization analysis for NIST2020 and MoNA
+We study the impact of regularization on molecule ranking and on molecule e mbeddings for all datasets in
+Figures (S4 and S5).
+S5 MCES Distributions between Train and Test Molecules
+To fairly benchmark against SIRIUS and CFM-ID’s pretrained models, w e evaluate the distribution of the
+MCES distances between the pretrained molecules of SIRIUS and CFM- ID and the test molecules of NPLIB1,
+NIST2020, MoNA, and MassSpecGym. For each dataset, we randomly select 10% of the tr ain-test pairs
+and compute the MCES distance. We plot the distributions for SIRIUS i n Figure S6 and CFM-ID in Figure
+S7. The test set in MassSpecGym provides the most equitable setup , where the pretrained molecules are
+structurally diﬀerent from the test molecules by an MCES distance of 10 or greater, just as the original
+MassSpecGym split (Figure S8).
+References
+Kingma, D. P. and Ba, J. (2014). Adam: A method for stochastic optimization. arXiv preprint
+arXiv:1412.6980 .
+S2
+Figure S1: The contrastive loss is calculated over a batch of molecules at a time. For each molecule in the
+batch, candidates are selected from the candidate list sorted by simi larity. If a particular molecule has a lesser
+number of candidates than the batch size, the candidates for that molecu le will be repeated sequentially.
+The candidates thus selected are used to calculate the regularization loss. The curly braces in the vertical
+direction show the contrasting batching for two batches, while the curly braces in the horizontal direction
+show regularization batches for two batches
+Figure S2: Results. A. Rank@k results for JESTR on NIST2020, with and withou t regularization, MIST,
+and ESP MLP-PD. B. Distribution of cosine similarities of query spec tra and target/candidate molecules in
+the NIST2020 test set with contrastive learning using JESTR.
+S3
+Figure S3: Results. A. Rank@k results for JESTR on MoNA, with and without r egularization, MIST, and
+ESP MLP-PD. B. Distribution of cosine similarities of query spectr a and target/candidate molecules in the
+MoNA test set with contrastive learning using JESTR.
+Figure S4: Regularization analysis for JESTR for NIST2020. A. Regularization impr oves rank@k by signif-
+icantly placing more targets at rank 1. B. Distribution on Tanimoto similar ities on the ECFP ﬁngerprints
+between target and candidates in the training set. C. Distribution on cosine similarities, with and without
+regularization, of the target and candidates within the test set.
+Figure S5: Regularization analysis for JESTR for MoNA. A. Regularization improv es rank@k by signiﬁ-
+cantly placing more targets at rank 1. B. Distribution on Tanimoto similari ties on the ECFP ﬁngerprints
+between target and candidates in the training set. C. Distribution on cosine similarities, with and without
+regularization, of the target and candidates within the test set.
+S4
+Figure S6: Distribution of MCES distances between molecules in SIR IUS’s training set and test molecules
+from A)NPLIB1, B)NIST2020, C)MoNA, D)MassSpecGym. The solid gray line marks th e MCES distance
+of 10.
+Figure S7: Distribution of MCES distances between molecules in CFM -ID’s training set and test molecules
+from A)NPLIB1, B)NIST2020, C)MoNA, D)MassSpecGym. The solid gray line marks th e MCES distance
+of 10.
+Figure S8: Distribution of MCES distances between train and test mole cules in the MassSpecGym. The
+solid gray line marks the MCES distance of 10.
+S5

@@ -27,3 +27,4 @@ v-eng/cache/
 *.npy
 data-clean/
 v-alt/frag_disk.pkl
+third-party/

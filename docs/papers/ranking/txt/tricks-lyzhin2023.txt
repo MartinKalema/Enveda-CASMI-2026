@@ -1,0 +1,979 @@
+                                                              Which Tricks Are Important for Learning to Rank?
+
+
+                                                           Ivan Lyzhin 1 Aleksei Ustimenko 2 † Andrey Gulin 1 Liudmila Prokhorenkova 3
+
+
+                                                                 Abstract                                     ous machine learning tasks, gradient-boosted decision trees
+                                                                                                              (GBDT) are still state-of-the-art algorithms for tabular
+                                              Nowadays, state-of-the-art learning-to-rank meth-               datasets containing heterogeneous and noisy features (Gor-
+                                              ods are based on gradient-boosted decision trees                ishniy et al., 2021; Katzir et al., 2021). In particular, GBDT
+
+
+
+
+arXiv:2204.01500v2 [cs.LG] 6 Oct 2023
+                                              (GBDT). The most well-known algorithm is                        methods outperform other approaches for the learning-to-
+                                              LambdaMART which was proposed more than a                       rank problem. A recent paper by Qin et al. (2021) observes
+                                              decade ago. Recently, several other GBDT-based                  that for standard tabular LTR datasets, the best results are
+                                              ranking algorithms were proposed. In this paper,                achieved by a classic LambdaMART algorithm (Wu et al.,
+                                              we thoroughly analyze these methods in a uni-                   2010) proposed more than a decade ago and implemented
+                                              fied setup. In particular, we address the following             within the LightGBM library (Ke et al., 2017). Thus, our pa-
+                                              questions. Is direct optimization of a smoothed                 per focuses on GBDT-based learning-to-rank methods and
+                                              ranking loss preferable over optimizing a convex                provides an extensive study of existing and new approaches
+                                              surrogate? How to properly construct and smooth                 and their important algorithmic details.
+                                              surrogate ranking losses? To address these ques-
+                                              tions, we compare LambdaMART with YetiRank                      In addition to LambdaMART, we revisit another long-
+                                              and StochasticRank methods and their modifica-                  known algorithm called YetiRank (Gulin et al., 2011). Yeti-
+                                              tions. We also propose a simple improvement of                  Rank won The Transfer Learning Track of Yahoo!’s LTR
+                                              the YetiRank approach that allows for optimizing                challenge in 2010 but was not much explored after that.
+                                              specific ranking loss functions. As a result, we                The main algorithmic differences of YetiRank compared
+                                              gain insights into learning-to-rank techniques and              to LambdaMART are stochastic smoothing used during
+                                              obtain a new state-of-the-art algorithm.                        training to randomize the orderings and a different way to
+                                                                                                              construct an upper bound for the loss function with a tighter
+                                                                                                              approximation. Our empirical evaluation shows that Yeti-
+                                                                                                              Rank outperforms LambdaMART and other competitors
+                                        1. Introduction
+                                                                                                              in most cases. In addition, we show that YetiRank implic-
+                                        Learning to rank (LTR) is a central problem in information            itly optimizes a particular form of the DCG ranking quality
+                                        retrieval (Burges, 2010). The objective of LTR is to rank a           function. This observation allows us to modify the Yeti-
+                                        given set of items to optimize the overall utility of the list.       Rank procedure by re-weighting the gradients according to
+                                        In information retrieval, given a query and a list of candidate       a proper loss. The proposed modification YetiLoss further
+                                        documents, it is desirable to rank the documents in decreas-          improves the performance of YetiRank for specific losses,
+                                        ing order of relevance to the query. Usually, LTR methods             for instance, MRR and MAP. For MAP, we obtain new
+                                        learn a function computing scores for all documents and               state-of-the-art results with YetiLoss. We also explain why
+                                        then sort the documents according to their scores. Thus,              YetiLoss is expected to have more stable optimization and
+                                        a major challenge for LTR is that the sorting operation is            better generalization.
+                                        non-differentiable, which prevents effective gradient-based
+                                                                                                              A recent work by Ustimenko & Prokhorenkova (2020)
+                                        optimization.
+                                                                                                              shows that the LambdaMART approach, implemented
+                                        Despite the recent success of neural approaches in vari-              within the CatBoost library (Prokhorenkova et al., 2018),
+                                          †
+                                                                                                              can be outperformed by an algorithm called StochasticRank.
+                                            The work was done while working at Yandex. 1 Yandex,              StochasticRank directly optimizes any given ranking loss
+                                        Moscow, Russia 2 ShareChat, London, UK 3 Yandex Research, Am-
+                                        sterdam, The Netherlands. Correspondence to: Aleksei Ustimenko        with provable convergence guarantees. For this purpose, it
+                                        <research@aleksei.uk>, Liudmila Prokhorenkova <ostroumova-            uses stochastic smoothing of the loss function (without up-
+                                        la@yandex-team.ru>.                                                   per bounding). The obtained objective is often non-convex,
+                                                                                                              so it is optimized with Stochastic Gradient Langevin Boost-
+                                        Proceedings of the 40 th International Conference on Machine          ing (Ustimenko & Prokhorenkova, 2020) — a boosting
+                                        Learning, Honolulu, Hawaii, USA. PMLR 202, 2023. Copyright
+                                        2023 by the author(s).                                                algorithm designed to optimize non-convex functions.
+
+                                                                                                          1
+                                     Which Tricks Are Important for Learning to Rank?
+
+The main difference between StochasticRank and YetiLoss              compute the vector z = (f (x1 ), . . . , f (xnq )) ∈ Rnq called
+is that the former optimizes the training loss directly, while       a vector of scores and then compute s = arg sort(z) ∈
+the latter constructs special convex bounds on the loss func-        Rnq that is the ranking of documents predicted by the
+tion at each iteration. While minimizing such bounds cannot          model f (x).
+guarantee reaching the global optima, convexity allows for
+                                                                     A ranking loss function L(z, r) is a function that measures
+more efficient optimization, which can often be beneficial.
+                                                                     how well the ranking s = arg sort(z) agrees with the rel-
+We provide extensive experiments to validate in which sce-
+                                                                     evance vector r. To simplify the notation, we also write
+narios direct optimization is helpful.
+                                                                     L(f, q) meaning that {x1 , . . . , xnq } and r are contained in
+To sum up, our main contributions are the following.                 q and z = (f (x1 ), . . . , f (xnq )) is computed internally.
+                                                                     The ultimate goal of LTR is to find a model f (x) ∈ F (F is
+   • We conduct a thorough analysis of several state-of-             a predefined class of models) such that:
+     the-art GBDT-based LTR algorithms. We provide a
+     theoretical explanation of their differences and exten-                          f = arg min Eq∼Q L(f, q) .                  (1)
+     sive empirical evaluation.                                                              f ∈F
+
+
+   • We analyze the effect of several algorithmic details: op-       Unfortunately, in practice, we do not know the distribution
+     timizing the loss function directly versus constructing         Q but rather have an i.i.d. sample q1 , . . . , qN ∼ Q which
+     a convex upper bound, adding stochastic smoothing to            we call the training dataset. Thus, instead of (1), we solve:
+     the loss function, and different ways of constructing an                                           N
+                                                                                                    1 X
+     upper bound.                                                                   f = arg min           L(f, qi ) .             (2)
+                                                                                            f ∈F    N i=1
+   • We propose a simple extension of the YetiRank algo-
+                                                                                                    PN
+     rithm that handles arbitrary loss functions. The ob-            The function LN (f ) := N1       i=1 L(f, qi ) is called an em-
+     tained algorithm achieves new state-of-the-art results          pirical loss function.
+     for such loss functions as MRR and MAP that are
+     often overlooked in LTR literature.                             The main difficulty of the LTR problem is the fact that
+                                                                     the function LN (f ) is locally constant as a function of z,
+                                                                     discontinuous, and non-convex in z, since each L(z, r) is
+In the next section, we give the necessary background:               defined by a permutation s = arg sort(z). As a result,
+define the learning-to-rank problem and popular quality              LN (f ) does not have a well-defined derivative (derivatives
+functions, and then describe several well-known ranking              of L(z, r) are everywhere zero due to a local constancy).
+algorithms. In Section 3, we propose our modification of             Thus, one cannot directly optimize this loss with standard
+YetiRank that allows for optimizing any given ranking loss           methods like gradient boosting or backpropagation in neural
+and also analyze and compare the properties of all the con-          networks.
+sidered algorithms. In Section 4, we conduct a thorough
+comparison of existing LTR algorithms on several bench-
+                                                                     2.2. Ranking Loss Functions
+marks, show that YetiLoss outperforms the competitors for
+specific ranking quality functions, and analyze the effect of        In this section, we define some widely used ranking loss
+the main algorithmic details on the quality of LTR. Section 5        functions. First, recall that all ranking losses depend on
+concludes the paper.                                                 the permutation s = arg sort(z). However, it can be the
+                                                                     case that two documents xi and xj have the same score,
+2. Background and Related Work                                       i.e., zi = zj . This situation is called a tie, and in this case,
+                                                                     arg sort(z) is not well-defined. Ties may occur due to the
+2.1. Learning-to-rank Problem                                        model’s discrete structure (e.g., if f is a GBDT model) or
+                                                                     when two different documents have the same feature vectors.
+Learning to rank is a classic information retrieval prob-
+                                                                     Although ties are often neglected in the LTR literature, they
+lem (Liu, 2009). To formally define the LTR task, consider
+                                                                     can affect the optimization procedure and lead to an overesti-
+a query q sampled from a distribution Q. For this query,
+                                                                     mated ranking quality (Ustimenko & Prokhorenkova, 2020).
+we are given a set of documents {x1 , . . . , xnq } and a rel-
+                                                                     Therefore, Ustimenko & Prokhorenkova (2020) propose re-
+evance vector r = (r1 , . . . , rnq ) ∈ Rnq . Each document
+                                                                     solving the ties as s = arg sort((z, −r)), meaning that the
+xi is represented as a vector of features that describes the
+                                                                     documents are ordered according to z, but in the case of ties,
+query-document pair.
+                                                                     we order them accordingly to −r, i.e., put the less relevant
+A learning-to-rank model is a function f (x) that takes the          document first. In other words, the worst permutation is
+document’s features xi and returns a value zi that is the            used for ties. In this paper, we follow this tie-resolution
+predicted relevance for this document. For a query q, we             policy.
+
+                                                                 2
+                                                 Which Tricks Are Important for Learning to Rank?
+
+Let s = arg sort((z, −r)) and let n = nq be the length of                          optimization method like gradient boosting or backpropa-
+the vectors z and r. Probably the most well-known ranking                          gation, we need to build a differentiable surrogate. One
+quality function is DCG@k:                                                         of the most popular approaches is to use the Majorization-
+                                                                                   Minimization technique, when at each iteration t we build
+                                     min{n,k}
+                                       X           2 r si − 1                      a function lt (z, r) that is usually convex and differentiable
+        DCG@k(z, r) =                                           ,        (3)       such that:
+                                       i=1
+                                                24 log2 (i + 1)
+                                                                                                   L(z, r) ≤ lt (z, r) ∀ z ∈ Rnq .                  (4)
+where ri ∈ [0, 4] are relevance labels. This quality function
+is called Discounted Cumulative Gain: we divide the gain                           After that, we sum up the upper bounds (4) for all the queries
+for the relevance by the discount for a lower position. Dif-                       and obtain:1
+ferent options for gain and discount functions are possible,
+                                                                                                                   N
+and (3) is the most widely used combination.                                                                  1 X
+                                                                                                LN (f ) ≤           lt (f, qi ) = L∗t (f ) .        (5)
+NDCG@k is a normalized variant of DCG@k:                                                                      N i=1
+
+                                         DCG@k(z, r)                               The loss function L∗t (f ) can be optimized directly by gradi-
+      NDCG@k(z, r) =                                          .
+                                     maxz′ ∈Rn DCG@k(z ′ , r)                      ent boosting or backpropagation.
+
+Usually, LTR papers report the values of NDCG@k, while                             Many popular learning-to-rank algorithms like Lambda-
+other measures can be of interest in practice. For instance,                       Rank (Burges et al., 2007), LambdaMART (Wu et al., 2010),
+for binary relevance labels rj ∈ {0, 1}, one can be interested                     or LambdaLoss (Wang et al., 2018) fall into this category.
+in Average Precision (AP):                                                         In this section, we mostly follow the reasoning of Wang
+                                                                                   et al. (2018).
+               Pn                              i
+                i=1 P(i) rsi                1X                                     To get a differentiable upper bound, these algorithms first
+  AP(z, r) =    Pn           , where P(i) =      rs .
+                   i=1 ri                   i j=1 j                                build a bound of the form:
+                                                                                                                        nq
+                                                                                                                               wij · 1zj −zi >0 .
+                                                                                                                        X
+Mean Average Precision (MAP) is AP averaged over the                                         L(z, r) ≤ const +                                      (6)
+queries. Another measure used for binary labels is Recipro-                                                            i,j=1
+cal Rank (called MRR after the averaging):
+                                                                                   After that, one can use the inequality 1zj −zi >0 ≤
+                  n    i−1
+                                                                                   log2 1 + e−(zi −zj ) to obtain a convex differentiable
+                                                                                                       
+                  X rs Y     i
+    RR(z, r) =                         (1 − rsj ),     rj ∈ {0, 1} ,               bound:
+                  i=1
+                         i       j=1
+                                                                                                              nq                             
+                                                                                                              X
+which is the inverse rank of the first relevant document. Fi-                        L(z, r) ≤ const +                wij log2 1 + e−(zi −zj ) . (7)
+nally, Expected Reciprocal Rank (ERR) is a similar measure                                                    i,j=1
+applied to non-binary labels:
+                                                                                   To be more precise, for NDCG@k LambdaRank and
+                   n    i−1
+                   X rs Y        i                                                 LambdaMART select the weights wij as:
+    ERR(z, r) =                         (1 − rsj ) ,     rj ∈ [0, 1] .
+                             i
+                   i=1               j=1                                                       wij = ∆ij NDCG@k(z, r) · 1ri >rj ,                   (8)
+The above examples are ranking quality functions, i.e.,                            where ∆ij NDCG@k(z, r) denotes the difference in
+higher values are preferred. When we need to convert a                             NDCG@k(z, r) caused by permuting i-th and j-th doc-
+quality function M (z, r) to a loss function, we can just con-                     uments in the sorting defined by z. Formally, recall that
+sider L(z, r) := 1 − M (z, r). Note that in our experiments,                       s = arg sort(z) and consider the inverse permutation
+we report ranking quality values multiplied by 100.                                p = s−1 . The value pi is the position of the i-th docu-
+                                                                                   ment in the list ordered by z. Then,
+2.3. Ranking Algorithms
+                                                                                                                             (2ri − 2rj )
+This section describes LTR algorithms that are of particular                          ∆ij NDCG@k(z, r) =
+interest to the current research. For more methods and a                                                              24 maxz′ DCG@k(z ′ , r)
+broader overview, we refer to Liu (2009); Ustimenko &                                                               1              1
+                                                                                                          ·                 −               . (9)
+Prokhorenkova (2020); Qin et al. (2021).                                                                      log2 (1 + pj ) log2 (1 + pi )
+As discussed in Section 2.1, the ranking loss function LN (f )                        1
+                                                                                        As before, we denote by lt (f, q) the values of lt (z, r), where
+is non-differentiable. Thus, if we want to apply a convenient                      we set z = (f (x1 ), . . . , f (xnq )).
+
+                                                                               3
+                                          Which Tricks Are Important for Learning to Rank?
+
+                                                                            1
+                                                                                PN
+As proven by Wang et al. (2018), using such wij in-                         N     i=1 l(f, qi ) which minimum point is arbitrary close to
+deed gives a desired upper bound. Similarly, one can                        the minimum of LN (f ), see Ustimenko & Prokhorenkova
+adapt LambdaMART to any ranking metric by substituting                      (2020) for the details. Moreover, the paper proposes novel
+∆ij NDCG@k(z, r) in (8) by the difference of the target                     stochastic gradient estimates to estimate the gradients more
+loss function. It is important to note that the upper bound                 effectively compared to the log-derivative trick (Nesterov &
+property may not hold in this case. However, empirical                      Spokoiny, 2017). Finally, StocasticRank relies on Stochas-
+evidence shows that this trick works well in practice.                      tic Gradient Langevin Boosting (SGLB) (Ustimenko &
+                                                                            Prokhorenkova, 2021) that guarantees that the optimiza-
+Now let us describe the YetiRank algorithm. The original
+                                                                            tion would eventually reach the global optimum even for
+formulation given by Gulin et al. (2011) does not specify
+                                                                            the non-convex loss function LN (f, µ, σ).
+which ranking metric is optimized, but the pairwise loss
+is similar to the ones described above. YetiRank uses the
+following convex differentiable loss:                                       3. Analysis of LTR Algorithms
+                      nq                                                  In Section 4, we will show that YetiRank achieves state-
+                      X
+      lt (z, r) = −           wij log 1 + e−(zi −zj ) ,         (10)        of-the-art results for most datasets and quality functions.
+                      i,j=1                                                 However, it is not specifically optimized for any of these
+                                                                            metrics. In this section, we first discuss which loss function
+where the weights are chosen as:
+                                                                            is optimized by YetiRank and then propose a simple modifi-
+  wij = (ri − rj ) · 1ri >rj · Eϵ [b pi −1 · 1|pi −pj |=1 ] , (11)          cation called YetiLoss that can optimize any given ranking
+                                                                            quality function. Finally, we discuss how YetiLoss relates
+where b ∈ (0, 1) is a hyper-parameter and pi is a random                    to LambdaMART and StochasticRank.
+permutation obtained as the inverse of arg sort(z + ϵ) with
+           u
+ϵ = log 1−u  , u ∼ U ([0, 1]nq ), i.e., ϵ is distributed accord-            3.1. YetiLoss Algorithm
+ing to the Logistic distribution. In practice, to estimate wij ,
+one adds random noise to the current scores to generate                     Let us consider the following ranking quality function for a
+several random permutations. By default, ten permutations                   fixed b ∈ (0, 1):
+are used.2 Importantly, for YetiRank, we can obtain only                                                      nq
+                                                                                                              X
+stochastic gradient estimates of ∇z lt (z, r) due to the ran-                             ExpDCG(z, r) =            bi−1 rsi ,         (13)
+domness of ϵ. We provide a deeper analysis of YetiRank in                                                     i=1
+Section 3.
+                                                                            where s = arg sort(z). This loss resembles the classic
+The CatBoost library also has a modification of YetiRank                    DCG given in (3), but the gain is rsi instead of 2rsi − 1,
+called YetiRankPairwise (CatBoost, 2023), which is de-                      while the discount is exponential (bi−1 ) instead of logarith-
+scribed in Gulin et al. (2011). It is a GBDT-specific mod-                  mic (log2 (i + 1)).
+ification of YetiRank, allowing one to get more accurate
+                                                                            It follows from (11) and (13) that up to a constant multiplier,
+results on large datasets. However, in our preliminary exper-
+                                                                            we have
+iments, we have not observed consistent improvements of
+YetiRankPairwise over YetiRank. Since YetiRankPairwise                       wij = 1ri >rj · Eϵ [∆ij ExpDCG(z + ϵ, r) · 1|pi −pj |=1 ] ,
+is significantly slower than all other algorithms considered
+in this paper, we do not include it in our empirical analysis.              which means that YetiRank optimizes ExpDCG but in a
+                                                                            smoothed form.
+Finally, we overview the recently proposed StochasticRank
+algorithm (Ustimenko & Prokhorenkova, 2020). In sharp                       This observation suggests that to adapt YetiRank for an
+contrast with the previous approaches that build convex                     arbitrary loss function, we need to replace ∆ij ExpDCG by
+differentiable surrogates to optimize a given non-convex                    the difference in the desired ranking loss. For NDCG@k,
+ranking loss, StochasticRank smooths L(z, r) directly using                 the expression is given in (9). For MRR, we have:
+the Gaussian distribution N (−µr, σInq ):                                                                  min{i,j}−1
+                                                                                                 1   1
+                                                                                                                       (1−rsj )· 1ri =1−rj .
+                                                                                                              Y
+                                                                            ∆ij MRR(z, r) =        −   ·
+         l(z, r) = Eϵ∼N (0,Inq ) L(z − µr + σϵ, r) ,            (12)                             pi pj
+                                                                                                              k=1
+
+where µ ≥ 0 and σ > 0 are hyper-parameters. Such                            Analogously, we obtain the expressions for ERR and MAP.
+smoothing leads to the loss function LN (f, σ, µ) =                         Similarly to LambdaMART, for an arbitrary metric (rather
+    2                                                                       than NDCG), we do not have the upper bound guarantees.
+      The complexity of computing the gradients is thus increased
+with the number of permutations, but this does not affect the overall       However, our experiments show that YetiLoss outperforms
+time complexity much since the most time-consuming operation is             standard YetiRank for the MRR and MAP and in half of
+building a decision tree, and this procedure is not affected.               the cases for ERR.
+
+                                                                        4
+                                     Which Tricks Are Important for Learning to Rank?
+
+3.2. Comparison of YetiLoss and LambdaMART                           relies only on such permutations. To see that, we write down
+                                                                                       ∂
+                                                                     the formula for ∂z    l(z, r, σ, µ) estimate that is introduced
+For a given ranking loss function M (z, r), LambdaMART                                   i
+                                                                     by Ustimenko & Prokhorenkova (2020) and is called Co-
+and YetiLoss use the following weights:
+                                                                     ordinate Conditional Sampling (CCS). Let us assume for
+                                                                     simplicity that µ = 0:
+               LM
+              wij = ∆ij M (z, r) · 1ri >rj ,
+                                                                        ∂ CCS
+        = Eϵ ∆ij M (z + ϵ, r) · 1ri >rj · 1|pi −pj |=1 .
+                                                                                                      1
+     YL
+    wij                                                                       l(z, r, σ) = (2πσ 2 )− 2
+                                                                         ∂zi
+Even though both weights share the term ∆ij M · 1ri >rj ,                          nq
+                                                                                   X                       1                      2
+they have principal differences, which we discuss below.                         ·     δi,j L(z + ϵ, r)e− 2σ2 (zi −zj +σ(ϵi −ϵj )) ,
+                                                                                   j=0
+First, let us note that wLM is a discontinuous function of the
+argument z (model predictions). Hence, it may drastically            where δij corresponds to the difference of the ranking loss
+change when the model f changes only slightly. In contrast,          if we change only zi without changing the remaining values,
+wY L is a smooth function of z due to smoothing with an              so that the i-th item is placed after the j-th item for j > 0.
+absolutely continuous distribution. Training with a smooth           For j = 0, it means the difference if we put the i-th item on
+objective is expected to be more robust; thus, we expect             the first position.
+YetiLoss to have a better generalization.
+                                                                     Next, if we assume that all zi are different, the properties of
+                                                                                                          2
+Let us also note that a similar smoothing is proposed in             the super-exponential decay of e−y allow us to ensure that
+a recent paper by Bruch et al. (2020). The authors use               for small enough σ ≈ 0 the latter can be approximated as:
+a different smoothing distribution and also add noise into
+fi − fj that appears in the logarithmic term that is multi-             ∂ CCS
+plied by the weights. The authors confirm that smoothing                      l(z, r, σ)
+                                                                         ∂zi
+the loss function improves the performance. While com-                                  1
+                                                                                                               1            2
+
+paring with Bruch et al. (2020) is out of the scope of the                  ≈ (2πσ 2 )− 2 · δi,a L(z + ϵ, r)e− 2σ2 (zi −za )
+current paper since we focus on widely used open-source                                                              1            2
+                                                                                                                                      
+implementations, we do empirically evaluate the importance                                    +δi,b L(z + ϵ, r)e− 2σ2 (zi −zb )           ,
+of smoothing and different smoothing distributions in Sec-
+tion 4.3.                                                            where a is the index of the largest za that is smaller than zi ,
+                                                                     and b is the index of the smallest zb that is larger than zi ,
+The second difference is that wY L contains ∆ij only for the         i.e., that is exactly the pairwise permutation of neighboring
+neighboring documents with |pi − pj | = 1. In other words,           items.
+YetiLoss uses only those pairwise permutations that can be
+realized by small changes in z. In contrast, wLM does not            We note that the approximation can be made arbitrarily
+have this restriction and contains the pairwise permutations         precise by letting σ → 0+ . We also note that σ ≈ 0 is
+that cannot be realized by small changes of z. This implies          preferred by the algorithm’s design to achieve the theoretical
+that for LambdaMART, the resulting gradients may contain             guarantees on the optimization of LN by StochasticRank.
+redundant information about the permutations that cannot be          Such observation suggests that the pairwise permutations
+achieved within one gradient-boosting step with a small step         of neighboring items are the only permutations that can
+size. Hence, the obtained upper bound on the ranking loss            be achieved by small perturbations of the model we are
+can be too loose. In Section 4.3, we empirically evaluate            learning. Hence, L∗t that arises from YetiLoss contains
+the effect of this difference.                                       more information about local behavior of the ranking loss
+                                                                     function LN .
+3.3. Comparison of YetiLoss and StochasticRank
+                                                                     The similarity between YetiLoss and StochasticRank allows
+The approach underlying the StochasticRank algorithm sig-            us to address the following question in the next section: is di-
+nificantly differs from both YetiLoss and LambdaMART                 rect optimization of the non-convex smoothed loss function
+(see Section 2.3). However, it turns out that Stochastic-            better than optimization of a convex surrogate loss?
+Rank has a structural similarity with YetiLoss but not with
+LambdaMART. This similarity lies in pairwise permuta-                4. Experiments
+tions that YetiLoss incorporates. We already mentioned that
+LambdaMART relies on all possible pairwise permutations              This section empirically compares popular LTR algorithms,
+to build the surrogate loss L∗t . In contrast, YetiLoss uses         evaluates the proposed modification called YetiLoss, and
+only those that permute the neighborhood elements in the             analyzes the importance of several algorithmic details in a
+sorted list. Similarly, we can show that StochasticRank also         unified setup.
+
+                                                                 5
+                                       Which Tricks Are Important for Learning to Rank?
+
+
+                                                 Table 1. Learning-to-rank datasets
+
+                                                      # queries                              # documents
+               Dataset       # features
+                                             train    validation        test        train     validation           test
+               Web10K           136         6,000          2,000       2,000      723,412        235,259        241,521
+               Web30K           136        18,919          6,306       6,306    2,270,296        747,218        753,611
+               Yahoo S1         699        19,944          2,944       6,983      473,134         71,083        165,660
+               Yahoo S2         699         1,266          1,266       3,798       34,815         34,881        103,174
+               Istella          220        20,307          2,912       9,799    5,497,064      1,828,561      3,129,004
+               Istella-S        220        19,246          7,211       6,562    2,043,304        684,076        681,250
+
+
+4.1. Setup                                                             ERR, and MAP.
+Datasets We use six publicly available datasets. The first             For StochasticRank, we use the official implementation for
+two are Web10K and Web30K released by Microsoft (Qin &                 NDCG, while we also add MRR and ERR loss functions to
+Liu, 2013). Following previous studies (Qin et al., 2021; Us-          the optimization. MAP is not supported in StochasticRank
+timenko & Prokhorenkova, 2020; Wang et al., 2018), we use              out of the box, and Ustimenko & Prokhorenkova (2020) only
+Fold 1 for these two datasets. We also use two datasets from           provide algorithms for efficiently computing ERR-like and
+YAHOO! Learning to Rank Challenge (Chapelle & Chang,                   DCG-like metrics. Making an efficient and correct gradient
+2011). Finally, we take Istella and Istella-S datasets (Dato           estimate for MAP in StochasticRank can be a subject of a
+et al., 2016). All datasets except for Istella are pre-divided         separate investigation, which is why we only implemented
+into the train, validation, and test sets. For Istella, there is       MRR and ERR.
+no standard validation set, so we randomly divided the train
+                                                                       For LambdaMART, we implement the original algo-
+part into train and validation. Table 1 overviews the datasets
+                                                                       rithm (Wu et al., 2010) within the CatBoost library with
+used in the current study.
+                                                                       all ranking quality functions considered in our analysis.
+                                                                       For completeness of the analysis, we also add the CatBoost
+Ranking loss functions We compare the algorithms ac-
+                                                                       trained in the QueryRMSE regime (CatBoost, 2023). In
+cording to all quality functions described in Section 2.2.
+                                                                       this case, the algorithm optimizes RMSE averaged over the
+The first one is NDCG@10, which is very popular in LTR re-             queries. This simple loss function can be considered as a
+search. In some of our experiments, we also use NDCG@1                 baseline for other methods.
+and NDCG@5. We observe no significant differences in the
+                                                                       Finally, we also add the implementation of LambdaMART
+obtained results, so we omit these losses from the main text.
+                                                                       provided by Microsoft within the LightGBM library (Ke
+Some results for NDCG@1 and NDCG@5 can be found in
+                                                                       et al., 2017). This implementation is known to outperform
+Appendix.
+                                                                       other open-source versions and to achieve state-of-the-art
+The second quality function is MRR, which is a well-known              LTR results for NDCG (Qin et al., 2021), while it does not
+click-based metric. As MRR requires binary labels, we                  allow for optimizing MRR, ERR, or MAP. Let us note,
+binarize each label as yei := 1{yi >0} . MRR is often used in          however, that LightGBM and CatBoost are different imple-
+practice while it is much less studied than NDCG@k.                    mentations of GBDT. This fact prevents a direct comparison
+                                                                       of LTR algorithms. For instance, in contrast to LightGBM,
+We also consider MAP, for which we binarize the labels in
+                                                                       CatBoots uses oblivious decision trees, where the same
+the same way.
+                                                                       splitting criterion is used for all tree nodes at a given depth.
+Finally, for ERR, we convert the labels to [0, 1] as yei :=
+yi /4. Using all these different loss functions is essential for
+                                                                       Parameter tuning For parameter tuning, we use 20 itera-
+analyzing the generalizability of the approaches to different
+                                                                       tions of random search followed by 80 iterations of Bayesian
+ranking tasks.
+                                                                       optimization (Balandat et al., 2020).3 For all algorithms,
+                                                                       we set the maximum number of trees to 1000. We choose
+Algorithms All the algorithms are implemented and avail-               the best parameters, including the optimal number of trees,
+able within the official CatBoost gradient boosting li-                using the value of the desired loss function on the validation
+brary (Prokhorenkova et al., 2018; CatBoost, 2023).                    set. The list of tuned parameters is given in Appendix A.
+For YetiRank, we use the original implementation, which we                3
+                                                                            Small variations of the results compared to the previous papers
+modify to obtain YetiLoss compatible with NDCG, MRR,                   can be explained by a particular parameter optimization used.
+
+                                                                   6
+                                     Which Tricks Are Important for Learning to Rank?
+
+
+                         Table 2. Comparison of learning-to-rank algorithms with tuned hyper-parameters
+
+                   Algorithm          Web10K       Web30K       Yahoo S1      Yahoo S2      Istella   Istella-S
+                                                                     NDCG@10
+                   LightGBM             50.39       52.21           78.88       77.25       72.89      76.48
+                   QueryRMSE            50.55       52.19           79.10       78.01       69.66      74.83
+                   LambdaMART           49.38       50.93           78.63       77.31       69.83      75.55
+                   StochasticRank       50.34       51.63           78.98       77.77       68.46      74.88
+                   YetiRank             50.75       52.31           79.19       77.99       73.02      77.15
+                   YetiLoss             50.76       51.90           78.67       77.77       71.60      76.32
+                                                                        MRR
+                   QueryRMSE            83.47       85.38           91.03       92.56       96.23      97.63
+                   LambdaMART           82.59       84.12           90.75       92.34       95.18      96.96
+                   StochasticRank       83.51       85.43           90.72       93.08       96.54      97.83
+                   YetiRank             84.21       85.58           91.20       93.05       96.70      97.58
+                   YetiLoss             84.17       86.01           90.88       93.21       97.16      97.97
+                                                                        MAP
+                   QueryRMSE            62.11       63.51           86.06       88.40       78.11      88.59
+                   LambdaMART           57.93       58.58           85.91       89.14       80.80      90.28
+                   YetiRank             62.07       63.39           85.94       88.00       80.01      89.09
+                   YetiLoss             62.62       64.03           86.46       89.37       82.66      91.07
+                                                                        ERR
+                   QueryRMSE            57.27       59.30           66.76       67.16       85.29      85.55
+                   LambdaMART           56.54       58.76           66.22       66.55       84.71      85.24
+                   StochasticRank       56.94       59.34           66.64       67.17       85.44      85.98
+                   YetiRank             57.41       59.53           66.69       67.27       87.29      86.97
+                   YetiLoss             57.46       59.53           66.71       67.15       86.83      86.59
+
+
+4.2. Comparison of LTR Algorithms                                   perior to LightGBM, LambdaMART, and StochasticRank in
+                                                                    at least half of the cases. QueryRMSE also achieves the best
+The results of the comparison are present in Table 2. The
+                                                                    results on Yahoo S2 for NDCG@10 and on Yahoo S1 for
+best results are highlighted. The differences between the
+                                                                    ERR. However, in most cases, YetiLoss is significantly bet-
+highlighted results and other algorithms are statistically
+                                                                    ter than QueryRMSE. Our experiments with QueryRMSE
+significant according to the paired one-tailed t-test with
+                                                                    show that considering such simple ranking-agnostic base-
+p-value < 0.05.
+                                                                    lines is important for a fair analysis.
+We make the following observations. First, we confirm the
+                                                                    By comparing YetiLoss with StochasticRank, we can see
+conclusion from Ustimenko & Prokhorenkova (2020) that
+                                                                    that convexity of the optimization problem is usually pre-
+StochastiRank outperforms LambdaMART in most cases.
+                                                                    ferred over direct optimization of a non-convex smoothed
+However, YetiRank beats both of them, leading to state-
+                                                                    ranking loss: except for some results on Yahoo datasets,
+of-the-art results, especially for NDCG@10. In turn, the
+                                                                    YetiLoss outperforms StochasticRank.
+proposed YetiLoss modification of YetiRank achieves the
+best results for MAP outperforming the competitors by a             To better understand the differences between LTR algo-
+considerable margin. It is also the best on most datasets for       rithms, we also analyze their generalization ability. These
+MRR and performs similarly to YetiRank for ERR. For                 results are shown in Appendix B.
+NDCG@10, YetiRank outperforms YetiLoss: this can be
+explained by the fact that the loss function optimized within       Comparison with default hyper-parameters To evaluate
+YetiRank is similar to NDCG.                                        the effect of parameter tuning on the obtained experimental
+                                                                    result, we additionally evaluate all the algorithms with their
+Interestingly, the simple QueryRMSE method is very com-
+                                                                    default set of hyper-parameters (only the optimal number of
+petitive in some cases. For instance, for NDCG@10, it is su-
+                                                                    trees is chosen on the validation set). The results are shown
+
+                                                                7
+                                                              Which Tricks Are Important for Learning to Rank?
+
+
+                                                              Table 3. The effect of stochastic smoothing for YetiLoss
+
+                                                         NDCG@10                                                       MRR                                 MAP
+                                           Web10K         Yahoo S2 Istella-S       Web10K                             Yahoo S2   Istella-S     Web10K     Yahoo S2     Istella-S
+     Logistic                                50.76          77.77          76.32    84.17                              93.21      97.97         62.62          89.37    91.07
+     Gaussian                                50.79          77.55          76.28    84.28                              93.61      97.83         62.52          89.37    91.08
+     No smoothing                            48.49          75.29          74.55    82.70                              91.94      97.38         61.32          88.13    89.89
+
+
+                            0.1                                                                                        0.5
+                                                                                                                       0.4                                 Web10K
+                              0
+                                                                                                                                                          Yahoo S2
+                            -0.1                                                                                       0.3
+
+
+
+
+      relative difference                                                                       relative difference
+                                                                                                                                                           Istella-S
+                                                                                                                       0.2
+                            -0.2
+                                                                                                                       0.1
+                            -0.3
+                                                                                                                         0
+                            -0.4
+                                                                                                                      -0.1
+                            -0.5        Web10K                                                                        -0.2
+                                       Yahoo S2
+                            -0.6                                                                                      -0.3
+                                        Istella-S
+                            -0.7                                                                                      -0.4
+                                   1                 2                3              all                                     1            2                3              all
+                                                     number of neighbors                                                                  number of neighbors
+
+                                                      (a) MAP                                                                                (b) ERR
+
+                                               Figure 1. The effect of the number of neighbors, relative loss compared to YetiLoss
+
+
+in Table 4. Note that all our observations are also present                                                 5. Conclusion and Discussion
+for this setup. Indeed, YetiLoss is the best with a significant
+margin for MRR and MAP. Moreover, it wins on half of                                                       This paper analyzes several GBDT-based state-of-the-art
+the datasets for ERR. For NDCG@10, similarly to Table 2,                                                   LTR algorithms and their modifications to determine which
+the best results are achieved with YetiRank.                                                               algorithmic details are important for better learning to rank.
+                                                                                                           In our experiments, we found that YetiRank is currently the
+                                                                                                           state-of-the-art LTR approach. We make a simple modifica-
+4.3. Analysis of Algorithmic Details
+                                                                                                           tion of YetiRank and propose an extension called YetiLoss
+Stochastic treatment of scores First, we analyze the ef-                                                   that can optimize arbitrary ranking loss functions. The
+fect of stochastic smoothing of weights. Recall that the                                                   experiments confirm that YetiLoss is better at optimizing
+presence of such smoothing is the key difference between                                                   MRR and is considerably better than the competitors on
+YetiLoss and LambdaMART. Table 3 confirms that smooth-                                                     all the datasets for MAP. Another important contribution
+ing is essential for YetiLoss. On the other hand, a particular                                             of our research is a thorough comparison of existing state-
+shape of smoothing is not so important: the results obtained                                               of-the-art learning-to-rank algorithms and their algorithmic
+with Gaussian and Logistic smoothing are similar.                                                          details.
+                                                                                                            Note that our work is limited to GBDT-based models. We
+Number of neighbors Another difference between                                                              chose this particular setup as GBDTs are known to outper-
+YetiLoss and LambdaMART is that YetiLoss uses only                                                          form other approaches on classic tabular LRT benchmarks.
+neighboring documents with |pi − pj | = 1 while com-                                                        Indeed, Qin et al. (2021) compare the existing neural ap-
+puting the weights. To analyze the effect of this detail, we                                                proaches with GBDT-based methods and show that if fairly
+consider modifications of YetiLoss with |pi − pj | = k for                                                  evaluated, GBDTs still outperform neural methods.4 This
+k ∈ {1, 2, 3} (see Figure 1). We also added the Lamb-                                                       agrees with the experiments of Gorishniy et al. (2021) com-
+daMART version, where all pairs are considered. We can                                                      paring GBDTs and neural approaches on non-ranking tab-
+see that there is no stable significant dependence on this                                                  ular datasets. Importantly, GBDTs have other advantages
+parameter. However, choosing k = 2 is a good option. Note                                                   useful in some applications: they are fast, easy to use, and
+that smaller values of k lead to more efficient algorithms.                                                     4
+                                                                                                                  The model proposed by Qin et al. (2021) is comparable with
+                                                                                                            GBDTs, but it uses self-attention, so to score a particular document
+                                                                                                            the neural network uses features of other documents that are not
+                                                                                                            available to GBDT.
+
+
+                                                                                            8
+                                      Which Tricks Are Important for Learning to Rank?
+
+
+                         Table 4. Comparison of learning-to-rank algorithms with default hyper-parameters
+
+                   Algorithm           Web10K      Web30K         Yahoo S1      Yahoo S2      Istella   Istella-S
+                                                                       NDCG@10
+                   LightGBM             50.34        51.06            78.34       76.96       67.71      73.67
+                   QueryRMSE            49.82        50.68            78.34       78.03       65.45      72.60
+                   LambdaMART           48.56        49.50            77.44       76.46       66.25      73.37
+                   YetiRank             50.18        50.91            78.58       78.15       68.86      74.72
+                   YetiLoss             50.14        50.91            78.03       77.55       68.73      74.62
+                                                                          MRR
+                   QueryRMSE            83.44        84.87            90.78       93.25       94.76      96.89
+                   LambdaMART           82.36        83.97            90.72       91.84       94.73      96.81
+                   YetiRank             83.81        85.10            91.02       93.16       95.59      97.09
+                   YetiLoss             84.50        85.98            91.14       93.76       96.40      97.71
+                                                                          MAP
+                   QueryRMSE            61.85        63.00            85.66       88.40       72.61      85.95
+                   LambdaMART           56.89        55.81            85.92       89.14       75.21      87.49
+                   YetiRank             61.80        63.03            85.66       88.00       75.36      86.82
+                   YetiLoss             62.43        63.58            86.41       89.36       76.61      88.14
+                                                                          ERR
+                   QueryRMSE            56.98        58.64            66.26       67.20       83.06      84.14
+                   LambdaMART           55.92        57.74            65.99       66.41       83.01      84.41
+                   YetiRank             57.12        58.73            66.54       67.28       85.31      85.77
+                   YetiLoss             57.16        58.80            66.50       67.22       85.46      85.71
+
+
+do not require much parameter tuning. Also, in production             YetiRank so that we can compare these methods and their
+scenarios (e.g., in search engines), neural networks usually          modifications fairly. While we believe the obtained conclu-
+compute some features that are then passed to a GBDT                  sions would transfer to other libraries, additional analysis is
+model to be combined with other heterogeneous features.               needed to confirm this.
+GBDT models are often used on top of neural networks
+since they are known to be good at dealing with hetero-               References
+geneous features of different natures and scales. That is
+why we strongly believe that the analysis of GBDT-based               Balandat, M., Karrer, B., Jiang, D. R., Daulton, S., Letham,
+ranking is very important.                                              B., Wilson, A. G., and Bakshy, E. BoTorch: A frame-
+                                                                        work for efficient Monte-Carlo Bayesian optimization. In
+On the other hand, a useful direction for future research is            Advances in Neural Information Processing Systems 33,
+to perform a similar systematic analysis for neural network             2020.
+models. All the discussed approaches (YetiLoss, Query-
+RMSE, and StochasticRank) can be straightforwardly ap-                Bruch, S., Han, S., Bendersky, M., and Najork, M. A
+plied to neural rankers. However, it is not guaranteed that the         stochastic treatment of learning to rank scoring functions.
+conclusions obtained in the current research would transfer             In Proceedings of the 13th ACM International Conference
+to other types of models and problems, and a separate analy-            on Web Search and Data Mining, pp. 61–69, 2020.
+sis is required, similarly to what is done for the LambdaLoss
+framework by Jagerman et al. (2022). In addition, it would            Burges, C. J., Ragno, R., and Le, Q. V. Learning to rank with
+be useful to compare the neural rankers in a suitable setup             nonsmooth cost functions. Proceedings of the Advances
+like image retrieval or recommendation systems.                         in Neural Information Processing Systems, 19:193–200,
+                                                                        2007.
+Finally, note that all the algorithms are implemented within
+the CatBoost open-source gradient boosting library for a fair         Burges, C. J. C. From RankNet to LambdaRank to Lamb-
+comparison. We choose this particular library since it con-             daMART: An overview. Technical report, Microsoft Re-
+tains the original implementations of StochasticRank and                search, 2010.
+
+                                                                  9
+                                     Which Tricks Are Important for Learning to Rank?
+
+CatBoost.   Ranking:  objectives and metrics.                          trees? In International Conference on Learning Repre-
+  https://catboost.ai/docs/concepts/                                   sentations, 2021.
+  loss-functions-ranking.html, 2023.
+                                                                     Ustimenko, A. and Prokhorenkova, L. StochasticRank:
+Chapelle, O. and Chang, Y. Yahoo! learning to rank chal-               Global optimization of scale-free discrete functions. In
+  lenge overview. In Proceedings of the learning to rank               International Conference on Machine Learning, pp. 9669–
+  challenge, pp. 1–24, 2011.                                           9679, 2020.
+
+Dato, D., Lucchese, C., Nardini, F. M., Orlando, S., Perego,         Ustimenko, A. and Prokhorenkova, L. SGLB: Stochastic
+  R., Tonellotto, N., and Venturini, R. Fast ranking with              Gradient Langevin Boosting. In International Conference
+  additive ensembles of oblivious and non-oblivious regres-            on Machine Learning, pp. 10487–10496, 2021.
+  sion trees. ACM Transactions on Information Systems
+  (TOIS), 35(2):1–31, 2016.                                          Wang, X., Li, C., Golbandi, N., Bendersky, M., and Najork,
+                                                                      M. The LambdaLoss framework for ranking metric opti-
+Gorishniy, Y., Rubachev, I., Khrulkov, V., and Babenko,               mization. In Proceedings of The 27th ACM International
+ A. Revisiting deep learning models for tabular data. In              Conference on Information and Knowledge Management,
+ Advances in Neural Information Processing Systems 34,                pp. 1313–1322, 2018.
+  2021.
+                                                                     Wu, Q., Burges, C. J., Svore, K. M., and Gao, J. Adapting
+Gulin, A., Kuralenok, I., and Pavlov, D. Winning the transfer         boosting for information retrieval measures. Information
+  learning track of Yahoo!’s learning to rank challenge               Retrieval, 13(3):254–270, 2010.
+  with YetiRank. In Proceedings of the Learning to Rank
+  Challenge, pp. 63–76, 2011.
+
+Jagerman, R., Qin, Z., Wang, X., Bendersky, M., and Najork,
+  M. On optimizing top-k metrics for neural ranking mod-
+  els. In Proceedings of the 45th International ACM SIGIR
+  Conference on Research and Development in Information
+  Retrieval, pp. 2303–2307, 2022.
+
+Katzir, L., Elidan, G., and El-Yaniv, R. Net-DNF: Effective
+  deep modeling of tabular data. In International Confer-
+  ence on Learning Representations, 2021.
+
+Ke, G., Meng, Q., Finley, T., Wang, T., Chen, W., Ma, W.,
+  Ye, Q., and Liu, T.-Y. LightGBM: A highly efficient
+  gradient boosting decision tree. In Advances in neural
+  information processing systems, pp. 3146–3154, 2017.
+
+Liu, T.-Y. Learning to rank for information retrieval. Foun-
+  dations and Trends® in Information Retrieval, 3(3):225–
+  331, 2009.
+
+Nesterov, Y. and Spokoiny, V. G. Random gradient-free
+  minimization of convex functions. Foundations of Com-
+  putational Mathematics, 17:527–566, 2017.
+
+Prokhorenkova, L., Gusev, G., Vorobev, A., Dorogush, A. V.,
+  and Gulin, A. CatBoost: unbiased boosting with cat-
+  egorical features. In Advances in Neural Information
+  Processing Systems, pp. 6638–6648, 2018.
+
+Qin, T. and Liu, T. Introducing LETOR 4.0 datasets. CoRR,
+  abs/1306.2597, 2013.
+
+Qin, Z., Yan, L., Zhuang, H., Tay, Y., Pasumarthi, R. K.,
+  Wang, X., Bendersky, M., and Najork, M. Are neural
+  rankers still outperformed by gradient boosted decision
+
+                                                                10
+                                      Which Tricks Are Important for Learning to Rank?
+
+A. Experimental Setup
+                                                                        Table 5. The effect of the number of neighbors for YetiLoss,
+We tune the following hyper-parameters:                                 NDCG@1
+   • learning-rate: log-uniform distribution over [10−3 , 1]                                  Web      Yahoo      Istella
+     for all models;                                                                    1     48.24     74.64     70.36
+   • l2-leaf-reg: 0 for StochasticRank; log-uniform distribu-                           2     49.27     74.60     70.70
+     tion over [0.1, 100] for LightGBM; over [0.001, 100]                               all   47.70     74.74     70.93
+     for other models;
+   • depth: uniform distribution over {6, . . . , 8} for
+     YetiRank and LambdaMART, over {6, . . . , 10} for
+     StochasticRank, over {6, . . . , 16} for LightGBM;                 Table 6. The effect of the number of neighbors for YetiLoss,
+                                                                        NDCG@5
+   • model-shrink-rate: log-uniform distribution over
+     [10−5 , 10−2 ] for StochasticRank;                                                       Web      Yahoo      Istella
+   • diffusion-temperature: log-uniform distribution over                               1     48.61     74.49     70.39
+     [108 , 1011 ] for StochasticRank;                                                  2     49.02     74.29     70.61
+   • mu: log-uniform distribution over [10−2 , 10] for                                  all   48.36     74.65     70.44
+     StochasticRank;
+   • num-leaves: integer log-uniform distribution over
+     [16, 256] for LightGBM;
+                                                                        Table 7. The effect of the number of neighbors for YetiLoss,
+   • min-data-in-leaf : integer log-uniform distribution over
+                                                                        NDCG@10
+     [1, 1000] for LightGBM; default value of 10 for other
+                                                                                              Web      Yahoo      Istella
+     algorithms.
+                                                                                        1     50.76     77.77     76.32
+The best hyper-parameters used for Table 2 are listed in
+                                                                                        2     50.90     77.68     76.69
+Tables 27-30.
+                                                                                        3     50.99     77.76     76.74
+                                                                                        all   50.56     77.90     76.79
+B. Additional Experimental Details
+Generalization gap Tables 23-26 provide additional in-
+formation on the generalization of different algorithms. The            Table 8. The effect of the number of neighbors for YetiLoss, MRR
+column “train” shows the corresponding error on the train                                     Web      Yahoo      Istella
+set, while “gap” is the difference of the error between the
+                                                                                        1     84.17     93.21     97.97
+train and test sets. A smaller value in “gap” indicates better
+                                                                                        2     84.18     93.75     97.99
+generalization.
+                                                                                        3     84.39     93.22     97.82
+As expected, YetiLoss usually has larger generalization gaps                            all   84.19     93.84     97.90
+than YetiRank (though there are some exceptions) since it
+is trained for a particular target quality function on the train
+set. Also, YetiLoss usually has better quality on the train
+                                                                        Table 9. The effect of the number of neighbors for YetiLoss, MAP
+set compared to YetiRank. Compared with LightGBM, all
+CatBoost-based algorithms usually have better generaliza-                                     Web      Yahoo      Istella
+tion (see Table 23). We assume that this is because CatBoost                            1     62.62     89.37     91.07
+uses oblivious decision trees known to be resistant to over-                            2     62.62     89.30     91.06
+fitting.                                                                                3     62.54     89.38     91.16
+                                                                                        all   62.32     89.36     90.43
+Number of neighbors Extended results on the analysis of
+the number of neighbors (including additional loss functions
+NDCG@1 and NDCG@5) can be found in Tables 5-10.
+                                                                        Table 10. The effect of the number of neighbors for YetiLoss, ERR
+
+Stochastic smoothing Extended results on the analysis                                         Web      Yahoo      Istella
+of stochastic smoothing (including additional loss functions                            1     57.46     67.15     86.59
+NDCG@1 and NDCG@5) can be found in Tables 11-22.                                        2     57.91     67.28     86.71
+                                                                                        3     57.59     67.13     86.48
+                                                                                        all   57.07     67.32     86.44
+
+
+                                                                   11
+                                      Which Tricks Are Important for Learning to Rank?
+
+
+
+Table 11. The effect of stochastic smoothing for YetiRank,            Table 17. The effect of stochastic smoothing for YetiLoss,
+NDCG@1                                                                NDCG@1
+
+                            Web     Yahoo      Istella                                            Web      Yahoo     Istella
+         Logistic          48.59     75.34       70.8                          Logistic          48.24     74.64      70.36
+         Gaussian          49.86     75.19      71.62                          Gaussian          49.99     74.36      70.45
+         No smoothing      48.26      73.7      70.47                          No smoothing      48.75     71.89      68.32
+
+
+
+Table 12. The effect of stochastic smoothing for YetiRank,            Table 18. The effect of stochastic smoothing for YetiLoss,
+NDCG@5                                                                NDCG@5
+
+                            Web     Yahoo      Istella                                            Web      Yahoo     Istella
+         Logistic          48.54     74.93      70.81                          Logistic          48.61     74.49      70.39
+         Gaussuan           49.4     74.99      70.94                          Gaussian          49.25     74.17      70.37
+         No smoothing      47.52     72.14      69.82                          No smoothing      46.85     71.51      68.46
+
+
+
+Table 13. The effect of stochastic smoothing for YetiRank,            Table 19. The effect of stochastic smoothing for YetiLoss,
+NDCG@10                                                               NDCG@10
+
+                            Web     Yahoo      Istella                                            Web      Yahoo     Istella
+         Logistic          50.75     77.99      77.15                          Logistic          50.76     77.77      76.32
+         Gaussian           51       78.07      77.23                          Gaussian          50.79     77.55      76.28
+         No smoothing      49.05     75.57      75.8                           No smoothing      48.49     75.29      74.55
+
+
+
+Table 14. The effect of stochastic smoothing for YetiRank, MRR        Table 20. The effect of stochastic smoothing for YetiLoss, MRR
+
+                            Web     Yahoo      Istella                                            Web      Yahoo     Istella
+         Logistic          84.21     93.05      97.58                          Logistic          84.17     93.21      97.97
+         Gaussian          83.85     93.07      97.47                          Gaussian          84.28     93.61      97.83
+         No smoothing      83.15     92.23      97.13                          No smoothing       82.7     91.94      97.38
+
+
+
+Table 15. The effect of stochastic smoothing for YetiRank, MAP        Table 21. The effect of stochastic smoothing for YetiLoss, MAP
+
+                            Web     Yahoo      Istella                                            Web      Yahoo     Istella
+         Logistic          62.07       88       89.09                          Logistic          62.62     89.37      91.07
+         Gaussian          61.85      87.8      89.02                          Gaussian          62.52     89.37      91.08
+         No smoothing      60.38     86.85      87.47                          No smoothing      61.32     88.13      89.89
+
+
+
+Table 16. The effect of stochastic smoothing for YetiRank, ERR        Table 22. The effect of stochastic smoothing for YetiLoss, ERR
+
+                         Web       Yahoo     Istella                                           Web       Yahoo     Istella
+            Logistic     57.41     67.27     86.97                                Logistic     57.46     67.15     86.59
+            Gaussian     57.76     67.15     86.87                                Gaussian     57.55     66.99     86.25
+
+
+                                                                 12
+                              Which Tricks Are Important for Learning to Rank?
+
+
+
+
+                             Table 23. Analysis of generalization gap for NDCG@10
+
+                    Web10K            Web30K          Yahoo S1         Yahoo S2         Istella         Istella-S
+ Algorithm        train   gap       train   gap      train   gap     train    gap    train      gap   train      gap
+ YetiRank         56.88    6.13    57.43     5.12   86.56    7.37   90.53    12.54   79.86    6.83    85.86     8.71
+ YetiLoss         57.68    6.92    52.48     3.57   80.46    5.34   94.83    17.06   77.03    5.57    85.23     8.91
+ StochasticRank   56.97   10.23    54.96     6.33   82.16    6.73   89.66    13.73   72.02    3.71    82.53     8.17
+ LambdaMART       55.25    5.87    55.72     4.79   83.35    4.72   90.48    13.17   73.38    3.55    80.12     4.57
+ LightGBM         56.04    9.25    59.58    10.37   84.99    9.67   84.79     9.39   82.36    9.61    87.73    11.77
+
+
+
+
+                                  Table 24. Analysis of generalization gap for MRR
+
+                    Web10K           Web30K           Yahoo S1         Yahoo S2          Istella          Istella-S
+Algorithm          train gap        train gap        train   gap      train   gap     train     gap     train     gap
+YetiRank          87.02   2.80     86.85    1.27    93.06    1.86    96.26    3.21   98.40     1.70    99.48     1.90
+YetiLoss          87.82   3.64     87.64    1.63    94.93    4.04    97.88    4.67   98.98     1.82    99.85     1.88
+StochasticRank    88.14   4.63     89.20    3.77    93.92    3.20    95.64    2.56   98.24     1.70    99.45     1.62
+LambdaMART        86.11   3.52     85.27    1.15    93.26    2.51    96.01    3.67   97.60     2.42    99.66     2.70
+
+
+
+
+                                  Table 25. Analysis of generalization gap for MAP
+
+                   Web10K            Web30K           Yahoo S1         Yahoo S2          Istella          Istella-S
+Algorithm         train gap         train gap        train   gap      train   gap     train     gap     train     gap
+YetiRank          65.38   3.31     65.02    1.63    89.48    3.54    94.16    6.15   84.55     4.53    92.26     3.18
+YetiLoss          65.86   3.24     66.22    2.20    90.70    4.24    96.06    6.69   89.40     6.74    96.27     5.20
+LambdaMART        62.40   4.46     59.89    1.32    87.13    1.22    96.50    7.36   85.75     4.94    94.02     3.74
+
+
+
+
+                                  Table 26. Analysis of generalization gap for ERR
+
+                    Web10K           Web30K           Yahoo S1         Yahoo S2          Istella          Istella-S
+Algorithm          train gap        train gap        train   gap      train   gap     train     gap     train     gap
+YetiRank          61.80   4.39     62.53    3.00    70.34    3.64    73.40    6.13   91.30     4.02    94.53     7.55
+YetiLoss          61.72   4.26     62.11    2.58    70.06    3.34    72.23    5.08   91.00     4.17    94.14     7.55
+StochasticRank    62.82   5.88     62.81    3.48    70.00    3.36    73.26    6.09   87.77     2.33    91.82     5.84
+LambdaMART        63.85   7.31     63.68    4.92    68.85    2.63    72.04    5.50   87.82     3.11    91.89     6.65
+
+
+
+
+                                                        13
+                             Which Tricks Are Important for Learning to Rank?
+
+
+
+
+                                    Table 27. Chosen parameters for NDCG@10
+
+Algorithm        Parameter                 Web10K      Web30K     Yahoo S1    Yahoo S2    Istella   Istella-S
+                 depth                        8           8           8          7          8          8
+YetiRank         l2-leaf-reg               0.03343     0.00100     0.00588    0.08913    0.00461    0.00100
+                 learning-rate             0.05450     0.10085     0.10285    0.04172    0.18317    0.18166
+                 depth                        8           8           8          8          8          8
+YetiLoss         l2-leaf-reg               0.00625     0.11205     0.10000    0.00313    0.13938    0.00100
+                 learning-rate             0.05111     0.11108     0.09002    0.03479    0.25685    0.15083
+                 depth                        10          10          10         8          10         10
+                 learning-rate             0.18210     0.30549     0.12293    0.05506    1.00000    1.00000
+StochasticRank   model-shrink-rate         0.00001     0.00117     0.00049    0.01000    0.00075    0.00125
+                 diffusion-temperature      675M       63274M       100M       102M       304M      5873M
+                 mu                        0.02034     0.01314     0.06495    0.04142    0.01190    0.01794
+                 depth                        8           8           8          6          8          7
+LambdaMART       l2-leaf-reg               0.00394     0.00170     0.00176    0.00100    0.00100    0.00100
+                 learning-rate             0.07478     0.14310     0.14611    0.10625    0.18117    0.15533
+                 depth                         14         14          16           9        14         16
+LightGBM         learning-rate              0.16656    0.12405     0.09355     0.12593   0.22409    0.22599
+                 num-leaves                    97        256         256          16       256        256
+                 min-data-in-leaf               1          1           2          11         9          1
+                 l2-leaf-reg               73.06401    0.39895     6.58340    11.54666   0.74747    1.76279
+
+
+
+
+                                      Table 28. Chosen parameters for MRR
+
+Algorithm        Parameter                 Web10K     Web30K      Yahoo S1    Yahoo S2   Istella    Istella-S
+                 depth                        7           7           8          6          8          8
+YetiRank         l2-leaf-reg               0.23902     0.55462     0.01642    6.24819    0.04491    0.11146
+                 learning-rate             0.09387     0.22263     0.07333    0.23151    0.14079    0.17564
+                 depth                        6           8           7          8          8          8
+YetiLoss         l2-leaf-reg               0.71013     0.32674     0.10000    0.02186    0.10000    0.00356
+                 learning-rate             0.16364     0.07572     0.15166    0.07400    0.18719    0.06319
+                 depth                        7           10          10         6          10         10
+                 learning-rate             0.19705     0.34981     0.14603    0.04305    1.00000    0.36481
+StochasticRank   model-shrink-rate         0.00001     0.00016     0.01000    0.00001    0.00006    0.00031
+                 diffusion-temperature      251M       8890M        100M       100M       100M       984M
+                 mu                        0.01120     0.01000     0.03325    0.01689    0.03698    0.01000
+                 depth                        6           6           8          8          6          6
+LambdaMART       l2-leaf-reg               0.00769     0.04354     0.00100    0.01220    0.00100    0.00100
+                 learning-rate             0.23696     0.08981     0.07174    0.12050    0.09162    0.09379
+
+
+
+
+                                                      14
+                             Which Tricks Are Important for Learning to Rank?
+
+
+
+
+                                     Table 29. Chosen parameters for MAP
+
+    Algorithm        Parameter       Web10K      Web30K     Yahoo S1       Yahoo S2      Istella    Istella-S
+                     depth              8           8           8             7          8             8
+    YetiRank         l2-leaf-reg     0.01157     0.00320     0.00708       0.20218    0.00287       0.02457
+                     learning-rate   0.05033     0.09699     0.11392       0.05680    0.18562       0.15196
+                     depth              8           8           8             8          8             8
+    YetiLoss         l2-leaf-reg     0.54619     0.04957     0.05314       0.00274    0.00819       0.02790
+                     learning-rate   0.05031     0.07755     0.06111       0.01103    0.25184       0.25536
+                     depth              8           8           8             7          8             8
+    LambdaMART       l2-leaf-reg     0.01119     0.00441     0.00100       0.00879    0.00100       0.00100
+                     learning-rate   0.01769     0.01267     0.02798       0.04096    0.18745       0.16072
+
+
+
+
+                                     Table 30. Chosen parameters for ERR
+
+Algorithm        Parameter                Web10K     Web30K      Yahoo S1     Yahoo S2        Istella   Istella-S
+                 depth                       8           8           8            8             8           8
+YetiRank         l2-leaf-reg              0.06115     0.00100     0.00309      0.01318       0.02537     0.00100
+                 learning-rate            0.06827     0.09341     0.09871      0.02678       0.17561     0.16226
+                 depth                       8           8           8            6             8           8
+YetiLoss         l2-leaf-reg              0.01401     0.00175     0.00966      0.05289       0.00100     0.00160
+                 learning-rate            0.04484     0.07811     0.06638      0.05021       0.12214     0.09334
+                 depth                       10          10          10           10            10          10
+                 learning-rate            0.14777     0.30041     0.25101      0.05651       0.54801     0.39642
+StochasticRank   model-shrink-rate        0.00042     0.00001     0.00004      0.01000       0.00085     0.00206
+                 diffusion-temperature     100M        589M        344M        1425M          100B        100M
+                 mu                       0.12610     0.02085     0.12851      0.18189       0.01375     0.01000
+                 depth                       8           8           8            6             6           6
+LambdaMART       l2-leaf-reg              0.00100     0.00100     0.00116      0.00100       0.00100     0.00100
+                 learning-rate            0.05517     0.10631     0.09575      0.04895       0.15040     0.15975
+
+
+
+
+                                                     15
+
