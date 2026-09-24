@@ -35,9 +35,14 @@ def denoise(mz, it, n=TOP_N, floor=INT_FLOOR):
     return mz[o], it[o]
 
 
-def window10(masses, smi, qmass, cap=3000):
+def window10(masses, smi, qmass, cap=3000, min_n=50):
     tol = max(qmass * 10 / 1e6, 0.01)
     lo = bisect_left(masses, qmass - tol); hi = bisect_right(masses, qmass + tol)
+    mult = 10.0
+    while hi - lo < min_n and mult < 5000:
+        mult *= 2
+        tol = max(qmass * 10 / 1e6, 0.01) * mult / 10.0
+        lo = bisect_left(masses, qmass - tol); hi = bisect_right(masses, qmass + tol)
     return list(smi[lo:hi][:cap])
 
 
@@ -135,6 +140,15 @@ def main():
             out.append(s)
             if len(out) == 25:
                 break
+        # backfill: key-dupes still beat empty slots (metric is Key14)
+        if len(out) < 25:
+            for _, s in scored:
+                if s in seen:
+                    continue
+                seen.add(s)
+                out.append(s)
+                if len(out) == 25:
+                    break
         rows.append((mol, ";".join(out[:25])))
         if (mi + 1) % 50 == 0:
             print(f"done {mi+1}/400", flush=True)
