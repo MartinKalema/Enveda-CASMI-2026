@@ -1,0 +1,20 @@
+load train meta...
+  train rows 2531092 structs 276870
+load coconut + fps...
+  fp entries 904634
+  frag entries 179263
+seed 10: held 13757 queries 110
+  seed 10 20/110
+  seed 10 40/110
+  seed 10 60/110
+  seed 10 80/110
+  seed 10 100/110
+seed 10 cached 110 queries
+seed 11: held 13757 queries 110
+  seed 11 20/110
+  seed 11 40/110
+  seed 11 60/110
+  seed 11 80/110
+  seed 11 100/110
+seed 11 cached 110 queries
+EXIT:0

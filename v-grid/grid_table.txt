@@ -1,0 +1,30 @@
+0.7012 GBM-F25                s10=0.6745 s11=0.7278 d10=+0.6745 d11=+0.7262 SHIP hit100=0.99/0.97 medr=1/1 {'floor': 'cos', 'fills': ['gbm'], 'dedup': 'exact'}
+0.6998 GBM-F31                s10=0.6993 s11=0.7003 d10=+0.6993 d11=+0.6987 SHIP hit100=0.99/0.97 medr=1/1 {'floor': 'cos', 'fills': ['gbm'], 'dedup': 'exact'}
+0.6196 GBM-F8                 s10=0.6046 s11=0.6346 d10=+0.6046 d11=+0.6330 SHIP hit100=0.99/0.97 medr=2/1 {'floor': 'cos', 'fills': ['gbm'], 'dedup': 'exact'}
+0.1456 GBM-F3                 s10=0.1193 s11=0.1718 d10=+0.1193 d11=+0.1702 SHIP hit100=0.94/0.87 medr=22/18 {'floor': 'cos', 'fills': ['gbm'], 'dedup': 'exact'}
+0.0683 all-on ent             s10=0.0511 s11=0.0855 d10=+0.0511 d11=+0.0839 SHIP hit100=0.55/0.73 medr=56/44 {'floor': 'ent', 'fills': ['ana200p4', 'met01', 'fpdot'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0621 window8.5ppm           s10=0.0386 s11=0.0855 d10=+0.0386 d11=+0.0839 SHIP hit100=0.71/0.85 medr=51/34 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': 8.5, 'cap': None}
+0.0569 window10.0ppm          s10=0.0305 s11=0.0832 d10=+0.0305 d11=+0.0816 SHIP hit100=0.69/0.84 medr=61/36 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': 10.0, 'cap': None}
+0.0369 window20.0ppm          s10=0.0186 s11=0.0553 d10=+0.0186 d11=+0.0537 SHIP hit100=0.57/0.64 medr=74/57 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': 20.0, 'cap': None}
+0.0357 floor-ent+ana          s10=0.0223 s11=0.0490 d10=+0.0223 d11=+0.0474 SHIP hit100=0.55/0.73 medr=82/60 {'floor': 'ent', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0196 floor ent-only         s10=0.0110 s11=0.0282 d10=+0.0110 d11=+0.0266 hold hit100=0.55/0.73 medr=89/66 {'floor': 'ent', 'fills': [], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0145 fp-fpcos               s10=0.0026 s11=0.0264 d10=+0.0026 d11=+0.0248 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'fpcos'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0144 fp-fpdot               s10=0.0026 s11=0.0263 d10=+0.0026 d11=+0.0247 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'fpdot'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0144 no-met                 s10=0.0026 s11=0.0263 d10=+0.0026 d11=+0.0247 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'fpdot'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0144 fp-fptop               s10=0.0026 s11=0.0262 d10=+0.0026 d11=+0.0246 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'fptop'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0078 all-on cos             s10=0.0004 s11=0.0153 d10=+0.0004 d11=+0.0137 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'met01', 'fpdot'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0077 all-on mixed           s10=0.0004 s11=0.0150 d10=+0.0004 d11=+0.0134 hold hit100=0.11/0.17 medr=122/108 {'floor': 'mixed', 'fills': ['ana200p4', 'met01', 'fpdot'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0047 dedup-ik14             s10=0.0019 s11=0.0074 d10=+0.0019 d11=+0.0058 hold hit100=0.15/0.20 medr=106/103 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'ik14', 'window': None, 'cap': None}
+0.0035 ana100p3               s10=0.0000 s11=0.0069 d10=+0.0000 d11=+0.0053 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0035 cap2000                s10=0.0000 s11=0.0069 d10=+0.0000 d11=+0.0053 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': None, 'cap': 2000}
+0.0035 floor-mixed+ana        s10=0.0000 s11=0.0069 d10=+0.0000 d11=+0.0053 hold hit100=0.11/0.17 medr=122/108 {'floor': 'mixed', 'fills': ['ana100p3'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0034 ana50p3                s10=0.0000 s11=0.0068 d10=+0.0000 d11=+0.0052 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana50p3'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0034 ana200p3               s10=0.0000 s11=0.0068 d10=+0.0000 d11=+0.0052 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana200p3'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0034 ana100p4               s10=0.0000 s11=0.0067 d10=+0.0000 d11=+0.0051 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p4'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0033 ana50p4                s10=0.0000 s11=0.0066 d10=+0.0000 d11=+0.0050 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana50p4'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0033 ana200p4               s10=0.0000 s11=0.0066 d10=+0.0000 d11=+0.0050 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana200p4'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0023 metfrag tol0.005       s10=0.0000 s11=0.0046 d10=+0.0000 d11=+0.0030 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'met005'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0023 metfrag tol0.01        s10=0.0000 s11=0.0046 d10=+0.0000 d11=+0.0030 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'met01'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0023 metfrag tol0.02        s10=0.0000 s11=0.0046 d10=+0.0000 d11=+0.0030 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'met02'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0023 no-fp                  s10=0.0000 s11=0.0046 d10=+0.0000 d11=+0.0030 hold hit100=0.11/0.17 medr=120/108 {'floor': 'cos', 'fills': ['ana100p3', 'met01'], 'dedup': 'exact', 'window': None, 'cap': None}
+0.0008 anchor cos-only        s10=0.0000 s11=0.0016 d10=+0.0000 d11=+0.0000 hold hit100=0.11/0.17 medr=210/192 {'floor': 'cos', 'fills': [], 'dedup': 'exact', 'window': None, 'cap': None}
