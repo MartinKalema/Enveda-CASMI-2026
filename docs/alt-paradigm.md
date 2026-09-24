@@ -41,15 +41,19 @@ over remaining structures + truth injected mass/formula-only. Metric MRR@25.
 ## Results
 | variant | seed 0 | seed 1 | seed 2 | pooled |
 |---|---|---|---|---|
-| frag-only | | | | |
-| formula-only | | | | |
-| blend 50/50 | | | | |
-| full | | | | |
-| cosine anchor | | | | |
-Funnel recall (truth formula in top-2): seed 0/1/2 = / / .
+| frag-only | 0.620 | 0.626 | 0.586 | 0.611 |
+| formula-only | 0.779 | 0.776 | 0.662 | 0.739 |
+| blend 50/50 | 0.630 | 0.565 | 0.557 | 0.584 |
+| full | 0.630 | 0.594 | 0.561 | 0.595 |
+| cosine anchor | 0.009 | 0.006 | 0.001 | 0.006 |
+Funnel recall (truth formula in top-2): seed 0/1/2 = 0.275 / 0.350 / 0.100.
 
 ## Verdict
-TBD after run.
+PASSED to production as v12 fills (floor top-5 untouched): formula funnel
+truth-recall@2 only 0.10-0.35 (funnel misses cascade, as designed to measure),
+but frag-only 0.61 pooled with zero spectrum-similarity is the most
+independent evidence measured yet. Cosine anchor 0.006 confirms the novel
+regime. Production: floor 1-5, formula-funnel + frag-ranked fills 6-25.
 
 ## Cost / offline notes
 RDKit needed for fragment enumeration (precompute once, `frag_disk.pkl` cache;
