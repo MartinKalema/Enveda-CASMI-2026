@@ -105,3 +105,8 @@
     have the next version training/building while the last one queues.
     Fills plateaued 0.093-0.095 across FOUR versions (v3/v5/v6/v7) before
     anyone admitted the floor must change.
+
+## Negative results that stay dead
+33. BDE-ordered cleavage + neutral-loss ladder: disjoint MRR 0.279 vs plain
+    1-2-bond 0.272 (n=30, same split) - no signal. Do NOT port to fork.
+    Fragmentation physics beyond BFS buys nothing at ranking time.
