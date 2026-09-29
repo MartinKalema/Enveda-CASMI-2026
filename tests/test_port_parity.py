@@ -43,7 +43,7 @@ def ported_ns():
            "from multiprocessing import Pool as MPool\n"
            "from numba import njit, prange\n"
            + get("AMU = {", [r"\ndef ", r"\nH_ATOM"]) + "\nH_ATOM = AMU[\"H\"]\n")
-    _parts = [pre.replace("@njit(cache=True", "@njit(cache=False")]
+    _parts = [pre.replace("@njit(cache=True", "@njit(cache=False"),
               get("def _clean", [r"\ndef entropy_sim"]),
               get("def _components", [r"\ndef "]), get("def fragment_masses", [r"\ndef explain_score"]),
               get("def explain_score", [r"\ndef _frag_masses_wrapper"]),
