@@ -24,13 +24,31 @@ def ported_ns():
         return full[i:i + 10 + min(mm)]
 
     ns = {"np": np, "HAVE_RDKIT": True}
+
+    class _LocalPool:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def map(self, fn, it, chunksize=None):
+            return list(map(fn, it))
+
+    ns["MPool"] = _LocalPool
     pre = ("from rdkit import Chem\nfrom rdkit.Chem import Descriptors\n"
+           "from multiprocessing import Pool as MPool\n"
+           "from numba import njit, prange\n"
            + get("AMU = {", [r"\ndef ", r"\nH_ATOM"]) + "\nH_ATOM = AMU[\"H\"]\n")
-    exec(pre + get("def _bde_of", [r"\ndef "]) + get("def mol_graph", [r"\ndef "])
-         + get("def _components", [r"\ndef "]) + get("def fragment_masses", [r"\ndef explain_score"])
-         + get("def explain_score", [r"\ndef _frag_masses_wrapper"])
-         + get("def _frag_masses_wrapper", [r"\ndef frag_scores"])
-         + get("def frag_scores", [r"\ndef instr_family"]), ns)
+    _parts = [pre, get("def _bde_of", [r"\ndef "]), get("def mol_graph", [r"\ndef "]),
+              get("def _components", [r"\ndef "]), get("def fragment_masses", [r"\ndef explain_score"]),
+              get("def explain_score", [r"\ndef _frag_masses_wrapper"]),
+              get("def _frag_masses_wrapper", [r"\ndef frag_scores"]),
+              get("def frag_scores", [r"\ndef instr_family"])]
+    exec("\n".join(_parts), ns)
     return ns
 
 
