@@ -110,3 +110,10 @@
 33. BDE-ordered cleavage + neutral-loss ladder: disjoint MRR 0.279 vs plain
     1-2-bond 0.272 (n=30, same split) - no signal. Do NOT port to fork.
     Fragmentation physics beyond BFS buys nothing at ranking time.
+
+## Ablation discipline (BDE vs NL menu)
+34. NL menu ablation: WITH-NL 0.279 vs WITHOUT-NL 0.279, identical rankings.
+    The 0.011 NL signal never flips a single rank - dead weight. BDE ordering
+    alone carries the whole win over their channel. Lesson: ablate every
+    bolt-on; a positive-looking signal (0.011 vs 0.000) can still be
+    ranking-irrelevant.
