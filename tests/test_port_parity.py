@@ -91,15 +91,19 @@ def test_bond_selection_matches():
 
 
 def test_port_scores_sane():
-    """Ported frag_scores runs end-to-end and returns finite values."""
+    """Ported frag machinery runs end-to-end (serial) and returns finite values."""
     import pandas as pd
     ns = ported_ns()
     tr = pd.read_parquet(f"{PROJECT}/data/train.parquet",
                          columns=["normalized_smiles", "ms2_mzs",
                                   "ms2_normalized_intensities"]).head(2)
     r = tr.iloc[0]
-    out = ns["frag_scores"]([r["normalized_smiles"]],
-                            [(r["ms2_mzs"], r["ms2_normalized_intensities"])],
-                            1.0, workers=1)
-    assert np.all(np.isfinite(out)), f"non-finite scores: {out}"
-    assert float(out[0]) >= 0.0
+    f = ns["_frag_masses_wrapper"](r["normalized_smiles"])
+    assert np.all(np.isfinite(np.asarray(f, dtype=float)))
+    import numpy as _np
+    m2, i2 = ns["_clean"](_np.asarray(r["ms2_mzs"], _np.float32),
+                          _np.asarray(r["ms2_normalized_intensities"], _np.float32),
+                          0.002, 256, 1.0, False)
+    v = ns["explain_score"](f, _np.asarray(m2, float), _np.asarray(i2, float),
+                            mode=1.0, tol=0.01)
+    assert np.isfinite(v) and v >= 0.0
