@@ -117,3 +117,16 @@
     alone carries the whole win over their channel. Lesson: ablate every
     bolt-on; a positive-looking signal (0.011 vs 0.000) can still be
     ranking-irrelevant.
+
+## Port verification (the +H incident)
+35. A hand-port is guilty until proven innocent: ours produced 47 fragments
+    per molecule vs 94 locally (exactly half, ~1 Da shift) because the +H
+    rearrangement variants were dropped in transcription. Caught only by a
+    differential test comparing ported vs local outputs on real inputs.
+36. Differential tests are now mandatory for every port: same inputs must
+    give identical outputs before the code ships anywhere near a submission.
+    tests/test_port_parity.py is the template (bond selection + end-to-end
+    scores + leak guards).
+37. Never submit without confirming new code actually ran: check kernel
+    version output freshness, not just COMPLETE status. A COMPLETE badge on
+    a stale version burned a submission for an identical 0.317.
