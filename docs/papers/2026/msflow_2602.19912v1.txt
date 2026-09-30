@@ -1,0 +1,858 @@
+                                             D E NOVO MOLECULAR STRUCTURE ELUCIDATION FROM MASS
+                                                                           SPECTRA VIA FLOW MATCHING
+
+
+
+                                                                 Ghaith Mqawass1,2∗ , Tuan Le2 , Fabian Theis1,3,4 , Djork-Arné Clevert2∗
+                                                          1
+                                                         TUM School of Life Sciences Weihenstephan, Technical University of Munich, Germany
+                                                     2
+                                                      Machine Learning and Computational Sciences, Pfizer Research & Development, Berlin, Germany
+
+
+
+
+arXiv:2602.19912v1 [cs.LG] 23 Feb 2026
+                                                   3
+                                                     TUM School of Computation, Information and Technology, Technical University of Munich, Germany
+                                                                4
+                                                                  Institute of Computational Biology, Helmholtz Center Munich, Germany
+                                                                                                         ∗
+
+
+
+
+                                                                                               February 24, 2026
+
+                                                                                                 A BSTRACT
+                                                     Mass spectrometry is a powerful and widely used tool for identifying molecular structures due to its
+                                                     sensitivity and ability to profile complex samples. However, translating spectra into full molecular
+                                                     structures is a difficult, under-defined inverse problem. Overcoming this problem is crucial for
+                                                     enabling biological insight, discovering new metabolites, and advancing chemical research across
+                                                     multiple fields. To this end, we develop MSFlow, a two-stage encoder-decoder flow-matching
+                                                     generative model that achieves state-of-the-art performance on the structure elucidation task for small
+                                                     molecules. In the first stage, we adopt a formula-restricted transformer model for encoding mass
+                                                     spectra into a continuous and chemically informative embedding space, while in the second stage we
+                                                     train a decoder flow matching model to reconstruct molecules from latent embeddings of mass spectra.
+                                                     We present ablation studies demonstrating the importance of using information-preserving molecular
+                                                     descriptors for encoding mass spectra and motivate the use of our discrete flow-based decoder. Our
+                                                     rigorous evaluation demonstrates that MSFlow can accurately translate up to 45% of molecular mass
+                                                     spectra into their corresponding molecular representations — an improvement up to fourteen-fold
+                                                     over the current state-of-the-art. A trained version of MSFlow is made publicly available on GitHub
+                                                     for non-commercial users.
+
+                                         1       Introduction
+                                         Mass spectrometry (MS) is a vital analytical method used in chemistry and molecular biology for measuring the
+                                         mass-to-charge (m/z) ratio of target compounds. Mass spectrometers provide sensitive, high-throughput, and precise
+                                         measurements that aid in identifying unknown compounds by determining their molecular weight. A mass spectrometer
+                                         contains three main components: an ionization source, a mass analyzer, and an ion detection system. First, molecules
+                                         are converted to gas-phase ions that can be manipulated via external electrical and magnetic fields. Then, ions are
+                                         separated according to their respective m/z ratios. Finally, the output of the mass analyzer is forwarded to a data system
+                                         where m/z ratios are stored along with their relative abundances. The result is a mass spectrum, which plots m/z ratios
+                                         on the x-axis against relative abundances (intensities) on the y-axis. MS is widely used for the structural characterization
+                                         of small molecules, natural products, and metabolites, enabling researchers to probe complex biological and chemical
+                                         systems. In the rapidly expanding field of metabolomics, tandem mass spectrometry (MS/MS or MS2) plays a central
+                                         role in elucidating complex molecular structures at scale. Tandem mass spectrometry is a two-stage analytical technique
+                                         used to obtain detailed structural information. In the first stage (MS1), all ions in the sample are measured, and a
+                                         specific ion of interest—called the precursor ion—is isolated, typically based on having the highest intensity. The
+                                         precursor ion then undergoes fragmentation, usually by collision-induced dissociation, and the resulting fragment ions
+                                         are analyzed in the second stage (MS2) to determine their masses. As shown in Figure 1, an MS2 spectrum displays
+                                             ∗
+                                                 Corresponding authors: ghaith.mqawass@tum.de, djork-arne.clevert@pfizer.com
+                                                                                     A PREPRINT - F EBRUARY 24, 2026
+
+
+
+                             Mass spectrum                        Molecular representation
+                             peak list / profile                  O=C1C2=C(N=CN2C)N(C(=O)N1C)C
+
+
+                               Rel. I
+
+
+
+
+                                m/z 55 67 82 109 138   194
+
+
+
+
+Figure 1: Given a mass spectrum of a natural product, like the spectrum of caffeine, the task is to identify the
+corresponding structure of that product. This task is referred to as the "inverse problem" and can be solved by de novo
+generation.
+
+
+these fragment ions, whose patterns serve as molecular fingerprints supporting the identification and characterization of
+unknown metabolites, peptides, and other small molecules.
+Despite the rich information provided by MS/MS, converting fragmentation spectra into complete molecular structures
+remains a fundamental inverse problem. Due to the ionization and fragmentation processes in the mass spectrometer,
+identifying a unique structure from a single spectrum is a hard inverse problem. The task is inherently difficult because
+the mapping from molecular structure to fragmentation spectrum is one-to-many: A certain molecular structure can be
+fragmented in different paths, producing highly similar spectra. Consequently, a large proportion of molecules detected
+in untargeted MS-based metabolomics studies remain unknown and missing in virtual chemical libraries, forming the
+so-called “dark matter in metabolomics” [1]. Often up to 87% of observed spectra in large public MS/MS databases
+remain unannotated [2, 1]. Moreover, Huber et al. [3] report that generally only 10% of reproducible spectral features
+can be identified even in well-studied matrices such as human serum. Solving this inverse problem is essential for
+advancing metabolomics and chemical biology, as it enables the annotation of unknown metabolites, the discovery of
+novel molecules, and the accurate interpretation of biochemical pathways.
+
+2   Related Work
+Before de novo structure generation, researchers have addressed the forward problem of predicting spectra from
+molecular structures using deep learning methods, including multilayer perceptrons[4], graph neural networks, and
+Transformers [5, 6, 7]. Further forward models have leveraged molecular (sub)formulas through graph-based approaches
+[8, 9, 10]. Complementary to these prediction-based methods, other work has focused on learning spectral similarity
+measures for retrieval and clustering. Spectral representation learning methods [11, 3] learn embeddings to predict
+structural similarities directly from spectral pairs, enabling molecular networking and compound clustering without
+requiring known structures.
+The problem of molecular structure elucidation from mass spectra has recently gained interest in computational
+chemistry as an alternative to the traditional (enhanced) database search. More specifically, different machine learning
+methods have been used to solve this inverse problem [12]. The task can be described by taking the mass spectrum
+as input and predicting a representation of the molecular structure as output. Several molecular representations have
+been developed, including fingerprints, graph-based and textual representations, such as the Simplified Molecular
+Input Line Entry System (SMILES)[13] or the more recent Sequential Attachment-based Fragment Embedding
+(SAFE)[14]. These representations have enabled the development of different MS-to-structure machine learning
+approaches [15][16][17][10]. Recent state-of-the-art approaches frame the task as the de novo generation of molecules
+from mass spectra. These methods can be classified mainly into autoregressive and diffusion-based approaches. Some
+prior studies [16] [17] used language models to generate SMILES from tokenized input (m/z) and intensity pairs.
+Tokenized (m/z, intensity) representations fail to capture the permutation-invariant nature of mass spectra and cannot
+enforce chemical formula constraints. Furthermore, autoregressive models suffer from two key limitations: they can get
+stuck in suboptimal local paths, necessitating beam search for adequate chemical space exploration, and their slower
+inference compared to flow-based models makes them impractical for large spectral datasets. Also, SMILES-based
+approaches depict molecular substructures non-sequentially, which imposes a challenge for de novo generation and
+highlights the need to use better textual molecular representation.
+Diffusion models [18, 19, 20] emerged as a powerful method for different generative tasks. Building on prior work that
+converts mass spectra into circular fingerprints using MIST [21], Bohde et al. [22] employed a diffusion decoder to
+reconstruct chemical compounds from these fingerprints. However, a key limitation of this approach is the irreversible
+loss of information when encoding mass spectra into binary fingerprints—different molecules often map to identical
+
+
+                                                             2
+                                                                                                                                A PREPRINT - F EBRUARY 24, 2026
+
+
+or highly similar fingerprints, compromising structural fidelity. This highlights the need for richer intermediate
+representations.
+To tackle these limitations, we developed MSFlow, a two-step encoder-decoder framework that utilizes MIST[21], a
+transformer-based encoder, to convert mass spectra into continuous molecular descriptors, and a conditional transformer-
+based discrete flow matching decoder with the BERT architecture [23] to generate SAFE sequences conditioned on
+embeddings of mass spectra.
+
+
+A. Spectrum Encoder                             B. Flow Decoder                                                                                     C. MSFlow
+                                                                                                                                                     Stage 1
+                                                                                                                                    Ground Truth
+           O=C(OCC)CC(SP(=O)(OC)OC)C(=O)OC
+                                                                            O=C(OCC)CC(SP(=O)(OC)OC)C(=O)OC
+                            Mass Spectrometer
+
+                                                                                    LM Head
+
+                                                     Adaptive LayerNorm        Transformer Block
+
+                                                                                  #×    ...
+                                                     Adaptive LayerNorm        Transformer Block                                            ℒ !"#
+                                                                                                                                                               Spectrum Encoder
+
+
+                                                                                                             ∥
+                                                                                                                       Time
+                                                                                                                                        !
+                                                                                           +                         Embedding
+                                                       MLP Projection
+              Mass Spectra Encoder                                             Token            Positional                                           Stage 2
+                                                                             Embedding         Embedding             Uniform Distribution
+                                                 !
+      "!
+                                                                                                                                                                  Flow Decoder
+             Molecular Descriptors (CDDDs)                                CCC((OCO)C((C(CO(O)(OC)OC)C((O)        ~
+
+                                                                                                                                                          O=C(OCC)CC(SP(=O)(OC)OC)C(=O)OC
+
+
+
+
+Figure 2: Overview of our method. A) The input mass spectrum is encoded using MIST [21] into an intermediate
+representation Y . In our work, we chose CDDD[24] to be the intermediate representation. B) The architecture of our
+flow decoder. It has a BERT-like architecture with bidirectional attention. Instead of using the standard LayerNorm,
+we use an adaptive LayerNorm. The model samples from a uniform distribution over tokens and uses the condition Y
+through its adaptive layer norm to guide the generation of structures aiming at reconstructing the true molecule. C) This
+panel shows the overview of our two-stage approach. First, the mass spectrum is encoded into a latent representation.
+Then, our conditional decoder takes the latent representation as an input condition to generate the corresponding
+molecule.
+
+
+
+3     Methods
+
+We formulate the task as follows: We represent structure-spectrum pairs as (X, S), where X denotes the SAFE
+representation of a molecule and S its corresponding spectrum. As the task of predicting a molecule X given a spectrum
+S is under-defined, the goal of conditional generation is to generate k structures that most closely match the input
+spectra.
+Conceptually, MSFlow tackles the molecular structure elucidation problem in two stages. In the first stage, mass
+spectra S are encoded into intermediate descriptors Y . In this stage, a labeled dataset of (spectrum, descriptor) pairs is
+constructed and used to train a MIST encoder [21] as shown in Figure 2A. In the second stage, a flow-based generative
+decoder uses these descriptors Y as conditioning to map back to molecular representations X as visualized in Figure
+2B.
+
+
+3.1        SAFE molecule representation
+
+Sequential Attachment-based Fragment Embedding (SAFE) is a novel line notation for molecular representation [25].
+SAFE represents molecules as an unordered sequence of fragments or substructures. Molecules are decomposed into
+fragments using the BRICS algorithm [26]. Fragments within the SAFE representation are concatenated using a dot
+token (.) while explicitly retaining their attachment points. This formulation ensures permutation invariance across
+fragments: reordering fragments in a SAFE string preserves the identical molecular structure. The main difference from
+the commonly used SMILES notation is that the arrangement of SMILES tokens corresponding to the same molecular
+fragment is consecutive.
+
+
+                                                                                      3
+                                                                                    A PREPRINT - F EBRUARY 24, 2026
+
+
+3.2   Mass spectrum encoding
+
+To leverage mass spectra in machine learning models, an effective numerical representation is essential. Binning the
+spectra can transform it into a fixed-size vector by aggregating intensities (e.g., via summation) within each bin. Ideally,
+one can directly use this vectorized spectrum as an input condition for guided de novo molecular generation. However,
+a key practical limitation is the scarcity of labeled mass spectrometry data for training generative models that map
+spectra directly to molecules.
+In contrast, vast paired structure-descriptor datasets can be readily generated from virtual chemical libraries, given the
+infinite diversity of possible molecules. This enables pretraining of a decoder model on large-scale data, benefiting
+from established scaling laws, at the cost of potential information loss during the spectrum-to-representation S → Y
+encoding step. The transformation function F : S → Y should preserve as much chemical information as possible and
+be ideally bijective.
+In our work, we adopt the continuous molecular descriptors introduced by Winter et al. [24], which have been
+successfully used as molecular representations in a range of chemoinformatics applications [27, 28]. Winter et al. [24]
+obtain these descriptors from an autoencoder trained to translate input SMILES strings into their canonical SMILES
+equivalents, with a 512-dimensional bottleneck layer; on top of supporting this autoencoding/translation objective, the
+resulting bottleneck embeddings (termed CDDD) provide a compact and transferable representation for downstream
+tasks. Compared to models relying on molecular fingerprints, these continuous descriptors are more expressive and
+chemically informative and lead to less information loss.
+
+3.3   Discrete flow matching decoder
+
+Discrete flow matching (DFM) models employ a continuous-time Markov chain (CTMC) over sequences of discrete
+tokens [29, 30]. In a CTMC, each token alternates between staying in its current state i and transitioning to another state
+j over infinitesimal time intervals. We apply DFM to generate molecular SAFE sequences X ∈ V L , where V denotes
+the vocabulary of tokens (e.g., atoms, bonds, branch indicators), L is the maximum sequence length, and K = |V | is
+the vocabulary size.
+The CTMC evolves over the interval t ∈ [0, 1], transforming sequences from a tractable prior distribution X0 ∼ p0 (X)
+to the target data distribution X1 ∼ p1 (X). We adopt a uniform prior over the vocabulary, p0 = U (K). In the following,
+we describe the dynamics for a single token position. Transitions from state i to state j are governed by a parameterized
+velocity uj←i
+           θ    (Xt ) ∈ R, which characterizes the instantaneous rate of probability flow between states. Each token in
+Xt ∼ pt evolves independently across positions via an Euler discretization:
+                                            Xt+∆t ∼ δXt + uθ (Xt , t, Y )∆t,                                            (1)
+where uθ (Xt , t, Y ) ∈ RK , δXt ∈{0,1}K denotes the one-hot encoding of the current token Xt , and ∆t is a small step
+size.
+Analogous to continuous flow matching [31, 32, 33], the velocity field uθ induces a generative model pθ (Xt ) that
+approximates the marginal distributions over t ∈ [0, 1]. Following Gat et al. [30], we adopt the probability denoiser
+parameterization:
+                                                         1 h                         i
+                                     uθ (Xt , t, Y ) =        X̂1|t (Xt , Y, t) − δXt ,                             (2)
+                                                       1−t
+where noisy samples are constructed via linear interpolation Xt = (1 − t)δX0 + tδX1 . The quantity X̂1|t (Xt , Y, t)
+represents the posterior distribution over clean data states conditioned on the current noisy sample Xt , the spectrum
+encoding Y , and time t. Accordingly, we train a denoising network X̂1|t,θ to predict the clean SAFE tokens by
+minimizing the cross-entropy (CE) loss summed over all sequence positions
+                                                            " L                                      #
+                                                             X                                     
+                     L = Et∼U [0,1], X0 ∼p0 (X), X1 ∼p1 (X)      CE δX1 [s], X̂1|t,θ (Xt , Y, t)[s] .               (3)
+                                                             s=1
+
+The latent embedding derived from the mass spectrum encoder is incorporated via adaptive layer normalization (AdaLN),
+whose variants have also found application in diffusion modeling on images and molecules [34, 35, 36]. Rather than
+using shared affine parameters for all inputs, the scale and shift parameters are learned and adjusted based on the latent
+embedding of the input condition Y , as illustrated in the following equation:
+                                    AdaLN(H, Y ) = Sθ (Y ) ⊙ LN(H) + Bθ (Y ),                                           (4)
+where H is the hidden representation of the input batch, and Sθ and Bθ are learnable transformations that return shift
+and scale tensors based on the spectrum encoding Y .
+
+
+                                                             4
+                                                                                    A PREPRINT - F EBRUARY 24, 2026
+
+
+The above describes the conditional training objective of the flow matching decoder. To enable more flexible generation,
+we adopt classifier-free guidance [37], where conditions are randomly dropped with a certain probability during training
+to allow the model to learn both conditional and unconditional (SAFE) generation.
+
+
+3.4       Datasets
+
+For encoder training and model evaluation, we use NPLIB1 (CANOPUS) [38], or the MassSpecGym [39] dataset,
+according to the defined training-val-test splits. These public datasets offer labeled spectrum-structure pairs (S, X)
+and are described in the following two paragraphs. The distribution of molecular properties across different splits for
+both benchmarks is shown in Figure 3, revealing that CANOPUS provides an in-distribution evaluation scenario with
+balanced train-test splits, while MSG constitutes a challenging out-of-distribution benchmark with test molecules being
+substantially larger and more flexible than those in the training set.
+
+
+NPLIB1 (CANOPUS) The dataset contains MS/MS spectra paired with molecular structures and compound class
+annotations derived from ClassyFire taxonomy to ensure an even distribution of chemical classes[39]. The dataset
+employs standard splitting based on 2D InChIKey hashes to ensure molecules with identical planar structures do not
+appear across different data splits. The dataset contains around 8K spectra of roughly 7K unique molecules.
+
+
+ A               Molecular Size Distribution                    B          Molecular Flexibility Distribution
+
+
+
+
+Density                                                         Density
+
+
+
+
+                     Number of Atoms                                          Number of Rotatable Bonds
+
+Figure 3: Molecular property distributions across CANOPUS (CPS) and MassSpecGym (MSG) datasets. (A) Atom
+count distributions showing minimal shift in CANOPUS (∆µ = −0.1 atoms) versus substantial shift in MassSpecGym
+(∆µ = +7.2 atoms). (B) Rotatable bond distributions indicating slightly increased flexibility in CANOPUS and
+MassSpecGym test sets splits (∆µ = +0.4bonds) and (∆µ = +0.3 bonds) respectively. Solid lines: training data;
+dashed lines: test data.
+
+
+
+MassSpecGym MassSpecGym is a rigorously curated benchmark dataset designed to evaluate model generalization
+to structurally novel molecules. Unlike conventional splitting methods based on 2D InChIKey hashes, MassSpecGym
+implements a structure-aware splitting strategy that guarantees a minimum chemical bond edit distance (MCES distance)
+of 10 between training, validation, and test sets. This approach prevents data leakage that can occur from minor structural
+modifications commonly found in spectral libraries (e.g., from click chemistry), enabling more accurate assessment of
+model performance on truly unseen chemical structures. The dataset contains around 231K spectra of more than 27K
+unique molecules.
+
+
+Decoder training set For decoder training, we curate a large-scale corpus from publicly available chemical databases.
+Specifically, the training set comprises molecules obtained by merging DSSTox [40], HMDB [41], COCONUT [42],
+and MOSES [43]. We also add the small training sets of molecules present in NPLIB1 and MassSpecGym to form a
+total set of approximately 2.8M molecules for decoder training using the setup described in Section 3.3. To ensure a
+fair assessment of generalization and novelty, we exclude from this corpus any molecules that appear in the validation
+or test splits of NPLIB1 (CANOPUS) or MassSpecGym so that evaluation is performed on structures unseen during
+training.
+
+
+                                                            5
+                                                                                   A PREPRINT - F EBRUARY 24, 2026
+
+
+3.5   Model parameterization
+
+We employ an encoder-decoder pipeline that decouples training of the spectrum encoder from the conditional molecular
+decoder. The encoder builds on the MIST architecture [21] and maps each input spectrum to a continuous condition
+vector Y in the space of CDDD embeddings, which is then provided to the flow-matching decoder as conditioning
+(Figure 2B). The encoder takes (m/z, intensity) peak pairs as input. For each spectrum, it incorporates a predicted
+molecular formula assignment produced by SIRIUS [44] and uses a set transformer to aggregate the peaks into a
+fixed-length CDDD vector Y corresponding to the precursor ion.
+The flow-based decoder is a BERT-like transformer trained with the discrete flow matching objective in Eq. (3).
+Bidirectional self-attention provides global molecular context without relying on an autoregressive token order, while
+non-autoregressive, parallel decoding further improves computational efficiency. Architectural and training details
+are deferred to Appendix 3.3. To train the decoder for spectrum-to-structure elucidation, we precompute CDDD
+embeddings for molecules in our dataset, yielding paired data (X, Y ), where X is the SAFE sequence and Y is the
+corresponding CDDD embedding. We use these pairs to learn a conditional flow matching model pθ (X | Y ) that
+samples SAFE sequences from descriptor-based conditions (Figure 2B) using classifier-free guidance. In this setup, in
+each training batch, the CDDD embedding Y serves as a condition that is randomly dropped with a fixed probability.
+This enables the model to learn both unconditional generation pθ (X) and conditional generation pθ (X | Y ). For
+inference, these two components are combined with a controllable guidance scale for generating SAFE sequences. This
+exposure to missing conditions during training prevents overfitting to ground truth CDDD conditions, which increases
+the robustness of the model to potentially noisy and off-manifold predicted CDDD embeddings by the encoder at
+inference.
+At inference time, we apply the MIST encoder to a query spectrum to predict its CDDD embedding, which is then fed
+to the flow-based decoder as conditioning to generate the corresponding molecular structure (Figure 2C).
+
+3.6   Baselines and evaluation benchmarks
+
+We evaluate our model, MSFlow, on two open-source benchmark datasets: NPLIB1 (CANOPUS) [38], and MassSpec-
+Gym [39]. We follow the same train/validation/test splits used in DiffMS by Bohde et al. [22]. We compare our model
+to different baseline methods that were re-implemented to be trained on the same datasets we used for fair evaluation.
+As baselines, we include two models as decoders that reconstruct molecules from Morgan fingerprints. Neuraldecipher
+[28], which uses an MLP to reconstruct molecules from ECFPs, meanwhile MSNovelist [15] utilizes a long short-term
+memory (LSTM) network to decode fingerprints back to SMILES. These models are added as a decoding step to
+Morgan fingerprints predicted by the MIST [21] encoder.
+Spec2Mol [17] employs a two-stage training pipeline. First, a GRU-based autoencoder is trained to reconstruct SMILES
+sequences, yielding a continuous latent space that captures molecular structure. Second, a CNN-based spectrum
+encoder is trained to map input mass spectra into the same latent space by minimizing the distance to the SMILES
+autoencoder’s latent representations of corresponding molecules. During inference, the spectrum encoder projects
+spectra into the latent space, which is further decoded into candidate SMILES strings using only the SMILES decoder
+from the autoencoder.
+Another approach, MADGEN [45], introduces a two-stage generative setting. It relies on a diffusion-based generative
+model to generate chemical structures from scaffolds. The accuracy of this approach is limited by the accuracy of
+MS/MS spectrum-to-scaffold prediction.
+A recent state-of-the-art model, DiffMS [22], utilized MIST[21] to convert mass spectra into circular molecular
+fingerprints. As a second step, DiffMS uses a graph-based diffusion decoder, which was pretrained on vast fingerprint-
+structure pairs from virtual chemical libraries.
+MS-BART [46] is a BERT-based encoder-decoder model with unified tokenization for molecular fingerprints (4096-bit
+ECPF) and SELFIES sequences. Like DiffMS, it utilized MIST to convert mass spectra to ECPF fingerprints. Training
+comprises three stages: pretraining on 4 million simulated fingerprint-molecule pairs via multi-task denoising, finetuning
+on experimental spectra to bridge the sim-to-real gap, and contrastive alignment through ranking loss to prioritize
+structurally similar candidates based on Tanimoto similarity.
+
+3.7   Evaluation metrics
+
+For evaluating our model, we sample 100 molecules per spectrum. We rank the generated molecules based on their
+frequencies. In alignment with the results of our baseline methods, we use three top-k metrics of de novo generation.
+Top-k accuracy measures if the true molecule is in the top-k predictions of our model. Top-k maximum Tanimoto
+
+
+                                                            6
+                                                                                   A PREPRINT - F EBRUARY 24, 2026
+
+
+similarity measures the structural similarity between the closest molecule in the top-k predictions and the true molecule.
+We also use the graph edit distance developed by Kretschmer et al. [47] as a distance metric. This metric measures the
+distance between the true molecules and the nearest molecule in our top-k predictions, and we report it in the results
+section as MCES (maximum common edge subgraph). All metrics are reported for k = 1, 10, where applicable.
+
+
+Results and Discussion
+
+Table 1: De novo structural elucidation performance on NPLIB1 [38] and MassSpecGym [39] datasets. The best
+performing model for each metric is bold and the second best is underlined. ‡ and † indicate results taken from
+Bohde et al. and Han et al.. ∗ indicates our implementations and approaches. Methods are approximately ordered by
+performance. Note that MIST + CDDD decoder is evaluated using Top-1 prediction only; Top-10 prediction is not
+applicable for this approach.
+                                                   Top-1                                    Top-10
+     Model                         Accuracy ↑     MCES ↓        Tanimoto ↑   Accuracy ↑    MCES ↓       Tanimoto ↑
+                                                        NPLIB1
+     Spec2Mol‡                       0.00%         27.82           0.12        0.00%         23.13         0.16
+     MADGEN‡                         2.10%         20.56           0.22        2.39%         12.64         0.27
+     MIST + Neuraldecipher‡          2.32%         12.11           0.35        6.11%          9.91         0.43
+     MIST + MSNovelist‡              5.40%         14.52           0.34       11.04%         10.23         0.44
+     DiffMS‡                         8.34%         11.95           0.35       15.44%          9.23         0.47
+     MS-BART†                        7.45%         9.66            0.44       10.99%          8.31         0.51
+     MSFlow (ECFP)∗                 12.95%          8.84           0.53       19.42%          6.61         0.61
+     MIST + CDDD decoder∗           40.97%          6.62           0.70           –            –             –
+     MSFlow∗                        44.70%         3.79            0.72       58.53%         2.46          0.82
+                                                     MassSpecGym
+     SMILES Transformer‡             0.00%         79.39           0.03        0.00%         52.13         0.10
+     MIST + MSNovelist‡              0.00%         45.55           0.06        0.00%         30.13         0.15
+     SELFIES Transformer‡            0.00%         38.88           0.08        0.00%         26.87         0.13
+     Spec2Mol‡                       0.00%         37.76           0.12        0.00%         29.40         0.16
+     MIST + Neuraldecipher‡          0.00%         33.19           0.14        0.00%         31.89         0.16
+     Random Generation‡              0.00%         21.11           0.08        0.00%         18.26         0.11
+     MADGEN‡                         1.31%         27.47           0.20        1.54%         16.84         0.26
+     DiffMS‡                         2.30%         18.45           0.28        4.25%         14.73         0.39
+     MS-BART†                        1.07%         16.47           0.23        1.11%         15.12         0.28
+     MSFlow (ECFP)∗                  5.17%         17.01           0.31        6.71%         13.87         0.41
+     MIST + CDDD decoder∗           24.10%         13.40           0.56           –            –             –
+     MSFlow∗                        32.00%         6.38            0.69       42.53%         5.25          0.74
+
+MSFlow (conditioned on CDDD embeddings) consistently outperforms prior baselines on both NPLIB1 and MassSpec-
+Gym across all reported metrics, as shown in Table 1. On NPLIB1, MSFlow achieves a Top-1 accuracy of 44.70%,
+improving substantially over DiffMS (8.34%; ∼ 5.4×), while also increasing structural similarity (Top-1 Tanimoto 0.72
+vs. 0.35) and reducing MCES (3.79 vs. 11.95). On the more challenging out-of-distribution MassSpecGym benchmark,
+the gain is even more pronounced: MSFlow reaches 32.00% Top-1 accuracy compared to 2.30% for DiffMS (∼ 13.9×),
+with corresponding improvements in Top-1 Tanimoto (0.69 vs. 0.28) and MCES (6.38 vs. 18.45). MSFlow further
+attains strong Top-10 performance, reaching 58.53% on NPLIB1 and 42.53% on MassSpecGym.
+To isolate the contribution of our SAFE-based flow matching decoder relative to ECFP-conditioned decoders, we train
+an ablated variant MSFlow (ECFP) that conditions on Morgan fingerprints, analogous to DiffMS. MSFlow (ECFP)
+exceeds DiffMS on all metrics for both datasets (e.g., NPLIB1 Top-1 accuracy 12.95% vs. 8.34%; MassSpecGym
+Top-1 accuracy 5.17% vs. 2.30%), providing empirical support for the superiority of our decoder design.
+Finally, MSFlow (CDDD) improves upon the original CDDD decoder baseline, increasing Top-1 accuracy from 40.97%
+to 44.70% on NPLIB1 and from 24.10% to 32.00% on MassSpecGym. Comparing conditioning representations
+within the same decoder further highlights the benefit of CDDD-based conditioning over ECFP-based conditioning:
+
+
+                                                            7
+                                                                                                                                                   A PREPRINT - F EBRUARY 24, 2026
+
+
+  MSFlow (CDDD) markedly outperforms MSFlow (ECFP) on both NPLIB1 (44.70% vs. 12.95% Top-1 accuracy) and
+  MassSpecGym (32.00% vs. 5.17%), indicating that the CDDD condition provides a substantially more informative
+  signal for structure generation in our setting.
+ Additionally, to assess the upper performance limit of our MSFlow decoder and disentangle the contributions of
+ molecular representation quality from decoder architecture, we conducted an oracle experiment using ground truth
+ CDDD descriptors as conditions instead of MIST-CDDD predictions. Under this oracle setting, our model’s top-1
+ and top-10 accuracies significantly increase to 86.55% and 91.28% on NPLIB1. For comparison, MS-BART achieves
+ 73.50% and 79.12% for top-1 and top-10 accuracies, respectively, when using ground truth (gold) molecular fingerprints
+ as conditions as stated in their Table 1 in Han et al. [46]. This substantial performance gap (86.55% vs. 73.50%)
+ demonstrates that both the choice of molecular representation (CDDD vs. ECFP) and the decoder architecture (flow
+ matching vs. autoregressive) contribute to MSFlow’s superior performance. The oracle results establish an upper
+ bound for our two-stage approach and reveal that the primary limitation lies in the spectrum-to-CDDD encoding stage:
+ the difference between oracle performance and MIST-based predictions (86.55%vs. 44.70% for top-1) indicates that
+ substantial structural information is lost during the projection from mass spectrum data to the fixed 512-dimensional
+ CDDD representation.
+
+    A 1.0                                                                MSFlow-CDDD                     B 1.0                             n=1965
+                                                                                                                                                 n=3204
+                                                                                                                                   n=177                                n=1452
+            0.8                                                          CDDD decoder                                  0.8                             n=3216     n=1867
+
+
+
+
+                                                                                                 Tanimoto Similarity
+                                                                                                                                                                              n=1942
+                                                                         MSFlow-ECFP                                                                        n=1774
+
+
+Accuracy
+                                    n=1965
+            0.6             n=177         n=3204                                                                       0.6   n=9                                                       n=779
+                                                                                                                                                                                               n=697
+                                                n=3216           n=1452
+            0.4                                            n=1867                                                      0.4
+                                                     n=1774            n=1942
+            0.2                                                                 n=779
+                                                                                        n=697
+                                                                                                                       0.2
+                     n=9
+            0.0                                                                                                        0.0
+                   <1
+                 15 5
+                   -2
+                 21 0
+                   -2
+                 26 5
+                   -3
+                 31 0
+                   -3                                                                                                      <1
+                                                                                                                         15 5
+                                                                                                                           -2
+                                                                                                                         21 0
+                                                                                                                           -2
+                                                                                                                         26 5
+                                                                                                                           -3
+                                                                                                                         31 0
+                                                                                                                           -3
+                 36 5
+                   -4
+                 41 0
+                   -4
+                 46 5
+                   -5
+                 51 0
+                   -5
+                 56 5                                                                                                    36 5
+                                                                                                                           -4
+                                                                                                                         41 0
+                                                                                                                           -4
+                                                                                                                         46 5
+                                                                                                                           -5
+                                                                                                                         51 0
+                                                                                                                           -5
+                                                                                                                         56 5
+                   -60                                                                                                     -60
+                                             Number of Atoms                                                                                        Number of Atoms
+                   >6 0                                                                                                    >6 0
+
+   C 50                                                                                  n=697
+                                                                                                         D 1.0
+                40                                                                                                     0.8
+
+
+MCES Distance
+                                                                                                                                                                        n=171
+                                                                                 n=779
+
+
+
+                                                                                                 Accuracy
+                30    n=9                                              n=1942
+                                                                                                                       0.6                     n=821
+                                                                                                                                                            n=681
+                                                                                                                               n=297                                                   n=78
+                                   n=1965n=3204n=3216n=1774
+                20           n=177                         n=1867
+                                                                 n=1452
+                                                                                                                       0.4
+                10                                                                                                     0.2
+                 0                                                                                                     0.0
+                   <1
+                 15 5
+                   -2
+                 21 0
+                   -2
+                 26 5
+                   -3
+                 31 0
+                   -3
+                 36 5
+                   -4
+                 41 0
+                   -4
+                 46 5
+                   -5
+                 51 0
+                   -5
+                 56 5
+                   -60                                                                                                       0-2           3-4         5-6          7-8           0
+                                                                                                                                                                                9-1             >1 0
+                                             Number of Atoms                                                                                Number of Rotatable Bonds
+                   >6 0
+
+  Figure 4: Panels A, B, and C show top-1 accuracy, top-1 Tanimoto similarity, and top-1 MCES distance, respectively, as
+  functions of molecular size (number of atoms) for the MassSpecGym benchmark dataset. Higher values indicate better
+  performance for accuracy and Tanimoto similarity, while lower values are better for MCES distance. Panel D displays
+  the reconstruction accuracy as a function of molecular flexibility (number of rotatable bonds). Given that reconstruction
+  accuracy degrades with increasing molecular size, we restricted the analysis to molecules containing 20–25 atoms. The
+  legend in Panel A applies to all other panels.
+
+  Furthermore, Figure 4 analyzes model performance with respect to molecular size on the MassSpecGym benchmark,
+  comparing MSFlow against the second- and third-best approaches. Panel A shows that MSFlow and the CDDD decoder
+  achieve comparable top-1 accuracy on small and medium-sized molecules. However, MSFlow demonstrates significant
+  improvement over the CDDD decoder on larger molecules with more than 40 atoms. This advantage arises because the
+  CDDD decoder is an RNN-based model that processes tokens sequentially in one direction, whereas our flow-based
+  decoder leverages a bidirectional attention mechanism to decode the spectrum embedding. Additionally, panels A, B,
+  and C show that although MSFlow has a slightly lower match rate on molecules with 31–40 atoms compared to the
+  CDDD decoder, it consistently generates molecules with higher structural similarity to the target (higher Tanimoto
+  similarity and lower MCES distance) across all molecular sizes.
+  From a mechanistic standpoint, flexible molecules undergo dissociation through multiple competing fragmentation
+  pathways in mass spectrometry. As a result, the same molecular structure may yield diverse fragmentation spectra.
+
+
+                                                                                                     8
+                                                                                           A PREPRINT - F EBRUARY 24, 2026
+
+
+This variability introduces significant complexity, thereby making the inverse problem of deducing molecular structure
+from spectral data more challenging. To investigate the effect of the molecular flexibility on our model, we stratify
+molecules in the MassSpecGym test set by the number of rotatable bonds and compute the top-1 accuracy for each
+bin, as shown in Figure 4D. Since reconstruction accuracy degrades with increasing molecular size, we restrict our
+flexibility analysis to molecules consisting of 20-25 heavy atoms. We can observe that MSFlow performs consistently
+across rigid (4> rotatable bonds) and highly flexible molecules (rotatable bonds >= 7), indicating its robustness with
+respect to molecular flexibility.
+In the MassSpecGym dataset, each unique molecular structure is associated with a highly variable number of spectra,
+ranging from 1 up to 383 spectra (median 3) for the test set. Prior benchmarking studies have reported only the average
+prediction accuracy over all spectra (see Table 1), but this metric can be misleading because molecules represented by
+many spectra disproportionately influence the overall score. For example, a method that correctly predicts only the
+single molecule with the most spectra achieves 2.24% accuracy, whereas its accuracy measured per unique molecule
+would be only 0.03%. To provide a more balanced evaluation, we additionally report the mean accuracy computed per
+unique molecule. Under this metric, the CDDD decoder and MSFlow-CDDD achieve mean accuracies of 29.1% and
+29.6%, respectively, while MSFlow-ECFP performs substantially lower at 0.9%.
+Figure 5 visualizes success and failure modes among the top-1 and top-10 predictions of our model. The leftmost
+example demonstrates successful reconstruction in the top-1 prediction, achieving perfect Tanimoto similarity (1.00)
+and MCES distance (0). The second example fails in top-1 but succeeds in top-10, highlighting the benefit of generating
+multiple candidates. The three rightmost examples illustrate failure cases where the model converges to structurally
+incorrect scaffolds. This behavior can be attributed to the many-to-one mapping in the training data, where multiple
+distinct molecules can produce similar spectra, diluting the conditioning embeddings. Notably, even in failure cases,
+top-10 predictions often yield higher structural similarity than top-1, suggesting that relevant structural motifs are
+present within the model’s hypothesis space but may not rank highest.
+
+Ground Truth
+
+
+
+
+Top-1 Prediction
+
+
+
+
+    Tan. Sim = 1.00, MCES=0   Tan. Sim = 0.65, MCES=5   Tan. Sim = 0.49, MCES=10   Tan. Sim = 0.47, MCES=10   Tan. Sim = 0.12, MCES=35
+
+Top-10 Prediction
+
+
+
+
+    Tan. Sim = 1.00, MCES=0   Tan. Sim = 1.00, MCES=0   Tan. Sim = 0.69, MCES=10   Tan. Sim = 0.58, MCES=10   Tan. Sim = 0.17, MCES=15
+
+
+
+Figure 5: Predictions of our model on random MassSpecGym test samples. Left to right, MSFlow succeeds in
+reconstructing the first two ground truth molecules in the top-1 and top-10 predictions, respectively, but fails on the last
+three examples.
+
+Finally, we analyze the ability of our model to predict certain functional groups. To conduct this analysis, we define a
+comprehensive list of functional groups based on SMARTS patterns in RDKit. The list includes the following functional
+groups: ester, amide, carboxylate, lactone, sulfoxide, sulfone, thioether, thiol, phosphate, phosphonate, nitro, azide,
+nitrile, heteroaromatic, and polycyclic aromatic rings, as well as epoxide and peroxide groups. Each SMARTS pattern
+is converted into a query molecule and matched against the ground truth molecule and the corresponding predicted
+molecule using substructure searching; if the pattern is present, the associated functional group name is recorded in the
+relevant set (Set1: Functional groups that exist in the query molecule; Set2: Functional groups that exist in the predicted
+
+
+                                                                  9
+                                                                                  A PREPRINT - F EBRUARY 24, 2026
+
+
+molecule). Then, we compute the number of intersections (true positives), the number of differences of groups existing
+in the predicted molecule but not in the query molecule (false positives), and the number of differences of patterns that
+exist in the query molecule but do not exist in the predicted molecule (false negatives). We repeat this procedure for
+each (ground truth, predicted) molecule pair, computing precision, recall, and F1-score. Finally, we report average
+scores across all pairs. Our model achieves good functional group prediction performance with an average precision of
+0.868, a recall of 0.863, and an F1 score of 0.854 ± 0.298 on the MassSpecGym test set. This indicates that our model
+can capture several existing functional groups with high accuracy, without predicting nonexistent ones.
+
+Conclusions
+In this work, we present MSFlow CDDD, an encoder-decoder approach for molecular structure elucidation from mass
+spectrometry data. The encoder maps the input spectrum to a continuous embedding space (CDDD), and our discrete
+flow-based decoder uses CDDD embeddings to reconstruct the corresponding molecular structure. Our experiments
+demonstrate the superior performance of our model against previous state-of-the-art approaches across two common
+de novo generation benchmarks. Despite the fact that our model’s performance degrades with increasingly larger
+molecules, MSFlow is still able to generate similar molecules to target molecules on different benchmarks across
+different molecular sizes. Our experiments highlight that the spectrum encoding stage constitutes the primary limitation,
+as evidenced by the substantial performance gap between oracle CDDD descriptors and those derived from experimental
+spectra. This observation motivates a future research direction for the development of more expressive spectrum
+representation techniques.
+
+Data availability
+Source code of the proposed method is openly available for non-commercial usage at the GitHub repository under
+https://github.com/ghaith-mq/MSFlow.
+
+Acknowledgements
+G.M. and D.A.C. are supported by the Horizon Europe funding program under the Marie Skłodowska-Curie Actions
+Doctoral Networks grant agreement “Explainable AI for Molecules - AiChemist”, no. 101120466. F.T. acknowledges
+funding from the European Union under the European Research Council (ERC) grant DeepCell (Grant Agreement No.
+101054957).
+
+References
+ [1] Wout Bittremieux, Mingxun Wang, and Pieter C. Dorrestein. The critical role that spectral libraries play in captur-
+     ing the metabolomics community knowledge. Metabolomics, 18(12):94, 2022. doi: 10.1007/s11306-022-01947-y.
+ [2] Samuel Goldman, Jiayi Xin, Joules Provenzano, et al. Mist-cf: Chemical formula inference from tandem mass
+     spectra. Journal of Chemical Information and Modeling, 64(7):2421–2431, 2024. doi: 10.1021/acs.jcim.3c01082.
+     URL https://doi.org/10.1021/acs.jcim.3c01082. PMID: 37725368.
+ [3] Florian Huber, Sven van der Burg, Justin J. J. van der Hooft, and Lars Ridder. Ms2deepscore: a novel deep learning
+     similarity measure to compare tandem mass spectra. Journal of Cheminformatics, 13(1):84, Oct 2021. ISSN
+     1758-2946. doi: 10.1186/s13321-021-00558-4. URL https://doi.org/10.1186/s13321-021-00558-4.
+ [4] Jennifer N. Wei, David Belanger, Ryan P. Adams, and D. Sculley. Rapid prediction of electron–ionization mass
+     spectrometry using neural networks. ACS Central Science, 5(4):700–708, 2019. doi: 10.1021/acscentsci.9b00085.
+     URL https://doi.org/10.1021/acscentsci.9b00085. PMID: 31041390.
+ [5] Xinmeng Li, Yan Zhou Chen, Apurva Kalia, Zhu, et al. An ensemble spectral prediction (esp) model for metabolite
+     annotation. Bioinformatics, 40(8):btae490, 08 2024. ISSN 1367-4811. doi: 10.1093/bioinformatics/btae490. URL
+     https://doi.org/10.1093/bioinformatics/btae490.
+ [6] Jiwon Park, Jeonghee Jo, and Sungroh Yoon. Mass spectra prediction with structural motif-based graph neural
+     networks. Scientific Reports, 14(1):1400, Jan 2024. ISSN 2045-2322. doi: 10.1038/s41598-024-51760-x. URL
+     https://doi.org/10.1038/s41598-024-51760-x.
+ [7] Adamo Young, Hannes Röst, and Bo Wang. Tandem mass spectrum prediction for small molecules using
+     graph transformers. Nature Machine Intelligence, 6(4):404–416, Apr 2024. ISSN 2522-5839. doi: 10.1038/
+     s42256-024-00816-8. URL https://doi.org/10.1038/s42256-024-00816-8.
+
+
+                                                           10
+                                                                                 A PREPRINT - F EBRUARY 24, 2026
+
+
+ [8] Richard Licheng Zhu and Eric Jonas. Rapid approximate subset-based spectra prediction for electron ioniza-
+     tion–mass spectrometry. Analytical Chemistry, 95(5):2653–2663, 2023. doi: 10.1021/acs.analchem.2c02093.
+     URL https://doi.org/10.1021/acs.analchem.2c02093. PMID: 36695638.
+ [9] Samuel Goldman, John Bradshaw, Jiayi Xin, and Connor W. Coley. Prefix-tree decoding for predicting mass
+     spectra from molecules. In Thirty-seventh Conference on Neural Information Processing Systems, 2023. URL
+     https://openreview.net/forum?id=NWEbeI2HNQ.
+[10] S. Goldman, J. Li, and C. W. Coley. Generating molecular fragmentation graphs with autoregressive neural
+     networks. Analytical Chemistry, 96(8):3419–3428, 2024. doi: 10.1021/acs.analchem.3c04654.
+[11] Florian Huber, Lars Ridder, Stefan Verhoeven, Jurriaan H Spaaks, et al. Spec2Vec: Improved mass spectral
+     similarity scoring through learning of structural relationships. PLoS Comput. Biol., 17(2):e1008724, February
+     2021.
+[12] F. F. Russo, Y. Nowatzky, C. Jaeger, et al. Machine learning methods for compound annotation in non-targeted
+     mass spectrometry—a brief overview of fingerprinting, in silico fragmentation and de novo methods. Rapid
+     Communications in Mass Spectrometry, 38(20):e9876, 2024. doi: 10.1002/rcm.9876. URL https://doi.org/
+     10.1002/rcm.9876.
+[13] David Weininger. Smiles, a chemical language and information system. 1. introduction to methodology and
+     encoding rules. Journal of Chemical Information and Computer Sciences, 28(1):31–36, 1988. doi: 10.1021/
+     ci00057a005. URL https://doi.org/10.1021/ci00057a005.
+[14] Emmanuel Noutahi, Cristian Gabellini, Michael Craig, et al. Gotta be safe: a new framework for molecular
+     design. Digital Discovery, 3:796–804, 2024. doi: 10.1039/D4DD00019F. URL http://dx.doi.org/10.1039/
+     D4DD00019F.
+[15] M. A. Stravs, K. Duhrkop, S. Böcker, and N. Zamboni. Msnovelist: de novo structure generation from mass
+     spectra. Nature Methods, 19(7):865–870, 2022. doi: 10.1038/s41592-022-01486-3.
+[16] T. Butler, A. Frandsen, R. Lightheart, et al. Ms2mol: A transformer model for illuminating dark chemical space
+     from mass spectra, 2023. Preprint.
+[17] E. E. Litsa, V. Chenthamarakshan, P. Das, and L. E. Kavraki. An end-to-end deep learning framework for
+     translating mass spectra to de-novo molecules. Communications Chemistry, 6(1):132, 2023. doi: 10.1038/
+     s42004-023-00932-3.
+[18] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising diffusion probabilistic models. In H. Larochelle, M. Ranzato,
+     R. Hadsell, M.F. Balcan, and H. Lin, editors, Advances in Neural Information Processing Systems, volume 33,
+     pages 6840–6851. Curran Associates, Inc., 2020.
+[19] Yang Song, Jascha Sohl-Dickstein, Diederik P Kingma, Abhishek Kumar, Stefano Ermon, and Ben Poole. Score-
+     based generative modeling through stochastic differential equations. In International Conference on Learning
+     Representations, 2021. URL https://openreview.net/forum?id=PxTIG12RRHS.
+[20] Jacob Austin, Daniel D. Johnson, Jonathan Ho, Daniel Tarlow, and Rianne van den Berg. Structured denoising
+     diffusion models in discrete state-spaces. In A. Beygelzimer, Y. Dauphin, P. Liang, and J. Wortman Vaughan,
+     editors, Advances in Neural Information Processing Systems, 2021. URL https://openreview.net/forum?
+     id=h7-XixPCAL.
+[21] S. Goldman, J. Wohlwend, M. Stražar, et al. Annotating metabolite mass spectra with domain-inspired chemical
+     formula transformers. Nature Machine Intelligence, 5:965–979, 2023. doi: 10.1038/s42256-023-00708-3. URL
+     https://doi.org/10.1038/s42256-023-00708-3.
+[22] Montgomery Bohde, Mrunali Manjrekar, Runzhong Wang, et al. DiffMS: Diffusion generation of molecules
+     conditioned on mass spectra. In Aarti Singh, Maryam Fazel, Daniel Hsu, Simon Lacoste-Julien, Felix Berkenkamp,
+     Tegan Maharaj, Kiri Wagstaff, and Jerry Zhu, editors, Proceedings of the 42nd International Conference on
+     Machine Learning, volume 267 of Proceedings of Machine Learning Research, pages 4737–4756. PMLR, 13–19
+     Jul 2025.
+[23] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina Toutanova. Bert: Pre-training of deep bidirectional
+     transformers for language understanding, 2019. URL https://arxiv.org/abs/1810.04805.
+[24] Robin Winter, Floriane Montanari, Frank Noé, and Djork-Arné Clevert. Learning continuous and data-driven
+     molecular descriptors by translating equivalent chemical representations. Chemical Science, 10:1692–1701, 2019.
+     doi: 10.1039/C8SC04175J. URL http://dx.doi.org/10.1039/C8SC04175J.
+[25] Emmanuel Noutahi, Cristian Gabellini, Michael Craig, et al. Gotta be safe: a new framework for molecular
+     design. Digital Discovery, 3:796–804, 2024. doi: 10.1039/D4DD00019F. URL http://dx.doi.org/10.1039/
+     D4DD00019F.
+
+
+                                                         11
+                                                                                A PREPRINT - F EBRUARY 24, 2026
+
+
+[26] Julia Degen, Christin Wegscheid-Gerlach, Andrea Zaliani, and Matthias Rarey. On the art of compiling and using
+     ‘drug-like’ chemical fragment spaces. ChemMedChem, 3(10):1503–1507, 2008. doi: 10.1002/cmdc.200800178.
+[27] Djork-Arné Clevert, Tuan Le, Robin Winter, and Floriane Montanari. Img2mol–accurate smiles recognition from
+     molecular graphical depictions. Chemical Science, 12(42):14174–14181, 2021.
+[28] Tuan Le, Robin Winter, Frank Noé, and Djork-Arné Clevert. Neuraldecipher–reverse-engineering extended-
+     connectivity fingerprints (ecfps) to their molecular structures. Chemical Science, 11(38):10378–10389, 2020.
+[29] Andrew Campbell, Jason Yim, et al. Generative flows on discrete state-spaces: Enabling multimodal flows with
+     applications to protein co-design. In Ruslan Salakhutdinov, Zico Kolter, Katherine Heller, Adrian Weller, Nuria
+     Oliver, Jonathan Scarlett, and Felix Berkenkamp, editors, Proceedings of the 41st International Conference on
+     Machine Learning, volume 235 of Proceedings of Machine Learning Research, pages 5453–5512. PMLR, 21–27
+     Jul 2024. URL https://proceedings.mlr.press/v235/campbell24a.html.
+[30] Itai Gat, Tal Remez, Neta Shaul, et al. Discrete flow matching. In The Thirty-eighth Annual Conference on Neural
+     Information Processing Systems, 2024. URL https://openreview.net/forum?id=GTDKo3Sv9p.
+[31] Yaron Lipman, Ricky T. Q. Chen, Heli Ben-Hamu, et al. Flow matching for generative modeling. In The Eleventh
+     International Conference on Learning Representations, 2023. URL https://openreview.net/forum?id=
+     PqvMRDCJT9t.
+[32] Xingchao Liu, Chengyue Gong, and Qiang Liu. Flow straight and fast: Learning to generate and transfer
+     data with rectified flow. In The Eleventh International Conference on Learning Representations, 2023. URL
+     https://openreview.net/forum?id=XVjTT1nw5z.
+[33] Michael Samuel Albergo and Eric Vanden-Eijnden. Building normalizing flows with stochastic interpolants. In
+     The Eleventh International Conference on Learning Representations, 2023. URL https://openreview.net/
+     forum?id=li7qeBbCR1t.
+[34] William Peebles and Saining Xie. Scalable diffusion models with transformers. arXiv preprint arXiv:2212.09748,
+     2022.
+[35] Prafulla Dhariwal and Alexander Nichol. Diffusion models beat gans on image synthesis. In M. Ranzato,
+     A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman Vaughan, editors, Advances in Neural Information
+     Processing Systems, volume 34, pages 8780–8794. Curran Associates, Inc., 2021. URL https://proceedings.
+     neurips.cc/paper_files/paper/2021/file/49ad23d1ec9fa4bd8d77d02681df5cfa-Paper.pdf.
+[36] Tuan Le, Julian Cremer, Djork-Arné Clevert, and Kristof T. Schütt. Equivariant diffusion for structure-based
+     de novo ligand generation with latent-conditioning. Journal of Cheminformatics, 17(1):90, May 2025. ISSN
+     1758-2946. doi: 10.1186/s13321-025-01028-x. URL https://doi.org/10.1186/s13321-025-01028-x.
+[37] Jonathan Ho and Tim Salimans. Classifier-free diffusion guidance, 2022. URL https://arxiv.org/abs/2207.
+     12598.
+[38] Kai Dührkop, Louis-Felix Nothias, Markus Fleischauer, et al. Systematic classification of unknown metabolites
+     using high-resolution fragmentation mass spectra. Nature Biotechnology, 39(4):462–471, 2021. doi: 10.1038/
+     s41587-020-0740-8.
+[39] Roman Bushuiev, Anton Bushuiev, Niek F. de Jonge, Adamo Young, et al. Massspecgym: A benchmark for
+     the discovery and identification of molecules. In A. Globerson, L. Mackey, D. Belgrave, A. Fan, U. Paquet,
+     J. Tomczak, and C. Zhang, editors, 38th Conference on Neural Information Processing Systems (NeurIPS 2024),
+     Advances in Neural Information Processing Systems, United States, 2024. NeurIPS Foundation. 38th Conference
+     on Neural Information Processing Systems, NeurIPS 2024 ; Conference date: 09-12-2024 Through 15-12-2024.
+[40] CCTE. Distributed structure-searchable toxicity (dsstox) database, 2019. URL https://epa.figshare.com/
+     articles/dataset/Chemistry_Dashboard_Data_DSSTox_Identifiers_Mapped_to_CAS_Numbers_
+     and_Names/5588566. Version 4.
+[41] David S. Wishart, AnChi Guo, Eponine Oler, Fei Wang, et al. Hmdb 5.0: the human metabolome database for
+     2022. Nucleic Acids Research, 50(D1):D622–D631, 2022. doi: 10.1093/nar/gkab1062.
+[42] Maria Sorokina, Peter Merseburger, Kohulan Rajan, Mehmet Aziz Yirik, et al. Coconut online: Collection of
+     open natural products database. Journal of Cheminformatics, 13(1):2, 2021. doi: 10.1186/s13321-020-00478-9.
+[43] Daniil Polykovskiy, Alexander Zhebrak, Benjamin Sanchez-Lengeling, et al. Molecular sets (moses): A bench-
+     marking platform for molecular generation models, 2020. URL https://arxiv.org/abs/1811.12823.
+[44] Sebastian Böcker and Kai Dührkop. Fragmentation trees reloaded. Journal of Cheminformatics, 8(1):5, 2016. doi:
+     10.1186/s13321-016-0116-8.
+
+
+                                                         12
+                                                                            A PREPRINT - F EBRUARY 24, 2026
+
+
+[45] Yinkai Wang, Xiaohui Chen, Liping Liu, and Soha Hassoun. Madgen: Mass-spec attends to de novo molecular
+     generation, 2025. URL https://arxiv.org/abs/2501.01950.
+[46] Yang Han, Pengyu Wang, Kai Yu, Xin Chen, and Lu Chen. MS-BART: Unified modeling of mass spectra and
+     molecules for structure elucidation. In The Thirty-ninth Annual Conference on Neural Information Processing
+     Systems, 2025. URL https://openreview.net/forum?id=N7Vg94l0gA.
+[47] Fleming Kretschmer, Jan Seipp, Marcus Ludwig, Gunnar W. Klau, and Sebastian Böcker. Coverage bias in small
+     molecule machine learning. Nature Communications, 16(1):554, 2025. doi: 10.1038/s41467-024-55462-w.
+
+
+
+
+                                                      13
+

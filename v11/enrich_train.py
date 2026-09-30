@@ -112,7 +112,7 @@ def main():
     for held in SEEDS:
         va = feat[feat["seed"] == held]
         trn = feat[feat["seed"] != held]
-        clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+        clf = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                              max_leaf_nodes=15, l2_regularization=10.0)
         clf.fit(trn[FEATS], trn["y"])
         p = clf.predict_proba(va[FEATS])[:, 1]
@@ -123,7 +123,7 @@ def main():
             rank = next((i + 1 for i, (_, r) in enumerate(g.iterrows()) if r["cand"] == r["truth"]), 10**9)
             rr.append(1 / rank if rank <= 25 else 0.0)
         print(f"held={held} gbm8={np.mean(rr):.3f}", flush=True)
-    final = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+    final = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                            max_leaf_nodes=15, l2_regularization=10.0)
     final.fit(feat[FEATS], feat["y"])
     with open(f"{PROJECT}/v11/gbm_full.pkl", "wb") as f:

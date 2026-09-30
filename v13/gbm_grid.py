@@ -25,7 +25,7 @@ def evaluate(feat, cols, params):
     for held in SEEDS:
         va = feat[feat["seed"] == held]
         trn = feat[feat["seed"] != held]
-        clf = HistGradientBoostingClassifier(**params)
+        clf = HistGradientBoostingClassifier(random_state=0, **params)
         clf.fit(trn[cols], trn["y"])
         v = va.copy()
         v["s"] = clf.predict_proba(v[cols])[:, 1]

@@ -1,0 +1,1257 @@
+                                                           FRIGID: Scaling Diffusion-Based Molecular Generation
+                                                             from Mass Spectra at Training and Inference Time
+
+
+                                             Montgomery Bohde * 1 2 Hongxuan Liu * 1 Mrunali Manjrekar 1 Magdalena Lederbauer 1 Shuiwang Ji 2
+                                                                           Runzhong Wang 1 Connor W. Coley 1
+
+
+                                                                    Abstract
+
+                                              Tandem mass spectrometry is prominent in scien-
+                                              tific discovery workflows for identifying unknown
+                                              small molecules, yet high-throughput structural
+                                              elucidation remains challenging. While recent
+                                              autoregressive and graph diffusion models have
+
+
+
+
+arXiv:2604.16648v2 [cs.LG] 27 Jul 2026
+                                              shown promise in de novo elucidation, perfor-
+                                              mance remains limited by poor scalability during
+                                              both training and inference time. In this work,
+                                              we present FRIGID, a framework with a novel
+                                              diffusion language model that generates molec-
+                                              ular structures conditioned on mass spectra via
+                                              intermediate fingerprint representations and de-
+                                              termined chemical formulae, training at the scale                Figure 1. Top-1 exact-match accuracy as a function of training
+                                              of hundreds of millions of unlabeled structures.                 compute on the NPLIB1 dataset. Our FRIGID-base exhibits strong
+                                              We then demonstrate how forward fragmentation                    scaling behavior, further amplified by inference-time scaling. Data
+                                                                                                               points correspond to models trained on increasingly large corpora
+                                              models enable inference-time scaling by identi-                  of unlabeled molecules.
+                                              fying spectrum-inconsistent fragments and refin-
+                                              ing them through targeted remasking and denois-                  1. Introduction
+                                              ing. While FRIGID already achieves strong per-
+                                              formance with its diffusion base, inference-time                 Tandem mass spectrometry (MS/MS) is a cornerstone of
+                                              scaling significantly improves its accuracy, sur-                modern analytical chemistry, enabling large-scale profiling
+                                              passing 18% Top-1 accuracy on the challenging                    of small molecules in human health (Gentry et al., 2024),
+                                              MassSpecGym benchmark and tripling the Top-                      drug discovery (Prudent et al., 2021), and environmental
+                                              1 accuracy of the leading methods on NPLIB1.                     chemistry (Tian et al., 2021), yet determining the chemical
+                                              Further empirical analyses show that FRIGID ex-                  structure from an observed spectrum remains difficult. Most
+                                              hibits log-linear performance scaling with increas-              deployed identification pipelines are retrieval-based, match-
+                                              ing inference-time compute, opening a promis-                    ing a query spectrum against libraries of experimental or
+                                              ing new direction for continued improvements in                  simulated spectra, or searching a structure database using
+                                              de novo structural elucidation. FRIGID code is                   predicted molecular fingerprints. Among them, retrieval-
+                                              publicly available at https://github.com/                        based spectrum simulators have demonstrated strong empir-
+                                              coleygroup/FRIGID.                                               ical accuracy (Wang et al., 2025a) and gained wide adop-
+                                                                                                               tion (Wang et al., 2021). However, retrieval pipelines funda-
+                                                                                                               mentally inherit the coverage limits of the underlying chem-
+                                           *
+                                                                                                               ical libraries (e.g., PubChem) and cannot propose novel
+                                             Equal contribution 1 Massachusetts Institute of Technology,       structures unless combined with an orthogonal method for
+                                         Cambridge, MA, United States 2 Texas A&M University, College
+                                         Station, TX, United States. Correspondence to: Runzhong Wang          molecular generation or enumeration (Qiang et al., 2026).
+                                         <runzhong@mit.edu>, Connor W. Coley <ccoley@mit.edu>.                 De novo elucidation models address this limitation by gen-
+                                                               rd
+                                         Proceedings of the 43 International Conference on Machine             erating molecular structures directly from spectra. With the
+                                         Learning, Seoul, South Korea. PMLR 306, 2026. Copyright 2026          pioneering development of end-to-end models (Shrivastava
+                                         by the author(s).                                                     et al., 2021; Butler et al., 2023; Litsa et al., 2023), two-stage
+
+                                                                                                           1
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+architectures have demonstrated promising empirical perfor-          Our contributions are summarized as follows:
+mance. These methods typically consist of an encoder that
+                                                                     (1) We present FRIGID, Fragment Refinement via
+first translates spectra into molecular fingerprints (Dührkop
+                                                                     ICEBERG-Guided Inference Diffusion, the first diffusion
+et al., 2015; Goldman et al., 2023a), followed by a decoder
+                                                                     language model (DLM) framework for de novo structural
+that translates fingerprints into molecular structures (Le
+                                                                     elucidation (Fig. 2a). Our DLM backbone, FRIGID-base,
+et al., 2020; Stravs et al., 2022; Ucak et al., 2023; Bohde
+                                                                     generates 1D SAFE sequences conditioned on chemical
+et al., 2025). Fingerprint-to-molecule decoding is a critical
+                                                                     formulae and utilizes MIST to translate spectra into finger-
+step with ample room for improvement. Unlike molecular
+                                                                     prints (Goldman et al., 2023a). By adopting a language-
+generation tasks in drug discovery campaigns, the core chal-
+                                                                     based architecture, FRIGID-base can be readily pretrained
+lenge of exact reconstruction in elucidation requires strong
+                                                                     on structure-only libraries encompassing hundreds of mil-
+conditioning, self-correction, and robustness to fingerprint
+                                                                     lions of structures. To further constrain the search space by
+prediction errors.
+                                                                     molecular formula, a unique aspect of the MS/MS context,
+Existing fingerprint-to-molecule decoders largely repurpose          we use NGBoost (Duan et al., 2020) to model the distribu-
+architectures originally developed for de novo drug dis-             tion of sequence lengths for a given molecular formula. In
+covery, leaving the distinctive challenges and structure of          experiments, we demonstrate that FRIGID-base achieves
+MS/MS data insufficiently addressed. Autoregressive mod-             strong performance even without any inference-time scaling
+els (Stravs et al., 2022; Han et al., 2025; Neo et al., 2025)        and is significantly faster than peer diffusion models.
+condition on predicted fingerprints to generate SMILES se-
+                                                                     (2) We then demonstrate how forward fragmentation mod-
+quences, whereas fragment-based representations—such as
+                                                                     els such as ICEBERG can be leveraged for spectrum-
+SAFE (Noutahi et al., 2023)—remain comparatively under-
+                                                                     structure cycle consistency by simulating spectra of gen-
+explored despite their natural alignment with the fragment-
+                                                                     erated molecules, identifying hallucinated fragments (i.e.,
+centric nature of both fingerprints and MS/MS spectra. Dis-
+                                                                     mistaken subgraphs) that lack correspondence to experimen-
+crete graph diffusion decoders (Bohde et al., 2025; Wang
+                                                                     tal signals, and performing targeted remasking of subgraphs
+et al., 2025b) introduce stronger inductive biases, but suf-
+                                                                     responsible for these inconsistencies (Fig. 2b). This en-
+fer from empirically slow inference. Although fingerprint-
+                                                                     ables sample-efficient inference-time scaling that prioritizes
+structure pairs can be synthesized at virtually unlimited
+                                                                     inconsistent subgraphs, rather than simply increasing the
+scale, enabling large-scale training as a promising path for-
+                                                                     number of diffusion steps or random masking and denoising.
+ward, systematic exploration of scaling effects remains lim-
+ited to preliminary evidence in Bohde et al. (2025). Finally,        (3) FRIGID achieves significant performance improvements
+existing de novo generators lack mechanisms for automatic            over both diffusion and autoregressive baselines on estab-
+correction of mistaken subgraphs, a capability that is crucial       lished de novo generation benchmarks. On the NPLIB1
+in the MS/MS context because a single token error typically          data (Dührkop et al., 2021), FRIGID triples the Top-1 exact-
+leads to a wrong structural prediction.                              match accuracy and achieves improved structural similarity
+                                                                     even in cases where the true molecule is not recovered.
+To overcome these limitations, we introduce a diffusion lan-
+                                                                     On the challenging MassSpecGym benchmark (Bushuiev
+guage model that jointly enables scalable training, efficient
+                                                                     et al., 2024), FRIGID offers substantial performance im-
+inference, fragment-based generation, and inference-time er-
+                                                                     provements, including a 70% relative boost in Top-1 exact-
+ror correction. As shown in Fig. 1, our architecture exhibits
+                                                                     match accuracy. This work represents foundational progress
+favorable scaling behavior with increasing training data. In
+                                                                     towards the long-standing goal of computational structural
+addition, we propose an inference-time scaling strategy that
+                                                                     elucidation from mass spectra.
+automatically corrects erroneous substructures—a capabil-
+ity absent from all existing de novo generation methods.
+These design choices are motivated by the limitations of             2. Related Work
+prior backbones: inference-time correction is nontrivial for
+                                                                     Generative molecular design. Molecular representation is
+standard autoregressive models, and graph diffusion models
+                                                                     an important design factor for modern molecular generators.
+incur prohibitively slow inference (Table 2). Moving be-
+                                                                     One family of models chooses linearized representations,
+yond naive inference-time scaling approaches such as longer
+                                                                     which are convenient and fit soundly with infrastructures
+denoising trajectories and stronger guidance (Karras et al.,
+                                                                     developed for natural language. SMILES (Weininger, 1988)
+2022; Ma et al., 2025), we leverage forward fragmentation
+                                                                     enables the use of sequence models (Gómez-Bombarelli
+models, including ICEBERG (Wang et al., 2025a), which
+                                                                     et al., 2018; Segler et al., 2018). Fragment-based alter-
+attribute predicted spectral peaks to specific molecular frag-
+                                                                     natives, such as SAFE (Noutahi et al., 2023), support con-
+ments. This spectral consistency signal enables targeted
+                                                                     strained editing and more stable generation in large chemical
+masking and re-denoising of inconsistent subgraphs, rather
+                                                                     spaces. Efforts to approach de novo structural elucidation
+than post hoc filtering of generated candidates.
+
+                                                                 2
+                   FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+  (a)                                         length                               [BOS] [M] [M] [M] ... [M] [M] [M] [M] [EOS]
+                      Precursor              sampling
+                      m/z: 194.1906 Chemical
+
+intensity
+                                                      NGBoost                              Self-
+                                     formula                             Formula                                                    [BOS] [M] [M] [M] ... c        [M] [M] [M] [EOS]
+                                                                                         Attention             Multi-head
+                                                                         Encoder          Blocks                                    [BOS] [M] [M] [M] ... c        [M] [M] [M] [EOS]
+                                                                                                               Attention
+                            m/z                                                                                 Blocks              [BOS] [M] [M] [M] ... c        [M]     = [M] [EOS]
+             Experimental
+                                                                                                                                    [BOS] [M] [M] [M] ... c        [M] =       O [EOS]
+               spectrum
+                                                                                      Self-
+                        Spectrum to Fingerprint                         Fingerprint
+                                                                                    Attention
+                               Encoder                                   Encoder                                FFN Layers          [BOS] [M]   1 [M] ... c            C   =   O [EOS]
+                                                                                     Blocks
+                                                                                                                                    [BOS] O     1    C ... c           C   =   O [EOS]
+                                                                          Fingerprint to SAFE Decoder:
+
+
+  (b) [BOS] [M] [M] [M] [M] [M] ... [M] [M] [M] [M] [EOS]                   Exp.                                 Identify inconsistent fragments and
+                                                                                                                    apply inference-time renoising
+                                                                                                          m/z
+                                FRIGID
+                                                                O   O       Sim.
+                                                                                                                                                              O        O
+                                                                                                     [BOS] O    1    [M] [M] [M] ... [M] C      =   O [EOS]
+            [BOS] [M] [M]   c   C [M] ... [M] C [M] [M] [EOS]
+                                                                                       Simulate
+                                FRIGID                                                 fragments                           FRIGID
+                                                                O   O
+                                                                                       and intensities
+                                                                                                                                                                   O             O
+                                                                                                     [BOS] O    1    [M]   c   O ... [M] C      =   O [EOS]
+            [BOS] [M] [M]   c   C [M] ... [M] C   =   O [EOS]
+
+                                FRIGID                                                                                     FRIGID                                 HO
+
+
+                                                                O   O                                                                                              O             O
+
+            [BOS] O                                                                                  <BOS> O     1    c    c   O ... C   C      =   O [EOS]
+                       1    c   C   c ... c   C   =   O [EOS]
+                                                                                                                                                                  HO
+
+
+
+
+Figure 2. (a) FRIGID-base includes a masked diffusion language model (MDLM) that generates SAFE (Noutahi et al., 2023) sequences.
+The MDLM decoder is conditioned on a precursor formula (C) and a MIST (Goldman et al., 2023a)-predicted molecular fingerprint (f ),
+injected via cross-attention. SAFE sequence lengths are predicted using NGBoost (Duan et al., 2020). Generated structures are first
+filtered by chemical formula match, then ranked by Tanimoto similarity to the intermediate fingerprint f . (b) The inference-time scaling
+pipeline enforces spectrum-structure consistency. ICEBERG model (Wang et al., 2025a) predicts simulated spectra for all generated
+structures. Discrepancies between the simulated and experimental spectra (hallucinations) are used to mask inconsistent tokens, which are
+then refined via targeted re-denoising.
+
+using these linearized representations (Stravs et al., 2022;                                lar generation of SAFE sequences in the context of drug
+Litsa et al., 2023; Butler et al., 2023; Shrivastava et al., 2021)                          discovery. These advancements establish the foundation for
+have primarily been autoregressive in nature.                                               the core architecture of FRIGID-base.
+Diffusion models (Sohl-Dickstein et al., 2015; Ho et al.,                                   Structural elucidation from MS/MS. Most existing
+2020) have become a dominant paradigm for generative                                        MS/MS identification pipelines remain retrieval-based.
+modeling and have been adapted to discrete and graph-                                       Classical methods search either experimental spectral li-
+structured domains (Austin et al., 2023; Vignac et al., 2023),                              braries or larger structure databases using tandem MS, often
+demonstrating beneficial utility for molecular machine learn-                               by computing fragmentation trees to explain fragment rela-
+ing. These methods are particularly well-suited for under-                                  tionships (Böcker & Dührkop, 2016), predicting molecular
+specified conditional generation, where many valid outputs                                  fingerprints from spectra as in CSI:FingerID (Dührkop et al.,
+exist for a single condition—a common setting in chemical                                   2015), or simulating spectra from candidate structures as
+design. Theoretically, these models enable inference-time                                   in CFM-ID and later neural predictors (Wang et al., 2021;
+scaling through iterative renoising and denoising (Li et al.,                               Young et al., 2024; Wang et al., 2025a). These approaches
+2023; 2025); however, it is computationally burdensome for                                  are highly effective when the true molecule or a close ana-
+graph data structures compared to linearized counterparts                                   log is represented among the candidates, but they cannot
+(e.g., SMILES).                                                                             directly recover structures absent from the reference set.
+Diffusion language models (DLMs) (Li et al., 2022; Austin                                   Intermediate prediction modules have therefore become cen-
+et al., 2023; Sahoo et al., 2024) offer a balanced trade-off in                             tral building blocks of modern elucidation pipelines. Molec-
+efficiency while preserving the flexibility for inference-time                              ular formula inference methods, including fragmentation-
+scaling. An exemplary DLM, GenMol (Lee et al., 2025),                                       tree-based approaches and learned models such as MIST-
+demonstrates strong capabilities in unconstrained molecu-                                   CF and BUDDY (Goldman et al., 2023b; Xing et al.,
+
+
+                                                                                        3
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+2023), help constrain the candidate search space. Finger-               our network learns pθ (x0 | f , C).
+print prediction from spectra, originally popularized by
+                                                                        Masked diffusion language modeling. To parameterize
+CSI:FingerID (Dührkop et al., 2015) and more recently
+                                                                        pθ (x0 | f , C) non-autoregressively, we adopt a BERT-style
+advanced by transformer-based spectrum encoders such as
+                                                                        masked diffusion language model (MDLM) following De-
+MIST (Goldman et al., 2023a), converts MS/MS into struc-
+                                                                        vlin et al. (2019); Lee et al. (2025), as the denoiser over
+tural descriptors that are straightforward to match against
+                                                                        SAFE tokens. Intuitively, MDLM defines a forward cor-
+chemical databases or pass to downstream generators.
+                                                                        ruption process that gradually converts each token into a
+To move beyond retrieval, de novo generators attempt to                 [MASK], and learns a reverse denoiser that imputes masked
+construct molecular structures from spectra themselves. Ex-             positions conditioned on the unmasked context and, in our
+isting spectrum-to-molecule models span end-to-end ap-                  case, the spectrum-derived conditions as well.
+proaches, such as MassGenie, Spec2Mol, and MS2Mol,
+                                                                        Let x0 denote a clean SAFE token sequence. For a noise
+that directly map spectra to molecular strings (Shrivastava
+                                                                        level t ∈ [0, 1], the forward process produces xt by inde-
+et al., 2021; Litsa et al., 2023; Butler et al., 2023), as well
+                                                                        pendently masking tokens with probability 1 − α(t):
+as the now-dominant two-stage spectra-to-fingerprint-to-
+structure paradigm built around learned spectrum encoders                                         L
+                                                                                                  Y
+such as MIST (Goldman et al., 2023a). Representative ex-                        qt (xt | x0 ) =         qt (xt,i | x0,i ),
+amples include MSNovelist, which pairs CSI:FingerID with                                          i=1
+an autoregressive SMILES decoder (Stravs et al., 2022),                                                                       (2)
+                                                                                                 
+                                                                                                 α(t),
+                                                                                                           xt,i = x0,i ,
+pipelines using general fingerprint decoders such as Neu-
+                                                                              qt (xt,i | x0,i ) = 1 − α(t), xt,i = [MASK],
+raldecipher or MolForge (Le et al., 2020; Ucak et al., 2023;                                     
+                                                                                                   0,       otherwise,
+                                                                                                 
+Neo et al., 2025), graph-based diffusion systems such as
+DiffMS (Bohde et al., 2025), scaffold-guided generators                                                                    
+                                                                        where α(t) = exp (1 − t) log αmax + t log αmin is a
+such as MADGEN (Wang et al., 2025b), and unified se-
+                                                                        log-linear exponential noise schedule with αmax = 1 and
+quence models such as MS-BART (Han et al., 2025). In
+                                                                        αmin = 10−3 . The reverse model is a conditional denoiser
+parallel, forward structure-to-spectrum models such as ICE-
+                                                                        that predicts the original tokens:
+BERG provide strong in silico spectral prediction for can-
+didate reranking (Wang et al., 2025a). FOAM (Manjrekar                                                     L
+                                                                                                           Y
+et al., 2026) further shows that forward fragmentation infor-                   pθ (x0 | xt , f , C) =           pθ (x0,i | xt , f , C),   (3)
+mation can benefit inverse de novo generation. FRIGID com-                                                 i=1
+bines these two lines: it adopts the modern de novo spectra-
+                                                                        implemented as a Transformer encoder that outputs per-
+to-fingerprint-to-structure paradigm, while also leveraging
+                                                                        token categorical logits over V. Our network has Nlayers =12
+the forward-modeling capability of ICEBERG inside the
+                                                                        Transformer blocks, hidden size d=896, and H=14 atten-
+generative loop for targeted iterative refinement rather than
+                                                                        tion heads; the maximum token length is set to 256.
+only for post hoc scoring.
+                                                                        Training objective. Following MDLM (Sahoo et al., 2024),
+3. FRIGID-Base Diffusion Model                                          we train by sampling t ∼ U (0, 1) and minimizing the
+                                                                        masked-token negative log-likelihood (ignoring [PAD]):
+3.1. Diffusion language generation
+                                                                         LMDLM (θ) = Ex0 ∼D, t∼U (0,1) Ext ∼qt (·|x0 )
+As shown in Fig. 2, we cast de novo structural elucidation                          "                                           #
+from MS/MS as a discrete conditional generation problem.
+                                                                                            X                                      (4)
+                                                                                   · −                log pθ (x0,i | xt , f , C) .
+Given a mass spectrum S, FRIGID-base models a condi-                                       i:xt,i =[MASK]
+tional distribution over SAFE strings (Noutahi et al., 2023),
+                                                                        In practice, we use continuous-time training with antithetic
+      pθ (x0 | S),      x0 = (x0,1 , . . . , x0,L ) ∈ V L ,   (1)       time sampling for variance reduction and an exponential
+                                                                        moving average (EMA) of model parameters for stability.
+where x0 is a SAFE string tokenized by byte-pair encoding
+(BPE), decomposing the string into frequently occurring                 Inference. To sample from the model, we first predict the
+substructure fragments, and V is the resulting fixed vocabu-            target length L (details for length prediction are in Sec. 3.2)
+lary containing additional special tokens: [BOS], [EOS],                and initialize x1 from a masked prior. For each step t,
+[MASK], and [PAD]. In practice, we turn S into compact                  the conditional denoiser predicts logits zt,i ∈ R|V| for
+conditioning signals: a chemical formula C inferred from                each i in masked positions Mt = {i : xt,i = [MASK]},
+MS1 and precursor information, and a spectrum-derived fin-              inducing a categorical distribution π t,i = softmax(zt,i )
+gerprint f predicted by MIST (Goldman et al., 2023a) (see               with components πt,i,v for each v ∈ V. We draw provi-
+details in Sec. 3.2). Instead of learning pθ (x0 | S) directly,         sional tokens x̃t,i ∼ Cat(π t,i ) and compute a confidence
+
+                                                                    4
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+score pt,i = maxv∈V πt,i,v (subsequently perturbed with                      Token length prediction. The diffusion process requires
+annealed Gumbel noise to yield p̂t,i ), then unmask the sin-                 a target length L to initialize the masked sequence x1 .
+gle most confident position i∗ = arg maxi∈Mt p̂t,i while                     We learn a formula-to-length predictor pϕ (L | C) using
+keeping all other positions masked (Sahoo et al., 2024; Lee                  NGBoost (Duan et al., 2020), which uses a boosted en-
+et al., 2025). After L steps, we decode the resulting SAFE                   semble of regression trees with natural-gradient updates
+sequence and deterministically convert it to SMILES, from                    to predict the parameters of a conditional Normal distri-
+which we generate RDKit objects for evaluation. Inference-                   bution from an element-count feature vector a(C) ∈ R|E| .
+time scaling design choices are discussed in Sec. 4.                         This is well-suited as a light-weight model for the length
+                                                                             prediction task, where L is inherently uncertain (multi-
+3.2. Model architecture                                                      ple structures can share C but yield different tokeniza-
+                                                                             tion lengths). At inference, we obtain      (µϕ (C), σϕ (C))
+Our FRIGID-base architecture couples (i) an MS/MS en-                                                               
+                                                                             and sample L̃ ∼ N µϕ (C), λ σϕ2 (C) , L = round(L̃),
+coder that produces conditioning fingerprint signals and
+                                                                             clipped to a valid range, and create a fully-masked
+(ii) a diffusion language backbone that decodes SAFE se-
+                                                                             x1 = [[BOS], [MASK], . . . , [MASK], [EOS]] with L+2
+quences under these conditions.
+                                                                             tokens (including [BOS]/[EOS]), before padding to the
+Conditioning signals from MS/MS. Given a spectrum S,                         batch maximum. The scale factor λ controls the sampling
+we use the MIST encoder (Goldman et al., 2023a) to predict                   variance around µϕ (C), trading off exploration of plausible
+f , a 4096-bit radius-2 Morgan fingerprint (Rogers & Hahn,                   lengths against wasted compute on implausible lengths.
+2010). The chemical formula C can typically be inferred
+upstream from high-resolution MS1 measurements using                         4. Cycle-Consistent Inference-Time Scaling
+dedicated formula annotation tools (Böcker & Dührkop,
+2016; Xing et al., 2023; Goldman et al., 2023b).                             While our diffusion decoder provides a strong prior over
+                                                                             valid chemical structures, the model may still generate struc-
+Conditioner embedding and cross-attention. We encode
+                                                                             tures that are inconsistent with the observed spectrum. To
+and concatenate both C and f into a single conditioning
+                                                                             mitigate this, we introduce an iterative refinement strategy
+embedding sequence Z ≜ [Z(c) , Z(f ) ] and inject it via
+                                                                             for spectrum-structure cycle consistency (Fig. 3).
+cross-attention in every multi-head Transformer block. For
+the formula, we represent C as a count vector y ∈ N|E| over
+                                                                             4.1. Forward fragmentation simulation
+a fixed element set E (|E|=30 in our implementation) and
+embed each element type together with its count, yielding                    ICEBERG (Wang et al., 2025a) is a state-of-the-art forward
+a fixed-length formula embedding sequence Z(C) ∈ R|E|×d                      fragmentation model that predicts tandem mass spectra from
+and a padding mask for zero-count elements.                                  molecular structures, working in the opposite direction of
+For the fingerprint f , we identify a set of active bit in-                  FRIGID. Driving its strong empirical accuracy in spectral
+dices by applying a softmax function to the MIST out-                        prediction, ICEBERG simulates spectra by predicting the
+put logits and selecting those exceeding a threshold of                      most likely fragment substructures of the candidate struc-
+ϑ = 0.1871 . We retain a maximum of 256 indices following                    ture and scores each fragment with a predicted intensity.
+the canonical bit order, and map each index to a learnable                   Formally, an ICEBERG simulated spectrum is a set of k
+embedding. We then apply 3 layers of self-attention with-                    tuples Ssim = {(Gj , mj , Ij )}kj=1 , one tuple per peak in the
+out positional encodings to these embeddings, making the                     simulated spectrum. For each peak j, Gj is a fragment (sub-
+network permutation-invariant while learning interactions                    graph) of the original molecule, mj is the mass-to-charge
+among active substructures, yielding Z(f ) ∈ RLf ×d with                     ratio of the fragment Gj , and Ij is the predicted intensity.
+Lf ≤ 256 and a padding mask. In our cross-attention layer,                   Our core insight is that we can use ICEBERG’s predicted
+as shown in Fig. 2, we concatenate Z(C) and Z(f ) along                      fragments to determine which atoms in a generated structure
+the conditioning-length dimension (and concatenate their                     are incompatible with the observed spectrum.
+padding masks accordingly), resulting in a total condition-
+ing length Lcond = |E| + Lf . Each cross-attention layer is                  4.2. ICEBERG-guided error refinement
+followed by an output projection and residual layer normal-                  We run inference-time scaling for R rounds. In the
+ization (Vaswani et al., 2017).                                              first round, we simply generate B samples from the
+   1
+     The threshold ϑ is set at 0.187 as a prior-informed calibration         FRIGID-base with different sequence lengths Li ∼
+strategy to ensure that the overall activation density of the MIST           N(µϕ (C), λ σϕ2 (C)). In all future rounds, we use ICEBERG
+model’s predicted fingerprints aligns with the empirical frequency           for targeted remasking and denoising.
+of on-bits in the validation set, thereby optimizing the trade-off be-
+tween precision and recall through distributional alignment without          Let Xr−1 be the set of all generated molecules in rounds
+any test-set information leakage.                                            1, . . . , r − 1. In each round r > 1, we select the top M
+
+
+                                                                         5
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+                                                                                                              OH
+                             FRIGID-base                                                                                            Compute atom consistency scores
+                                                                                                                   O
+                                                                                                              O
+                                                                                                                                                                    OH                  1.0
+
+                                                                        ICEBERG                                                                               O
+                                                                                                                             Unmatched
+                                                                                              Sim.                           peaks
+                                                        SAFE sequence from round 0                                                                                    Atom scores           Score
+                                                                                                                                                                                        0
+
+    Round 0                                                [BOS] O   = C 1 C C c   O [EOS]
+
+                                                                                              Exp.                                     [BOS] O   = C 1 C C c             O [EOS]
+                                                           [BOS] O C   1 C C C c   O [EOS]                                                                           Token scores       -1.0
+
+                                                           [BOS] O   = C c 2 c c   O [EOS]
+                                                           [BOS] O   = C c 2 c c   O [EOS]
+                                                                                                                                                                  Randomly mask tokens
+                                                         New sequences for round 1
+    Round 1                                                                                                                                                       according to token scores
+                                                                                                                   [BOS] O [M][M][M] C C    c      O [EOS]
+                                                                                             FRIGID-base           [BOS] O   = C 1 [M][M] c        O [EOS]
+                                                                                                                   [BOS] [M][M] C   1 C C c       [M] [EOS]
+
+
+                                                                            Single expansion step within inference time scaling
+
+Figure 3. Mechanism of ICEBERG-guided inference-time scaling. Left: the process first comprises a beam search, starting with structures
+generated by FRIGID-base (Round 0). Right: at each expansion step, we use ICEBERG to simulate a mass spectrum, compare it
+against the experimental spectrum to identify hallucinated peaks—peaks present in simulation but missing in the experiment. Atom-wise
+consistency scores (Sa ) are collected based on an atom’s presence in fragments corresponding to matched or hallucinated peaks (Eq. (5)).
+These scores are aggregated at the token-level to define a masking probability Pmask (Eq. (6)), to remask inconsistent substructures. The
+masked sequence is then re-denoised by FRIGID-base to generate refined candidates, constructing candidates for Round 1.
+
+Algorithm 1 ICEBERG-Guided Inference-Time Scaling                              20 ppm (parts-per-million) tolerance as Pmatch , and (with
+  Input: Observed Spectrum Sobs , MIST-Predicted Fin-                          slight abuse of notation) we label all unmatched peaks
+  gerprint f , Rounds R, Batch size B, Top-M count M ,                         Phalluc = Sobs \ Pmatch as hallucinations.
+  Number of renoised samples N                                                 We then compute a consistency score Sa for every atom a
+  Xpool ← ∅                                                                                (i)
+                                                                               in sample x0 . Let atoms(Gj ) be the set of atoms involved
+  for r = 1 to R do                                                            in fragment Gj . Atoms can be (and usually are) part of
+    if r = 1 then                                                              multiple fragments. We define the score for each atom a by
+       Sample lengths Li ∼ N (µϕ (C), λσϕ2 (C))                                aggregating over the fragments a is in:
+       Xpool ← Generate B samples Xnew using FRIGID-
+       base with lengths Li                                                                                  X
+                                                                                                     Sa =                    I [a ∈ atoms(Gj )] · δ(Gj ),                                           (5)
+    else
+                                                                                                            Gj ∈Ssim
+       Xtop ← arg maxm TaniSim(f p(x), f )
+                   x∈Xpool
+       Xnew ← ∅                                                                where δ(Gj ) is a reward function that assigns +1 if Gj ∈
+       for x ∈ Xtop do                                                         Pmatch and −γ if Gj ∈ Phalluc . Intuitively, atoms that fre-
+         Ssim ← ICEBERG(x)                                                     quently participate in spectral-consistent peaks accumulate
+         Compute atom consistency scores Sa using Ssim                         positive scores while atoms in hallucinated fragments ac-
+         and Sobs using Eq. (5)                                                cumulate negative scores. The parameter γ allows us to
+         Calculate token masking probabilities Pmask from                      tradeoff between rewarding matched atoms and penalizing
+         Sa using Eq. (6)                                                      spectrum-inconsistent atoms. We then normalize the atom-
+         Construct N renoised inputs x̃ by masking x us-                       wise consistency scores such that S̃a ∈ [−1, 1].
+         ing Pmask                                                             Since our FRIGID-base operates over SAFE strings and
+         Xnew ← Xnew ∪ Denoise(x̃|f )                                          each token may cover multiple atoms (e.g. in a ring or func-
+       end for                                                                 tional group) or similarly connect them (e.g., bond order
+    end if                                                                     tokens), we must aggregate atom consistency scores into
+    Xpool ← Xpool ∪ Xnew                                                       token-level consistency scores. Let Aj be the set of atoms as-
+  end for                                                                      sociated with token xj . The score for token xj is determined
+  return Xpool                                                                 by the worst atom it covers, Stoken (j) = mina∈Aj S̃a .
+                                                                               This min aggregation ensures that if any part of the token is
+                                                                               predicted to be responsible for a hallucinated fragment, it
+molecules Xtop ranked by Tanimoto similarity to the MIST-                      will still receive a negative score. Finally, we convert token
+                                           (i)
+predicted fingerprint f . For each sample x0 ∈ Xtop , we                       scores into masking probabilities Pmask (j) for each token:
+then use ICEBERG to simulate the spectrum Ssim and at-                                          (
+tempt to match the simulated peaks in Ssim to peaks in                                           pmax · |Stoken (j)|                                          if Stoken (j) ≤ 0,
+                                                                                    Pmask (j) =                                                                                                     (6)
+the observed spectrum Sobs = {(mobs , Iobs )}li=1 within a                                       0                                                            if Stoken (j) > 0.
+
+                                                                           6
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+           (i)                                              (i)
+For each x0 ∈ Xtop , we construct N renoised inputs xt                 Peer methods. Prior works fall into two categories:
+for refinement by randomly and independently masking                   Spec2Mol (Litsa et al., 2023), MIST + Neuraldecipher (Le
+                  (i)                                                  et al., 2020; Bohde et al., 2025), MIST + MolForge (Neo
+each token xj ∈ x0 with probability Pmask (j). These new
+samples are then denoised with our backbone and added to               et al., 2025), MIST + MSNovelist (Stravs et al., 2022), and
+Xr to be ranked in the following round. The full FRIGID                MS-BART (Han et al., 2025) are all autoregressive mod-
+inference-time scaling approach is detailed in Algorithm 1.            els that predict SMILES/SELFIES sequences from spec-
+                                                                       tra, while MADGEN (Wang et al., 2025b), DiffMS (Bo-
+                                                                       hde et al., 2025), and FOAM (Manjrekar et al., 2026) are
+5. Experiments                                                         graph-based approaches, with FOAM further augmenting
+5.1. Evaluation metrics                                                a forward-model-guided iterative optimization pipeline us-
+                                                                       ing DiffMS-generated + PubChem formula-matched seed
+We adopt the standard de novo generation metrics of                    candidates. Additionally, all baselines except for Spec2Mol
+Bushuiev et al. (2024) used by all recent works (Wang et al.,          and MADGEN rely on MIST (Goldman et al., 2023a) to
+2025b; Bohde et al., 2025; Han et al., 2025):                          extract dense structural features from spectra.
+   • Top-k accuracy: measures whether the true molecule                Because Neo et al. (2025) do not report results on NPLIB1
+     is ranked in the Top-k predictions                                and do not have publicly available code, we re-implemented
+   • Top-k maximum Tanimoto similarity: measures the                   MIST + MolForge and report our reproduced results on
+     highest structural similarity to the true molecule among          both benchmarks. In Appendix A.3, we further analyze a
+     the Top-k predictions                                             batched-inference bug that can substantially inflate MIST
+   • Top-k minimum MCES: measures the smallest graph                   + MolForge results on MassSpecGym and clarify why the
+     edit distance (maximum common edge subgraph) to                   corrected numbers reported in Table 1 are the appropriate
+     the true molecule among the Top-k predictions                     comparison. Mismetti et al. (2026) recently developed a
+In Appendix A.1, we report additional close/meaningful                 test-time tuning strategy for de novo structural elucidation;
+match metrics established by Butler et al. (2023).                     however, we exclude this method from comparison because
+                                                                       it pretrains its model on a dataset (Alberts et al., 2024)
+5.2. Datasets and baselines                                            without confirmation that NPLIB1 and MassSpecGym test
+                                                                       structures are excluded during training. We provide more
+Datasets and benchmarks. Following prior works, we                     details on this exclusion in Appendix A.6. We also note that
+evaluate FRIGID on the NPLIB1 (Dührkop et al., 2021)                  their test-time tuning is orthogonal to our inference-time
+and MassSpecGym (Bushuiev et al., 2024) benchmarks.                    scaling, and future works may benefit from combining both
+The MassSpecGym benchmark poses a challenging out-of-                  ideas.
+distribution shift with a scaffold-based test split that ensures
+no training molecules have an MCES < 10 compared to any                5.3. Results and Discussion
+test molecules. While historically some works also evalu-
+ated on NIST datasets (NIST, 2023), since this reference               Main results. As seen in Table 1, both FRIGID-base and
+library is not publicly available, we focus on these two open-         FRIGID achieve leading performance across both bench-
+source libraries to enable comparison to the most recent               marks, achieving state-of-the-art results across 9 of the 12
+works. In line with peer methods, we focus on the setting              metrics. FRIGID triples the Top-1 accuracy of all previ-
+where the ground-truth chemical formula is provided.                   ous works on NPLIB1 and achieves improved structural
+                                                                       similarity even in cases where the true molecule could not
+FRIGID training. While prior works typically train for                 be recovered. On the more challenging MassSpecGym
+many epochs on a smaller dataset such as the 2.8M unla-                benchmark, FRIGID is the first to surpass 18% Top-1 accu-
+beled molecules used by DiffMS and MIST + MolForge,                    racy. While FRIGID achieves an improvement of over 7×
+we draw from LLM pretraining and train for a single epoch              in exact-match accuracy compared to DiffMS and FOAM,
+on a large corpus up to hundreds of millions of unlabeled              these graph-based models still maintain competitive per-
+structures. Specifically, we train our FRIGID-base DLM on              formance on the graph-based distance metric, MCES. In
+up to 1 billion structures from Noutahi et al. (2023). We en-          Appendix A.1 and Appendix A.2–A.5, we report additional
+sure that all NPLIB1 and MassSpecGym test and validation               close/meaningful-match metrics, inference-time scaling ab-
+molecules are removed from the training set to ensure our              lations, robustness analyses, and direct spectra-conditioning
+model never sees even unlabeled evaluation structures. ICE-            ablations. Our DLM achieves strong performance on both
+BERG models, which are used for inference-time scaling,                benchmarks by itself; however, our proposed inference-time
+are trained only on the training subset of each dataset. More          scaling offers significant performance improvements across
+details about model training are provided in Appendix B.2.             all benchmarks and metrics.
+
+
+                                                                   7
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Table 1. De novo structural elucidation performance on NPLIB1 (Dührkop et al., 2021) and MassSpecGym (Bushuiev et al., 2024)
+datasets, assuming known chemical formulae. The best performing model for each metric is bold and the second best is underlined.
+† indicates our implementations of baseline approaches without public code. Methods are approximately ordered by performance.
+
+                                                        Top-1                                       Top-10
+      Model                             Accuracy ↑     MCES ↓        Tanimoto ↑     Accuracy ↑     MCES ↓        Tanimoto ↑
+                                                                NPLIB1
+      Spec2Mol                            0.00%         48.57           0.12           0.00%         17.58          0.16
+      MADGEN                              2.10%         20.56           0.22           2.39%         12.69          0.27
+      MIST + Neuraldecipher               2.32%         10.26           0.35           6.11%          8.53          0.43
+      MIST + MolForge†                    2.24%         14.16           0.40           5.11%         10.96          0.47
+      MIST + MSNovelist                   5.40%         13.10           0.34          11.04%          8.57          0.44
+      MS-BART                             7.45%          9.66           0.44          10.99%          8.31          0.51
+      DiffMS                              8.34%         10.46           0.35          15.44%          8.54          0.47
+      FRIGID-base (ours)                 19.80%          7.88           0.54          24.41%         6.20           0.61
+      FRIGID (ours)                      25.03%          7.10           0.58          33.37%         5.56           0.64
+                                                           MassSpecGym
+      MIST + MSNovelist                   0.00%         39.84           0.06           0.00%         18.83          0.15
+      Spec2Mol                            0.00%         36.78           0.12           0.00%         36.02          0.16
+      MIST + Neuraldecipher               0.00%         22.93           0.14           0.00%         21.76          0.16
+      MADGEN                              1.31%         27.47           0.20           1.54%         16.84          0.26
+      MS-BART                             1.07%         16.47           0.23           1.11%         15.12          0.28
+      DiffMS                              2.30%         13.96           0.28           4.25%         11.68          0.39
+      FOAM (DiffMS + PubChem)             1.50%         12.21           0.35          10.28%          6.06          0.53
+      MIST + MolForge†                    10.73%        22.15           0.37          14.48%         17.88          0.41
+      FRIGID-base (ours)                 16.09%         15.02           0.41          18.19%         11.95          0.46
+      FRIGID (ours)                      18.29%         13.49           0.43          22.00%         11.65          0.47
+
+
+Computational efficiency. Table 2 compares the inference            Table 2. Number of parameters and inference throughput of
+                                                                    FRIGID backbone compared with baseline diffusion models.
+runtime of the FRIGID backbone against other diffusion              Throughput evaluated using random samples from the NPLIB1
+models. Despite using an architecture with 247.0M pa-               dataset on a single NVIDIA 6000 Ada GPU.
+rameters, FRIGID achieves an inference speed of 6.58 sec-
+onds per spectrum, 20× faster than the graph-based DiffMS                                         Inference Latency ↓      Relative
+                                                                      Model        # Parameters
+(131.2 s/spectrum) and over 3.6× faster than MADGEN                                                 (sec. / spectrum)      Speedup
+(23.80 s/spectrum). This significant speedup can be at-               DiffMS         53.2M               131.2              1.00×
+tributed to the efficiency of our parallel decoding scheme            MADGEN         2.51M               23.80              5.51×
+compared to the computationally expensive graph opera-                FRIGID         247.0M               6.58              20.0×
+tions required by existing diffusion models. This low la-
+tency provides the computational budget necessary to per-           faster than graph-based methods like DiffMS. This estab-
+form massive inference-time scaling (next paragraph) while          lishes FRIGID as a flexible state-of-the-art that allows users
+remaining practical for large-scale spectral annotation.            to trade compute for precision on difficult samples.
+Inference-time compute scaling. Fig. 4 highlights the               To test whether ICEBERG-guided refinement is specific
+trade-off between identification accuracy and inference             to FRIGID, we also apply the same refinement procedure
+cost. FRIGID exhibits a clear log-linear scaling trend (blue        to DiffMS. On NPLIB1, DiffMS improves from 8.34% to
+dashed line), where increasing the compute budget for refine-       13.33% Top-1 accuracy and from 0.35 to 0.43 Top-1 Tani-
+ment consistently boosts Top-1 accuracy. This full scaling          moto after 11 rounds of guidance (Table 3), confirming that
+yields a 14–26% relative improvement over FRIGID-base               the refinement mechanism itself is model-agnostic. How-
+(Table 1). Even the base model, without inference-time cor-         ever, this improvement requires 1423.30 seconds per sample,
+rection, outperforms both autoregressive and graph diffusion        compared to 86.49 seconds for FRIGID, and we observe a
+baselines in accuracy while remaining orders of magnitude           similar qualitative trend on MassSpecGym. This reinforces
+
+                                                                8
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Table 3. ICEBERG-guided refinement applied to DiffMS on the NPLIB1 benchmark. ICEBERG improves DiffMS substantially,
+confirming that the refinement strategy is model-agnostic; however, the resulting latency is much higher than for FRIGID.
+
+                                              Top-1                                      Top-10                  Inference Compute
+    Model                    Accuracy ↑     MCES ↓       Tanimoto ↑        Accuracy ↑   MCES ↓      Tanimoto ↑     (sec./sample) ↓
+    DiffMS                     8.34%          10.46         0.35            15.44%        8.54         0.47            131.21
+    DiffMS + ICEBERG           13.33%          9.30         0.43            23.29%        6.91         0.54            1423.30
+    FRIGID-base (ours)         19.80%         7.88          0.54            24.41%        6.20         0.61              6.58
+    FRIGID (ours)              25.03%         7.10          0.58            33.37%        5.56         0.64             86.49
+
+
+                                                                           training (approximated by training duration on increasingly
+                                                                           large datasets) and the resulting Top-1 accuracy on NPLIB1.
+                                                                           Notably, even at lower compute budgets, FRIGID pushes the
+                                                                           accuracy significantly beyond existing baselines, achieving
+                                                                           higher accuracy with orders of magnitude less training cost
+                                                                           than graph-based diffusion models like MADGEN. This
+                                                                           trend suggests that our sequence-based architecture effec-
+                                                                           tively leverages large-scale unlabeled data, and that further
+                                                                           scaling of the pretraining corpus and model size is a promis-
+                                                                           ing avenue for continued performance gains.
+
+                                                                           6. Conclusion
+                                                                           In this work, we present FRIGID, a DLM-based framework
+                                                                           for de novo structural elucidation from tandem mass spec-
+                                                                           tra. In favor of a sequence-based diffusion backbone, we
+                                                                           achieve a 20× inference speedup over state-of-the-art graph
+                                                                           diffusion methods, enabling scalable decoder pretraining on
+                                                                           hundreds of millions of molecules without spectrum labels.
+                                                                           Our efficient DLM architecture enables novel inference-time
+                                                                           scaling, leveraging a neural spectral simulator to iteratively
+                                                                           detect and correct spectral hallucinations through targeted
+                                                                           masking and denoising. Empirically, FRIGID establishes
+                                                                           a new state-of-the-art on the NPLIB1 and MassSpecGym
+                                                                           benchmarks, demonstrating a log-linear relationship be-
+Figure 4. Inference-time scaling on NPLIB1 and MassSpecGym.                tween inference compute and identification accuracy. These
+The plots display Top-1 identification accuracy as a function of in-       results suggest a promising new direction for continued
+ference compute time for FRIGID and baseline methods. The blue
+dashed line illustrates FRIGID ’s performance across increasing            improvements in de novo structural elucidation.
+rounds of refinement, demonstrating a log-linear scaling behavior
+where additional compute yields higher accuracy. FRIGID sig-
+nificantly outperforms autoregressive baselines (e.g., MS-BART,
+                                                                           Software and Data
+MSNovelist) and graph diffusion models (e.g., DiffMS, MAD-                 FRIGID code and models are available at https://
+GEN) in both accuracy and efficiency.
+                                                                           github.com/coleygroup/FRIGID.
+our core claim: forward fragmentation guidance transfers
+across backbones, but a sequence-based diffusion decoder                   Acknowledgments
+is what makes iterative refinement practical. Appendix A.2                 This work was partly supported by the MIT Generative AI
+further compares ICEBERG-guided refinement to compute-                     Impact Consortium (MAGIC) and DSO National Labora-
+matched naive scaling baselines and reports sensitivity anal-              tories in Singapore. The authors acknowledge the MIT
+yses over refinement hyperparameters.                                      Office of Research Computing and Data for providing high-
+Pretraining scaling analysis. As illustrated in Figure 1,                  performance computing resources that have contributed to
+our DLM backbone exhibits strong scaling behavior with                     the research results reported within this paper.
+respect to training compute. We observe a log-linear rela-
+tionship between the amount of compute used during pre-
+
+                                                                       9
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Impact Statement                                                          for probabilistic prediction. In International conference
+                                                                          on machine learning, pp. 2690–2700. PMLR, 2020.
+Advances in computational methods for de novo structure
+elucidation can substantially improve the identification of             Dührkop, K., Shen, H., Meusel, M., Rousu, J., and Böcker,
+previously unknown compounds, including metabolites that                  S. Searching molecular structure databases with tandem
+serve as diagnostic biomarkers or illuminate underlying                   mass spectra using csi: Fingerid. Proceedings of the
+biological processes. These capabilities have broad poten-                National Academy of Sciences, 112(41):12580–12585,
+tial for positive societal impact across healthcare and life              2015.
+sciences, with minimal foreseeable risk.
+                                                                        Dührkop, K., Nothias, L.-F., Fleischauer, M., Reher, R., Lud-
+References                                                                wig, M., Hoffmann, M. A., Petras, D., Gerwick, W. H.,
+                                                                          Rousu, J., Dorrestein, P. C., et al. Systematic classi-
+Alberts, M., Schilter, O., Zipoli, F., Hartrampf, N., and                 fication of unknown metabolites using high-resolution
+  Laino, T. Unraveling molecular structure: A multimodal                  fragmentation mass spectra. Nature biotechnology, 39(4):
+  spectroscopic dataset for chemistry. Advances in Neu-                   462–471, 2021.
+  ral Information Processing Systems, 37:125780–125808,
+  2024.                                                                 Gentry, E. C., Collins, S. L., Panitchpakdi, M., Belda-
+Austin, J., Johnson, D. D., Ho, J., Tarlow, D., and van den               Ferre, P., Stewart, A. K., Carrillo Terrazas, M., Lu, H.-
+  Berg, R. Structured denoising diffusion models in dis-                  h., Zuffa, S., Yan, T., Avila-Pacheco, J., et al. Reverse
+  crete state-spaces, 2023. URL https://arxiv.org/                        metabolomics for the discovery of chemical structures
+  abs/2107.03006.                                                         from humans. Nature, 626(7998):419–426, 2024.
+
+Böcker, S. and Dührkop, K. Fragmentation trees reloaded.              Goldman, S., Wohlwend, J., Stražar, M., Haroush, G.,
+  Journal of cheminformatics, 8:1–26, 2016.                              Xavier, R. J., and Coley, C. W. Annotating metabo-
+                                                                          lite mass spectra with domain-inspired chemical formula
+Bohde, M., Manjrekar, M., Wang, R., Ji, S., and Coley, C. W.              transformers. Nature Machine Intelligence, 5(9):965–979,
+  DiffMS: Diffusion generation of molecules conditioned                   2023a.
+  on mass spectra, 2025. URL https://arxiv.org/
+  abs/2502.09571.                                                       Goldman, S., Xin, J., Provenzano, J., and Coley, C. W.
+                                                                          Mist-cf: Chemical formula inference from tandem mass
+Bushuiev, R., Bushuiev, A., de Jonge, N. F., Young, A.,                   spectra. Journal of Chemical Information and Modeling,
+  Kretschmer, F., Samusevich, R., Heirman, J., Wang, F.,                  64(7):2421–2431, 2023b.
+  Zhang, L., Dührkop, K., Ludwig, M., Haupt, N. A.,
+  Kalia, A., Brungs, C., Schmid, R., Greiner, R., Wang,                 Gómez-Bombarelli, R., Wei, J. N., Duvenaud, D.,
+  B., Wishart, D. S., Liu, L.-P., Rousu, J., Bittremieux, W.,             Hernández-Lobato, J. M., Sánchez-Lengeling, B., She-
+  Rost, H., Mak, T. D., Hassoun, S., Huber, F., van der                   berla, D., Aguilera-Iparraguirre, J., Hirzel, T. D., Adams,
+  Hooft, J. J. J., Stravs, M. A., Böcker, S., Sivic, J., and             R. P., and Aspuru-Guzik, A. Automatic chemical de-
+  Pluskal, T. MassSpecGym: A benchmark for the dis-                       sign using a data-driven continuous representation of
+  covery and identification of molecules, 2024. URL                       molecules. ACS central science, 4(2):268–276, 2018.
+  https://arxiv.org/abs/2410.23326.
+                                                                        Han, Y., Wang, P., Yu, K., Chen, X., and Chen, L. MS-
+Butler, T., Frandsen, A., Lightheart, R., Bargh, B., Taylor, J.,
+                                                                          BART: Unified modeling of mass spectra and molecules
+  Bollerman, T., Kerby, T., West, K., Voronov, G., Moon,
+                                                                          for structure elucidation, 2025. URL https://arxiv.
+  K., et al. MS2Mol: A transformer model for illuminating
+                                                                          org/abs/2510.20615.
+  dark chemical space from mass spectra. ChemRxiv, 2023.
+
+Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K.                    Ho, J., Jain, A., and Abbeel, P. Denoising diffusion proba-
+  BERT: Pre-training of deep bidirectional transformers                   bilistic models. In Proceedings of the 34th International
+  for language understanding. In Proceedings of the 2019                 Conference on Neural Information Processing Systems,
+  Conference of the North American Chapter of the As-                     NIPS ’20, Red Hook, NY, USA, 2020. Curran Associates
+  sociation for Computational Linguistics: Human Lan-                     Inc. ISBN 9781713829546.
+  guage Technologies, pp. 4171–4186, 2019. URL https:
+ //aclanthology.org/N19-1423/.                                          Karras, T., Aittala, M., Aila, T., and Laine, S. Elucidating
+                                                                          the design space of diffusion-based generative models.
+Duan, T., Anand, A., Ding, D. Y., Thai, K. K., Basu, S., Ng,             Advances in neural information processing systems, 35:
+  A., and Schuler, A. NGBoost: Natural gradient boosting                  26565–26577, 2022.
+
+                                                                   10
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Le, T., Winter, R., Noé, F., and Clevert, D.-                          leap for De Novo molecule generation from mass spec-
+  A.      Neuraldecipher–reverse-engineering extended-                  tra, 2025. URL https://arxiv.org/abs/2508.
+  connectivity fingerprints (ecfps) to their molecular struc-           04180.
+  tures. Chemical science, 11(38):10378–10389, 2020.
+                                                                      NIST. NIST standard reference database. National Institute
+Lee, S., Kreis, K., Veccham, S. P., Liu, M., Reidenbach, D.,            of Standards and Technology, 2023. URL https://
+  Peng, Y., Paliwal, S., Nie, W., and Vahdat, A. GenMol:                www.nist.gov/srd.
+  A drug discovery generalist with discrete diffusion, 2025.
+  URL https://arxiv.org/abs/2501.06158.                               Noutahi, E., Gabellini, C., Craig, M., Lim, J. S. C., and
+                                                                       Tossou, P. Gotta be SAFE: A new framework for molecu-
+Li, X., Thickstun, J., Gulrajani, I., Liang, P. S., and                 lar design, 2023. URL https://arxiv.org/abs/
+  Hashimoto, T. B. Diffusion-lm improves controllable                   2310.10773.
+  text generation. Advances in Neural Information Process-
+                                                                      Prudent, R., Annis, D. A., Dandliker, P. J., Ortholand, J.-
+  ing Systems, 35:4328–4343, 2022.
+                                                                        Y., and Roche, D. Exploring new targets and chemical
+Li, Y., Guo, J., Wang, R., and Yan, J. T2t: From distribution           space with affinity selection-mass spectrometry. Nature
+   learning in training to gradient search in testing for com-          Reviews Chemistry, 5(1):62–71, 2021.
+   binatorial optimization. Advances in Neural Information
+                                                                      Qiang, H., Wang, F., Lu, W., Xing, X., Kim, H., Mérette, S.
+  Processing Systems, 36:50020–50040, 2023.
+                                                                        A. M., Ayres, L. B., Oler, E., AbuSalim, J. E., Roichman,
+Li, Y., Chen, L., Wang, H., Wang, R., and Yan, J. Generation            A., Neinast, M., Cordova, R. A., Lee, W. D., Herbst, E.,
+   as search operator for test-time scaling of diffusion-based          Gupta, V., Neff, S. L., Hiebert-Giesbrecht, M., Young,
+   combinatorial optimization. In The Thirty-ninth Annual               A., Gautam, V., Tian, S., Wang, B., Röst, H., Baidwan,
+  Conference on Neural Information Processing Systems,                  J., Greiner, R., Chen, L., Johnston, C. W., Foster, L. J.,
+   2025.                                                                Shapiro, A. M., Wishart, D. S., Rabinowitz, J. D., and
+                                                                        Skinnider, M. A. Language model-guided anticipation
+Litsa, E. E., Chenthamarakshan, V., Das, P., and Kavraki,               and discovery of mammalian metabolites. Nature, pp.
+  L. E. An end-to-end deep learning framework for translat-             1–10, January 2026.
+  ing mass spectra to de-novo molecules. Communications
+  Chemistry, 6(1):132, 2023.                                          Ridder, L., van der Hooft, J. J. J., and Verhoeven, S. Auto-
+                                                                        matic compound annotation from mass spectrometry data
+Loshchilov, I. and Hutter, F. Sgdr: Stochastic gradient                 using MAGMa. Mass Spectrom. (Tokyo), 3(Spec Iss 2):
+  descent with warm restarts, 2017.                                     S0033, July 2014.
+Loshchilov, I. and Hutter, F. Decoupled weight decay reg-             Rogers, D. and Hahn, M. Extended-connectivity finger-
+  ularization. In Proceedings of the Seventh International              prints. Journal of Chemical Information and Modeling,
+  Conference on Learning Representations (ICLR 2019),                   50(5):742–754, 2010. doi: 10.1021/ci100050t.
+  2019.
+                                                                      Sahoo, S., Arriola, M., Schiff, Y., Gokaslan, A., Marroquin,
+Ma, N., Tong, S., Jia, H., Hu, H., Su, Y.-C., Zhang, M., Yang,          E., Chiu, J., Rush, A., and Kuleshov, V. Simple and
+ X., Li, Y., Jaakkola, T., Jia, X., and Xie, S. Inference-              effective masked diffusion language models. Advances
+ time scaling for diffusion models beyond scaling denois-               in Neural Information Processing Systems, 37:130136–
+ ing steps, 2025. URL https://arxiv.org/abs/                            130184, 2024.
+ 2501.09732.
+                                                                      Segler, M. H., Kogej, T., Tyrchan, C., and Waller, M. P.
+Manjrekar, M., Bohde, M., Liu, H., Lederbauer, M., Wang,                Generating focused molecule libraries for drug discovery
+ R., and Coley, C. W. Generative structural elucida-                    with recurrent neural networks. ACS central science, 4
+ tion from mass spectra as an iterative optimization prob-              (1):120–131, 2018.
+ lem, 2026. URL https://arxiv.org/abs/2602.
+ 07709.                                                               Shrivastava, A. D., Swainston, N., Samanta, S., Roberts,
+                                                                        I., Wright Muelas, M., and Kell, D. B. Massgenie: A
+Mismetti, L., Alberts, M., Krause, A., and Graziani, M. Test-           transformer-based deep learning method for identifying
+ time tuned language models enable end-to-end de novo                   small molecules from their mass spectra. Biomolecules,
+ molecular structure generation from ms/ms spectra, 2026.               11(12):1793, 2021.
+ URL https://arxiv.org/abs/2510.23746.
+                                                                      Sohl-Dickstein, J., Weiss, E., Maheswaranathan, N., and
+Neo, N. K. N., Lim, J., Zhau, P. N. Y., Ting, S. K. X., and             Ganguli, S. Deep unsupervised learning using nonequi-
+  Shen, B. One small step with fingerprints, one giant                  librium thermodynamics. In Bach, F. and Blei, D. (eds.),
+
+                                                                 11
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+  Proceedings of the 32nd International Conference on Ma-             Young, A., Röst, H., and Wang, B. Tandem mass spectrum
+  chine Learning, volume 37 of Proceedings of Machine                   prediction for small molecules using graph transformers.
+  Learning Research, pp. 2256–2265, Lille, France, 07–                  Nature Machine Intelligence, 6(4):404–416, 2024.
+  09 Jul 2015. PMLR. URL https://proceedings.
+  mlr.press/v37/sohl-dickstein15.html.
+
+Stravs, M. A., Dührkop, K., Böcker, S., and Zamboni, N.
+  MSNovelist: de novo structure generation from mass
+  spectra. Nature Methods, 19(7):865–870, 2022.
+
+Tian, Z., Zhao, H., Peter, K. T., Gonzalez, M., Wetzel, J.,
+  Wu, C., Hu, X., Prat, J., Mudrock, E., Hettinger, R., et al.
+  A ubiquitous tire rubber–derived chemical induces acute
+  mortality in coho salmon. Science, 371(6525):185–189,
+  2021.
+
+Ucak, U. V., Ashyrmamatov, I., and Lee, J. Reconstruc-
+  tion of lossless molecular representations from finger-
+  prints. Journal of Cheminformatics, 15(1):26, 2023. doi:
+ 10.1186/s13321-023-00693-0. URL https://doi.
+  org/10.1186/s13321-023-00693-0.
+
+Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones,
+  L., Gomez, A. N., Kaiser, Ł., and Polosukhin, I. Atten-
+  tion is all you need. In Neural Info. Process. Systems,
+  volume 30, 2017.
+
+Vignac, C., Krawczuk, I., Siraudin, A., Wang, B., Cevher,
+  V., and Frossard, P. Digress: Discrete denoising diffusion
+  for graph generation. In International Conference on
+  Learning Representations (ICLR), 2023.
+
+Wang, F., Liigand, J., Tian, S., Arndt, D., Greiner, R., and
+ Wishart, D. S. Cfm-id 4.0: more accurate esi-ms/ms spec-
+ tral prediction and compound identification. Analytical
+ chemistry, 93(34):11692–11700, 2021.
+
+Wang, R., Manjrekar, M., Mahjour, B., Avila-Pacheco, J.,
+ Provenzano, J., Reynolds, E., Lederbauer, M., Mashin, E.,
+ Goldman, S., Wang, M., et al. Neural spectral prediction
+ for structure elucidation with tandem mass spectrometry.
+ BioRxiv, 2025a.
+
+Wang, Y., Chen, X., Liu, L., and Hassoun, S. MAD-
+ GEN: Mass-spec attends to de novo molecular gen-
+ eration. In The Thirteenth International Conference
+ on Learning Representations, 2025b. URL https:
+ //openreview.net/forum?id=78tc3EiUrN.
+
+Weininger, D. Smiles, a chemical language and information
+ system. 1. introduction to methodology and encoding
+ rules. Journal of Chemical Information and Computer
+ Sciences, 28(1):31–36, 1988. doi: 10.1021/ci00057a005.
+
+Xing, S., Shen, S., Xu, B., Li, X., and Huan, T. BUDDY:
+  molecular formula discovery via bottom-up MS/MS in-
+  terrogation. Nat. Methods, 20(6):881–890, June 2023.
+
+                                                                 12
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+A. Additional Experimental Results
+A.1. Additional metrics
+Following (Bohde et al., 2025) we report additional metrics to further contextualize how close FRIGID predictions are to the
+true molecule even in cases where the true structure cannot be recovered. In Table 4, we report the percentage of FRIGID
+samples that correspond to valid molecules as well as the percentage of Top-1 and Top-10 predictions that are “close” and
+“meaningful” structural matches according to the definitions of Butler et al. (2023). Specifically, a molecule is a “meaningful”
+match if it has an RDKit fingerprint Tanimoto similarity ≥ 0.4 compared to the reference structure, and it is a close match
+if the similarity is ≥ 0.675. These thresholds were selected based on domain-expert annotations, and close structural
+matches can be considered to be useful in practical settings. As shown in Table 4, FRIGID achieves strong performance,
+including achieving close Top-1 predictions on more than half of NPLIB1 test spectra. We also note that FRIGID-base
+achieves similarly strong Top-10 performance and is able to consistently generate meaningful and close matches without
+any inference-time scaling, however inference-time scaling helps to refine close matches into exact structural matches.
+
+Table 4. Additional evaluation of molecule validity, and percentage above domain-expert-defined Tanimoto thresholds on NPLIB1
+(Dührkop et al., 2021) and MassSpecGym (Bushuiev et al., 2024) de novo generation datasets. The best performing model for each metric
+is bold and the second best is underlined. † indicates our implementations of baseline approaches without public code. Methods are
+approximately ordered by performance. Definitions of meaningful match (Tanimoto similarity of RDKit fingerprints ≥ 0.4) and close
+match (Tanimoto similarity of RDKit fingerprints ≥ 0.675) are taken from Butler et al. (2023).
+
+                                 Overall                       Top-1                                       Top-10
+  Model                         % Valid ↑    % Meaningful match ↑      % Close match ↑   % Meaningful match ↑       % Close match ↑
+                                                                          NPLIB1
+  Spec2Mol                        66.5%              4.09%                  0.00%                 8.05%                  0.00%
+  MIST + Neuraldecipher          81.78%             65.81%                 28.57%                78.14%                 39.68%
+  MIST + MSNovelist              98.60%             13.72%                 3.39%                 53.03%                 7.35%
+  MIST + MolForge†               100.0%             63.14%                 31.76%                73.47%                 43.34%
+  DiffMS                         100.0%             77.10%                 42.82%                87.50%                 59.03%
+  FRIGID-base (ours)             100.0%             79.70%                52.80%                 88.42%                67.00%
+  FRIGID (ours)                  100.0%             80.20%                57.41%                 88.04%                67.25%
+                                                                       MassSpecGym
+  Spec2Mol                        68.5%              4.09%                   0%                  27.70%                  0%
+  MIST + Neuraldecipher          91.11%             53.75%                 2.50%                 63.37%                 4.27%
+  MIST + MSNovelist              98.58%             57.17%                30.92%                 70.06%                42.58%
+  MIST + MolForge†               100.0%             52.68%                24.58%                 68.66%                29.02%
+  DiffMS                         100.0%             78.56%                28.28%                 96.67%                51.74%
+  FOAM (DiffMS+PubChem)          100.0%             78.00%                35.55%                 93.66%                62.94%
+  FRIGID-base (ours)             100.0%             72.66%                 32.86%                85.87%                 40.11%
+  FRIGID (ours)                  100.0%             75.61%                 34.63%                86.34%                 41.86%
+
+
+A.2. Inference-Time Scaling Ablations
+This section provides additional evidence that the gains of FRIGID arise from targeted refinement rather than simply
+spending more inference-time compute. We first show that ICEBERG-guided refinement transfers to a graph-diffusion
+backbone, then compare against compute-matched naive scaling baselines, and finally evaluate sensitivity to the main
+refinement hyperparameters.
+
+A.2.1. TARGETED ICEBERG R EFINEMENT O UTPERFORMS NAIVE C OMPUTE S CALING
+We next compare FRIGID against two compute-matched baseline scaling strategies on NPLIB1. Random masking preserves
+the same multi-round structure as FRIGID but masks the selected candidates uniformly at random instead of using ICEBERG
+scores. No masking never refines existing candidates and instead spends the full budget on repeated from-scratch generation.
+Both baselines improve over FRIGID-base, showing that additional inference compute is indeed useful; however, both
+underperform ICEBERG-guided refinement. This indicates that the benefit of FRIGID is not merely increased compute, but
+
+                                                                 13
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+rather how that compute is allocated to spectrum-inconsistent substructures.
+
+Table 5. Compute-matched baselines on NPLIB1. Naively increasing inference-time compute improves over FRIGID-base, but targeted
+ICEBERG-guided refinement performs best under the same overall candidate budget.
+
+                                                     Top-1                                      Top-10
+                Model                Accuracy ↑     MCES ↓      Tanimoto ↑     Accuracy ↑       MCES ↓        Tanimoto ↑
+                Random Masking         21.54%         7.76         0.54             26.65%          6.22        0.599
+                No Masking             21.17%         7.45         0.546            27.27%          5.92        0.608
+                FRIGID (ours)          25.03%         7.10         0.58             33.37%          5.56        0.643
+
+
+A.2.2. S ENSITIVITY TO R EFINEMENT H YPERPARAMETERS
+We evaluate sensitivity to the main refinement hyperparameters on NPLIB1. Specifically, we vary the maximum masking
+probability pmax , the number of candidates refined per round (K), the number of renoised variants per candidate (M ),
+and the hallucination penalty weight γ. Across the tested settings, performance varies only modestly, suggesting that the
+refinement procedure is reasonably robust and does not depend on a narrow hyperparameter regime.
+
+Table 6. Sensitivity analysis of FRIGID refinement hyperparameters on NPLIB1. The procedure is fairly stable across nearby settings of
+pmax , K, M , and γ.
+
+                        γ    pmax    K     M      Acc@1 ↑      Tanimoto@1 ↑     Acc@10 ↑        Tanimoto@10 ↑
+                        1    0.75    12     8     25.03%           0.58             33.37%             0.64
+                        1    0.50    12     8     22.67%           0.57             30.88%             0.64
+                        1    0.50    6     6      23.54%           0.57             33.37%             0.65
+                        1    0.75    16     4     24.03%           0.57             33.75%             0.65
+                        1    0.25    12     8     24.16%           0.57             32.00%             0.64
+                        1    1.00    12     8     23.29%           0.57             31.88%             0.64
+                        1    0.75    8     12     24.16%           0.57             32.05%             0.64
+                        5    0.75    12     8     23.91%           0.57             33.75%             0.64
+                        10   0.75    12     8     24.15%           0.57             32.75%             0.62
+
+
+A.3. Baseline Reassessment: MIST + MolForge
+We investigated the discrepancy between our reproduced MIST + MolForge results and the much stronger MassSpecGym
+numbers reported in Neo et al. (2025). We identified a bug in batched MIST inference inherited from older implementations:
+the attention mask adds zero, rather than negative infinity, to padded positions. As a result, shorter spectra can attend to
+padding and collapse toward the longest spectrum in the batch. Because MassSpecGym groups spectra from the same
+molecule, this leakage can substantially inflate fingerprint quality and downstream reconstruction accuracy when the batch
+size is significantly greater than 1. We successfully reproduced the inflated behavior and confirmed that the corrected
+implementation yields the lower, more reliable numbers reported in Table 1. Since Neo et al. (2025) did not publicly release
+their MIST + MolForge implementation, we developed our own reimplementation, and release both the faulty and corrected
+reimplementations at https://github.com/harrylaucngd/MIST-MolForge.
+
+Table 7. MassSpecGym results for MIST + MolForge under corrected and inflated batched MIST inference. The inflated setting reproduces
+the unexpectedly strong numbers caused by the masking bug, whereas the corrected implementation remains below FRIGID.
+
+ Model                                            MIST Tanimoto ↑     Top-1 Acc ↑       Top-1 Tan ↑        Top-10 Acc ↑    Top-10 Tan ↑
+ MIST + MolForge (corrected)                           0.457               10.73%            0.37             14.48%           0.41
+ MIST + MolForge (inflated, batch size= 24)            0.812               31.75%            0.68             40.55%           0.74
+ FRIGID (ours)                                         0.457               18.29%            0.43             22.00%           0.47
+
+
+A.4. Robustness to Imperfect Intermediate Predictions
+The main paper evaluates the standard setting where the chemical formula is assumed known and the molecular fingerprint
+is predicted from spectra. Here we test robustness when these intermediate signals are imperfect.
+
+                                                                 14
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+A.4.1. ROBUSTNESS TO F ORMULA U NCERTAINTY
+To measure robustness to formula annotation errors, we use MIST-CF (Goldman et al., 2023b) to generate the top 5 formula
+hypotheses for each test entry. To preserve a fair compute budget, we keep the total number of generated molecules fixed
+and distribute that budget across the 5 candidate formulae. While performance degrades without oracle formulae, FRIGID
+remains reasonably robust on both NPLIB1 and MassSpecGym.
+
+
+Table 8. Robustness to unknown chemical formulae. We replace the ground-truth formula with the top 5 MIST-CF hypotheses while
+keeping the total generation budget fixed.
+
+                                                                Top-1                                           Top-10
+        Model                               Accuracy ↑      MCES ↓        Tanimoto ↑       Accuracy ↑       MCES ↓       Tanimoto ↑
+                                                                NPLIB1
+        FRIGID-base (known formula)           19.80%            7.88            0.54            24.41%           6.20       0.61
+        FRIGID-base (formula unknown)         18.68%            8.78            0.52            22.91%           6.70       0.58
+        FRIGID (known formula)                25.03%            7.10            0.58            33.37%           5.56       0.64
+        FRIGID (formula unknown)              21.79%            7.94            0.55            30.14%           6.23       0.62
+                                                            MassSpecGym
+        FRIGID-base (known formula)           16.09%            15.02           0.41            18.19%          11.95       0.46
+        FRIGID-base (formula unknown)         11.60%            20.19           0.35            13.13%          14.81       0.42
+        FRIGID (known formula)                18.29%            13.49           0.43            22.00%          11.65       0.47
+        FRIGID (formula unknown)              14.28%            18.30           0.37            17.43%          14.85       0.43
+
+
+
+A.4.2. F INGERPRINT Q UALITY D ISTRIBUTIONAL A NALYSIS
+We also retrospectively bin test spectra by the Tanimoto similarity between the MIST-predicted fingerprint and the ground-
+truth fingerprint. As expected, reconstruction accuracy and structural similarity improve monotonically with fingerprint
+quality. Nonetheless, even when the predicted fingerprint has Tanimoto similarity below 0.5, the true molecule can still
+occasionally be recovered, indicating that FRIGID can tolerate nontrivial upstream fingerprint error.
+
+
+Table 9. Distributional analysis of FRIGID performance as a function of upstream fingerprint quality. Test spectra are binned by the
+Tanimoto similarity between the MIST-predicted fingerprint and the ground-truth fingerprint.
+
+                               Metric             [0.0, 0.25)     [0.25, 0.5)     [0.5, 0.75)     [0.75, 1.0]
+                                                                NPLIB1
+                               Acc@1 ↑               0.0%           6.09%          23.55%          60.00%
+                               Tanimoto@1 ↑          0.18            0.36           0.67            0.89
+                               Acc@10 ↑             4.80%          13.71%          32.97%          70.24%
+                               Tanimoto@10 ↑         0.25            0.45           0.75            0.93
+                                                            MassSpecGym
+                               Acc@1 ↑              0.2%            3.00%           7.68%          42.44%
+                               Tanimoto@1 ↑         0.17             0.31            0.50           0.79
+                               Acc@10 ↑             0.3%            4.93%          11.65%          48.73%
+                               Tanimoto@10 ↑        0.20             0.35            0.56           0.82
+
+
+
+A.5. Direct Spectra Conditioning Ablation
+The two-stage spectra-to-fingerprint-to-structure pipeline is the standard design in modern de novo elucidation systems, but
+one might ask whether direct end-to-end spectra conditioning is preferable with a stronger decoder. To test this, we fine-tune
+our model directly on spectra-conditioned generation and compare against the fingerprint-conditioned backbone. Direct
+end-to-end conditioning consistently hurts exact reconstruction, with the gap being especially large on the more challenging
+MassSpecGym benchmark. These results support the use of the intermediate fingerprint as a useful structural prior rather
+than an unnecessary decomposition.
+
+                                                                   15
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Table 10. Direct spectra conditioning versus the standard fingerprint-conditioned pipeline. End-to-end conditioning underperforms the
+two-stage formulation on both benchmarks, especially on MassSpecGym.
+
+                                                               Top-1                                   Top-10
+      Model                                    Accuracy ↑     MCES ↓      Tanimoto ↑     Accuracy ↑    MCES ↓     Tanimoto ↑
+                                                              NPLIB1
+      E2E FT-Base                                  18.30%       8.39         0.50         22.17%         6.58         0.57
+      E2E FT                                       24.28%       7.10         0.56         33.13%         5.54         0.63
+      FRIGID-base (fingerprint-conditioned)        19.80%       7.88         0.54         24.41%         6.20         0.61
+      FRIGID (fingerprint-conditioned)             25.03%       7.10         0.58         33.37%         5.56         0.64
+                                                            MassSpecGym
+      E2E FT-Base                                  6.05%       13.97         0.33          6.54%        12.33         0.39
+      E2E FT                                       11.13%      12.37         0.41         12.11%        11.18         0.44
+      FRIGID-base (fingerprint-conditioned)        16.09%      15.02         0.41         18.19%        11.95         0.46
+      FRIGID (fingerprint-conditioned)             18.29%      13.49         0.43         22.00%        11.65         0.47
+
+
+A.6. Multimodal Spectroscopic Dataset Overlap
+Mismetti et al. (2026) have recently developed a test-time tuning strategy that dynamically adapts a pretrained de novo
+elucidation model to the most relevant experimental spectra at inference time. We have omitted a comparison with their
+approach because their base model is pretrained on a dataset of simulated spectra (Alberts et al., 2024) which we found
+contains substantial amounts of both NPLIB1 and MassSpecGym test structures. The full results of this analysis are shown
+in Table 11, where we find more than 10% of both the NPLIB1 and MassSpecGym test sets overlap with the training
+set. Additionally, the models used to build this simulated spectra dataset were likely trained on datasets which contain
+true NPLIB1 and MassSpecGym test structures. Because of this, overlap, it is not possible to fairly compare the method
+in Mismetti et al. (2026) to FRIGID and other baselines. While we did not have the capacity to retrain their model from
+scratch without on cleaned data, we note that their test-time tuning strategy is orthogonal to our inference-time scaling and
+that future works may benefit from combining both ideas.
+
+Table 11. Analysis of structures in the Multimodal Spectroscopic Dataset (Alberts et al., 2024) also present in the NPLIB1 and
+MassSpecGym test splits. Two structures are considered to be a match if they have the same connectivity-based (2D) InChIKeys.
+
+
+                                                                  Train-Test Overlap
+                                         Dataset
+                                                            # of Structures % of Test Set
+                                         NPLIB1                  122            14.90%
+                                         MassSpecGym            1820            10.37%
+
+
+B. Experimental Details
+B.1. Model Details
+As detailed in Sec. 3.2, we parametrize pθ (x0 | f , C) using a BERT-style masked diffusion language model (MDLM)
+with an additional cross-attention mechanism added in each transformer layer to inject information from the conditioning
+sequence. We set the MDLM backbone to a 12-layer Transformer encoder with hidden size d=896, H=14 attention
+heads, and feed-forward dimension dff =3072, using dropout 0.1 throughout. We tokenize SAFE strings using a byte-pair
+encoding (BPE) tokenizer; the resulting vocabulary size is |V|=1880, and we use a maximum token length of 256 (including
+[BOS]/[EOS]), padding shorter sequences with [PAD].
+Formula conditioning. We encode the precursor formula C as a fixed-dimensional count vector over a set of 30 common
+elements, without normalization. For cross-attention conditioning, we represent C as a fixed-length embedding sequence
+of length 30 by summing (i) a learnable element embedding, (ii) a learnable count embedding (with counts clipped to a
+maximum of 200), and (iii) a learned positional embedding. We apply a conditioning mask that zeros out elements with
+count 0. We do not apply formula conditional dropout during training (pdrop,f =0).
+Fingerprint conditioning. We condition on a 4096-bit radius-2 Morgan fingerprint. We embed the fingerprint as an
+unordered set of active bits, retaining up to 256 indices following canonical bit order; in our training configuration, the
+
+                                                                 16
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+activation threshold is 0 (i.e., all non-zero bits are treated as active). Each active index is mapped to a learnable embedding,
+and we apply 3 layers of permutation-equivariant self-attention (without positional encodings) to model interactions among
+active substructures, yielding a fingerprint embedding sequence and a corresponding padding mask. For robustness, we
+apply fingerprint conditional dropout during training with probability pdrop,C =0.25.
+Cross-attention injection. We inject formula and fingerprint conditions via cross-attention sublayers in every Transformer
+block (with the same hidden size and number of heads as the backbone). We use shared cross-attention pathway for the two
+modalities.
+
+B.2. Training Details
+We pretrain the FRIGID-base DLM on the SAFE-GPT molecular corpus from Noutahi et al. (2023) and mask out all NPLIB1
+and MassSpecGym test and validation structures using an exclusion list of connectivity-based (2D) InChIKeys. Prior studies
+have shown that the SAFE molecular representation can be beneficial for de novo molecular generation (Noutahi et al.,
+2023; Lee et al., 2025), which motivates our adoption of SAFE during pretraining. That said, our work does not perform an
+independent head-to-head ablation of molecular representation choice, and therefore does not directly benchmark SAFE’s
+claimed advantages over SMILES for molecular generation. We adopted the datasets used in these two prior works without
+modification, including approximately 17% of the SAFE strings in the SAFE-GPT corpus that could not be parsed into valid
+molecular structures. They were still retained for MDLM pretraining; because no valid molecular formula or fingerprint
+could be computed for these samples, their cross-attention conditioning falls back to an all-zero mask, effectively acting as a
+form of dropout.
+We train using AdamW (Loshchilov & Hutter, 2019) with a cosine annealing schedule (Loshchilov & Hutter, 2017). Our
+largest model is trained on over 1 billion structures; we found that fine-tuning on NPLIB1 and MassSpecGym did not
+improve end-to-end performance (Table 10) and thus omit any finetuning.
+In our largest set, the training configuration is as follows: we train for 400,000 optimization steps with global batch size 576.
+We use mixed precision (bfloat16) and clip gradients to max norm 1.0. We train in continuous time (T =0) with log-linear
+noise and antithetic time sampling, using sampling ϵ=10−3 . We maintain an EMA of parameters with decay 0.9999 for
+evaluation. AdamW hyperparameters are β1 =0.9, β2 =0.999, ϵ=10−8 , and weight decay 0, with peak learning rate 3×10−4 .
+The learning rate is linearly warmed up for 50,000 steps and then annealed with cosine decay (CosineAnnealingLR) with
+Tmax =400,000 and ηmin =10−8 . We optimize the MDLM reconstruction objective with global-mean loss aggregation, and
+do not use bracket-SAFE tokens in this configuration.
+We do not use an auxiliary formula-matching loss in this configuration (formula loss weight 0.0), relying instead on formula
+filtering at inference time and the strong conditional signal provided by cross-attention.
+
+B.2.1. ICEBERG M ODEL T RAINING D ETAILS
+To use a forward spectrum simulation method as part of our inference-time strategy, we adopt the deep learning model,
+ICEBERG (Wang et al., 2025a), which, briefly, fragments candidate structures to predict the most likely fragments to appear,
+and scores intensities for each of these fragments to compose a simulated MS/MS spectrum. For the MassSpecGym and
+NPLIB1 benchmarks, we first train a version of ICEBERG specific to each dataset. Each model is only trained on the same
+training structures and spectra specified by each benchmark to avoid leakage of test structures at the correction stage. We
+include training example counts below (Table 12).
+
+                          Table 12. Number of training examples used to train each version of ICEBERG.
+
+                                        Dataset       Training structures   Training spectra
+                                       NPLIB1                6,810              9,272
+                                     MassSpecGym            13,543             101,573
+
+
+ICEBERG is a two-part model; the first model learns to predict likely fragments through bond-breaking of the candidate
+structure. As experimental fragments are difficult to characterize in MS/MS, this first model is therefore supervised on
+rule-based enumeration and annotation of fragments as collected from the MAGMa algorithm (Ridder et al., 2014). The
+second model learns to take the fragments, as well as the original structure, to predict intensities. Both models are trained
+with cross-entropy loss. To boost differentiation and ranking of candidate structures, the intensity model is also further
+
+                                                              17
+         FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+fine-tuned with a contrastive learning loss against decoy structures.
+
+B.3. Inference-time Scaling Details
+Our inference-time scaling procedure implements the cycle-consistent refinement pipeline described in Sec. 4. For each test
+spectrum, we obtain a binary fingerprint by thresholding the spectrum-predicted fingerprint probabilities with ϑ = 0.187,
+and treat the molecular formula as known. After each refinement round, we rank the pool of unique candidates by fingerprint
+Tanimoto similarity to the predicted fingerprint, while prioritizing candidates whose molecular formula matches the target
+formula; we then report Top-k metrics on the ranked list. Refinement is run for R rounds with a per-round sample budget B.
+In round 1, we generate B candidates from scratch using the conditional DLM. In subsequent rounds, we refine the top K
+unique candidates from the current pool by constructing M renoised variants per candidate (via masking) and denoising
+them, yielding up to M · K refined samples; the remaining budget, B−M · K, is filled with additional from-scratch
+generations to preserve diversity. By default, we use B=128, K=12, and M =8. For inference-time scaling, we sweep the
+number of rounds R up to 25 and evaluate intermediate rounds.
+We simulate spectra using ICEBERG with collision energies {10, 20, 30, 40, 50, 60, 70, 80, 90} (eV) and adduct [M +H]+ .
+We simulate over a range of collision energies to also cover cases where the collision energy was not recorded, selecting the
+collision energy that minimizes the discrepancy. We match simulated and experimental peaks within a 20 ppm tolerance
+and ignore the precursor peak. For each candidate, we identify a small set of informative simulated peaks (by intensity
+thresholding and selecting the top few peaks) and mark each peak as matched if it lies within the ppm tolerance of any
+experimental peak; otherwise it is treated as a hallucination. ICEBERG associates each simulated peak with a fragment,
+enabling attribution of peaks to atoms in the candidate molecule. As described in Sec. 4, atom-wise consistency scores
+are computed, then normalized and aggregated into token-wise consistency scores, yielded from contribution and penalty
+from matched and hallucinated peaks, respectively. Finally, tokens with non-positive scores are independently masked with
+probability pmax · |Stoken |, where pmax =0.75. The resulting partially masked sequence is then re-denoised under the original
+conditions to propose refined candidates.
+We maintain a persistent candidate pool across rounds and deduplicate candidates by connectivity (stereochemistry-agnostic)
+identifiers to ensure refinement invests compute in genuinely new structures rather than repeated samples. To amortize cost,
+ICEBERG calls are batched across molecules and collision energies, and simulated spectra are cached for reuse across
+rounds.
+
+B.4. Compute Benchmarking Details
+For our inference compute benchmarks (in Sec. 5.3), we measure the latency in seconds/spectra on a single NVIDIA 6000
+Ada GPU after an initial warmup period. Diffusion models, including FRIGID, DiffMS, and MADGEN, generate many
+samples and then apply some ranking produce to determine the final ranked predictions. Specifically, FRIGID generates 128
+samples, DiffMS generates 100 samples, and MADGEN generates 50 samples. The reported seconds/spectra refers to the
+total time taken to generate all samples (which is different for each model). We omit speed comparisons to Spec2Mol (Litsa
+et al., 2023) and MIST + Neuraldecipher (Bohde et al., 2025; Le et al., 2020) as the inference code reproduced in Bohde et al.
+(2025) is not publicly available. Similarly, to benchmark the GPU hours required to train each baseline in Sec. 5.3, we train
+each model for one epoch on a single NVIDIA A100 GPU and multiply by the number of epochs used to train each model.
+
+B.5. Train Compute Scaling Details
+In Table 13 we provide settings and additional experimental results for each of the models in our training compute scaling
+study. We train each model for a single epoch with increasingly large numbers of training structures ranging from 3.2M to
+over 1B. For models with less than 10M training structures, we find that smaller models achieve better empirical performance.
+We hypothesize that larger models might be appropriate when scaling training to billions of structures.
+
+
+
+
+                                                             18
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+Table 13. Compute and accuracy evaluations from progressive scaling of the pretraining set. While holding parameter count constant
+for the larger half of pretraining sets, Top-1 and Top-10 reconstruction and structural similarity continues to improve with additional
+molecules observed.
+
+                  # Training                  Training                 Top-1                      Top-10
+                                # Params
+                   Structures                GPU Hours      Accuracy ↑    Tanimoto ↑     Accuracy ↑     Tanimoto ↑
+                     3.2M        82.5M         3.92          9.22%             0.39        12.58%          0.46
+                       8M         82.5M        9.89          10.58%            0.43        14.57%          0.49
+                     12.5M       182.2M        27.06         13.82%            0.47        18.93%          0.53
+                     25.1M       182.2M        54.12         16.81%            0.50        22.42%          0.56
+                     49.9M       182.2M       107.83         18.06%            0.50        22.79%          0.56
+                    112.8M       182.2M       243.65         20.30%            0.53        26.77%          0.60
+                    230.4M       182.2M       497.67         20.92%            0.55        28.02%          0.61
+                      1.0B       247.0M       2777.77        25.03%            0.58        33.37%          0.64
+
+
+
+
+                                                                  19
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+C. FRIGID Predictions
+C.1. NPLIB1 Predictions
+
+
+
+
+Figure 5. Examples of selected test spectra from the NPLIB1 dataset where FRIGID makes successful reconstructions. Rows #1 and
+#2: Two examples of immediate success, where the true structure was correctly generated and identified as the Top 1 (as in Row #1) or
+Top 2 (as in Row #2) candidate in Round 1 (where no inference-time correction has yet been applied). The panels here show the top 5
+ranked candidates. Rows #3 and #4: Examples of an eventual success, where FRIGID fails to create the true molecule in earlier rounds,
+but eventually corrects its predictions to create the true molecule. Row #3 shows this eventual success after 3 rounds of inference-time
+correction; Row #4 after 5 rounds of correction.
+
+
+
+
+                                                                  20
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+
+
+
+Figure 6. Examples of selected test spectra from the NPLIB1 dataset where FRIGID makes errors. Row #1: Failure example where
+FRIGID fails to make or rank the true molecule highly, even after 24 rounds of correction. Row #2: Failure case where applying inference
+time correction worsens the Top 1 ranked structure, from a true structure to a slightly mimicked decoy structure. Note that this structure
+technically differs in formula and would thus be excluded in a formula filtering step, but we visualize it to highlight a possible failure
+mode.
+
+
+
+
+                                                                   21
+          FRIGID: Scaling Diffusion-Based Molecular Generation from Mass Spectra at Training and Inference Time
+
+C.2. MassSpecGym Predictions
+
+
+
+
+Figure 7. Examples of selected test spectra from the MassSpecGym dataset. Rows #1 and #2: Two examples of immediate success, where
+the true structure was correctly generated and identified as the Top 1 (as in Row #1) or Top 2 (as in Row #2) candidate in Round 1 (where
+no inference-time correction has yet been applied). The panels here show the top 5 ranked candidates. Rows #3 and #4: Examples of an
+eventual success, where FRIGID fails to create the true molecule in earlier rounds, but eventually corrects its predictions to create the true
+molecule. Row #3 shows this eventual success after 3 rounds of inference-time correction; Row #4 after 4 rounds of correction. Row #4’s
+intermediate molecules show a progressive improvement in structural similarity leading up to the discovery of the true structure. Row #5:
+Failure example where FRIGID fails to make or rank the true molecule highly, even after 26 rounds of correction.
+
+
+
+
+                                                                     22
+
