@@ -42,3 +42,9 @@ Local grid over OUR upgrade combos on calibrated multi-seed validation
 MetFrag on/off, fp-channel variants, GBM feature sets, dedup variants,
 floor variants. Output: ranked combo table → v14 config. Only the winner
 touches a submission.
+
+## How-to: fingerprint prediction (was missing - added)
+Predict a molecule's chemical fingerprint (which building blocks it has)
+directly from its spectrum, then rank candidates by overlap. Evidence type:
+chemistry inferred without any database hit. Their transformer does it at
+0.65-0.72 local MRR; our MLP at 0.32-0.41. Same data, different bodies.
