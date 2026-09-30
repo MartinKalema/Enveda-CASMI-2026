@@ -112,12 +112,10 @@ def stage_bout(n_query=None, seeds=SEEDS):
         our_frags = pickle.load(f)
     from v7.submit_v7 import frag_match
     from v13.enrich_bde import ladder_score
+    # ---- light frame once (no spectra): maps + masses ----
     tr = pd.read_parquet(
         f"{PROJECT}/data/train.parquet",
-        columns=["normalized_smiles", "inchikey14", "molecular_formula", "adduct", "precursor_mz",
-                 "ms2_mzs", "ms2_normalized_intensities", "instrument_type",
-                 "collision_energy_ev", "ionization_mode"])
-    _tm = None
+        columns=["normalized_smiles", "inchikey14", "molecular_formula", "adduct", "precursor_mz"])
     tr["_neut"] = [nm(p, a) for p, a in zip(tr["precursor_mz"], tr["adduct"])]
     smass = tr.groupby("normalized_smiles")["_neut"].median().to_dict()
     sform = tr.groupby("normalized_smiles")["molecular_formula"].first().to_dict()
@@ -127,9 +125,39 @@ def stage_bout(n_query=None, seeds=SEEDS):
                            _cfm["molecular_formula"]):
         smass.setdefault(_s, float(_m))
         sform.setdefault(_s, _ff)
+    del _cfm
     from collections import Counter as _Counter
     fprior = _Counter(tr["molecular_formula"].tolist())
     gbm9m, gbm9f = gbm9["model"], gbm9["feats"]
+    # ---- global rep pool once: richest spectrum per structure ----
+    # Two passes so peak lists never all sit in RAM at once.
+    _meta = pd.read_parquet(
+        f"{PROJECT}/data/train.parquet",
+        columns=["normalized_smiles", "adduct", "num_peaks"])
+    _rep_smi = _meta.sort_values("num_peaks").groupby("normalized_smiles").tail(1)
+    _rep_smi = _rep_smi["normalized_smiles"].tolist()
+    del _meta
+    gc.collect()
+    _spec = pd.read_parquet(
+        f"{PROJECT}/data/train.parquet",
+        columns=["normalized_smiles", "adduct", "ms2_mzs", "ms2_normalized_intensities"],
+        filters=[("normalized_smiles", "in", _rep_smi)])
+    _spec["_m"] = _spec["normalized_smiles"].map(smass)
+    _spec = _spec.sort_values(["_m", "normalized_smiles"]).drop_duplicates(
+        ["normalized_smiles", "adduct"], keep="last").reset_index(drop=True)
+    _ml = [np.asarray(m, dtype=np.float32) for m in _spec["ms2_mzs"]]
+    _il = [np.asarray(v, dtype=np.float32) for v in _spec["ms2_normalized_intensities"]]
+    _oo = np.zeros(len(_spec) + 1, np.int64)
+    for _i, _m in enumerate(_ml):
+        _oo[_i + 1] = _oo[_i] + len(_m)
+    _rep = np.arange(len(_spec))
+    _rep_key = np.asarray(_spec["normalized_smiles"].tolist(), dtype=object)
+    _rep_nm = np.asarray(_spec["_m"].tolist(), dtype=float)
+    _rep_ad = np.asarray(_spec["adduct"].astype(str).tolist(), dtype=object)
+    _rep_lib = {"off": _oo, "mz": np.concatenate(_ml), "it": np.concatenate(_il)}
+    del _spec, _ml, _il
+    gc.collect()
+    _guard("rep pool built")
     res = {"theirs": [], "ours": []}
     for seed in seeds:
         _guard(f"seed {seed} start")
@@ -137,19 +165,26 @@ def stage_bout(n_query=None, seeds=SEEDS):
         groups = list(d.groupby(["seed", "truth"]))
         if n_query is not None:
             groups = groups[:n_query]
-        # full-library reps for this seed (NOT window-restricted)
-        _dbfull = tr[~tr["normalized_smiles"].isin(
-            set(d["truth"].unique().tolist()))]
-        _libfull = load_library_df(_dbfull, L.neutral_mass)
-        _rep, _rep_key, _rep_nm, _rep_ad = L.build_rep(_libfull)
+        # per-seed spectra: one filtered read for union(candidates + truths)
+        _uni = set()
+        for _, _g in groups:
+            _uni.update(_g["cand"].tolist())
+        _uni.update([_t for _, _t in groups])
+        _spec = pd.read_parquet(
+            f"{PROJECT}/data/train.parquet",
+            columns=["normalized_smiles", "adduct", "precursor_mz", "ms2_mzs",
+                     "ms2_normalized_intensities", "instrument_type",
+                     "collision_energy_ev", "ionization_mode"],
+            filters=[("normalized_smiles", "in", sorted(_uni))])
+        _guard(f"seed {seed} spectra loaded")
         for (sd, truth), g in groups:
             cands = g["cand"].tolist()
-            qrows = tr[tr["normalized_smiles"] == truth].head(2)
+            qrows = _spec[_spec["normalized_smiles"] == truth].head(2)
             if len(qrows) == 0:
                 continue
             q = qrows.iloc[0]
             # ---- THEIR side ----
-            lib_rows = tr[tr["normalized_smiles"].isin(set(cands))]
+            lib_rows = _spec[_spec["normalized_smiles"].isin(set(cands))]
             lib = load_library_df(lib_rows, L.neutral_mass)
             specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
             target = float(np.median([nm(p, a) for p, a in
@@ -157,7 +192,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
             lib_hits = L.lib_sim(lib, specs, target)
             lv = np.array([lib_hits.get(s, 0.0) for s in cands], np.float32)
             rep, rep_key, rep_nm, rep_ad = _rep, _rep_key, _rep_nm, _rep_ad
-            an = L.analog_sim(_libfull, specs, target, rep, rep_key, rep_nm, rep_ad)
+            an = L.analog_sim(_rep_lib, specs, target, rep, rep_key, rep_nm, rep_ad)
             amd = {k: v for k, v in an}
             afp, asim = [], []
             for k, v in an[:80]:
@@ -266,7 +301,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
             res["ours"].append(1 / ro_rank if ro_rank <= 25 else 0.0)
         print(f"seed {seed}: theirs={np.mean(res['theirs'][-50:]):.3f} "
               f"ours={np.mean(res['ours'][-50:]):.3f}", flush=True)
-        del d, _dbfull, _libfull
+        del d, _spec
         _up.cache_clear()
         gc.collect()
         _guard(f"seed {seed} end")
