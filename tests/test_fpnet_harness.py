@@ -43,7 +43,12 @@ def test_model_logits_finite():
                  "ms2_normalized_intensities", "instrument_type",
                  "collision_energy_ev", "ionization_mode"]).head(1)
     r = tr.iloc[0]
+    ce = r["collision_energy_ev"]
+    try:
+        ce = float(np.mean(np.atleast_1d(ce))) if ce is not None and len(np.atleast_1d(ce)) else 25.0
+    except Exception:
+        ce = 25.0
     z = F._logits_raw([(r["ms2_mzs"], r["ms2_normalized_intensities"])], [net],
                       r["precursor_mz"], r["adduct"], r["instrument_type"],
-                      r["collision_energy_ev"], 1.0)
+                      ce, 1.0)
     assert z is not None and np.all(np.isfinite(z)) and len(z) == 6930
