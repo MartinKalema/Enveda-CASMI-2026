@@ -29,6 +29,7 @@ parts = [
     "import math",
     "import numpy as np, pandas as pd, torch, glob, os",
     "import torch.nn as nn",
+    "import torch.nn.functional as F",
     "from rdkit import Chem",
     "from rdkit.Chem import rdFingerprintGenerator",
     "from rdkit.Chem import Descriptors, MACCSkeys",

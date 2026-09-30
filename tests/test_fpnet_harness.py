@@ -19,6 +19,8 @@ def test_bits_mask_shape():
 
 def test_fp_and_mass_shape():
     import v13.fork_fpnet_raw as F
+    F.BITS = np.load("/tmp/cocofp/fp_bits.npy")
+    F._fp_init()
     F._fp_init()
     out = F.fp_and_mass("CCO")
     assert out is not None
