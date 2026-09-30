@@ -14,7 +14,8 @@ def test_their_frag_uses_real_scorer():
 
 def test_analogs_from_full_library_reps():
     s = _src()
-    assert "lib_rows = tr[tr" not in s, "analogs must not be window-restricted"
+    assert "analog_sim(_libfull" in s, "analogs must use full-library reps"
+    assert "_rep, _rep_key, _rep_nm, _rep_ad = L.build_rep(_libfull)" in s
 
 
 def test_model_dual_view():
