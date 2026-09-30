@@ -13,7 +13,8 @@ def test_harness_has_all_pieces():
 def test_bits_mask_shape():
     import v13.fork_fpnet_raw as F
     bits = np.load("/tmp/cocofp/fp_bits.npy")
-    assert bits.sum() == 6930, f"expected 6930 informative bits, got {bits.sum()}"
+    assert bits.shape == (6930,) and bits.max() < 4096 + 4096 + 2048 + 167, \
+        f"bit-index array unexpected: {bits.shape}"
 
 
 def test_fp_and_mass_shape():
@@ -33,6 +34,7 @@ def test_model_logits_finite():
     ck = torch.load("/tmp/fpmodels/fp_single_s2.pt", map_location="cpu", weights_only=False)
     net = F.FPNet(ck["nbits"], d=ck["d"], layers=ck["layers"]).eval()
     net.load_state_dict(ck["model"])
+    F._MODEL = ([net], [], "cpu", ck["nbits"])
     tr = pd.read_parquet(
         "/Users/martin/Desktop/enveda-casmi26-molecule-id/data/train.parquet",
         columns=["normalized_smiles", "adduct", "precursor_mz", "ms2_mzs",
