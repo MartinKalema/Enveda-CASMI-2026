@@ -138,3 +138,9 @@
     Rule: a surprising zero is a harness suspect first, a finding second -
     verify the harness runs the target code correctly before believing any
     number it prints, especially zeros.
+
+## H-shift ladder isolation (local, n=30)
+39. Same fragments, same peaks, only H-ladder varies: 5-state ladder MRR
+    0.482 vs single-+H 0.224. The ladder more than doubles fragmentation
+    scoring. It is the single biggest verified sub-component win: BDE
+    enumeration selects better pieces, the ladder matches much more of them.
