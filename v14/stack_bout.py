@@ -112,6 +112,11 @@ def stage_bout(n_query=None, seeds=SEEDS):
         groups = list(d.groupby(["seed", "truth"]))
         if n_query is not None:
             groups = groups[:n_query]
+        # full-library reps for this seed (NOT window-restricted)
+        _dbfull = tr[~tr["normalized_smiles"].isin(
+            set(d["truth"].unique().tolist()))]
+        _libfull = load_library_df(_dbfull, L.neutral_mass)
+        _rep, _rep_key, _rep_nm, _rep_ad = L.build_rep(_libfull)
         for (sd, truth), g in groups:
             cands = g["cand"].tolist()
             qrows = tr[tr["normalized_smiles"] == truth].head(2)
@@ -126,8 +131,8 @@ def stage_bout(n_query=None, seeds=SEEDS):
                                       zip(qrows["precursor_mz"], qrows["adduct"])]))
             lib_hits = L.lib_sim(lib, specs, target)
             lv = np.array([lib_hits.get(s, 0.0) for s in cands], np.float32)
-            rep, rep_key, rep_nm, rep_ad = L.build_rep(lib)
-            an = L.analog_sim(lib, specs, target, rep, rep_key, rep_nm, rep_ad)
+            rep, rep_key, rep_nm, rep_ad = _rep, _rep_key, _rep_nm, _rep_ad
+            an = L.analog_sim(_libfull, specs, target, rep, rep_key, rep_nm, rep_ad)
             amd = {k: v for k, v in an}
             afp, asim = [], []
             for k, v in an[:80]:
@@ -144,17 +149,32 @@ def stage_bout(n_query=None, seeds=SEEDS):
                 ce = 25.0
             zlog = F._logits_raw([(q["ms2_mzs"], q["ms2_normalized_intensities"])], [tnet],
                                  q["precursor_mz"], q["adduct"], q["instrument_type"], ce, 1.0)
+            try:
+                _mp = F._merge_peaks(qrows)
+                _mz = np.concatenate([np.asarray(a, float) for a, _ in _mp]) \
+                    if isinstance(_mp, list) else np.asarray(q["ms2_mzs"], float)
+                _it = np.concatenate([np.asarray(b, float) for _, b in _mp]) \
+                    if isinstance(_mp, list) else np.asarray(q["ms2_normalized_intensities"], float)
+                _zm = F._logits_raw([(_mz, _it)], [tnet],
+                                    q["precursor_mz"], q["adduct"], q["instrument_type"], ce, 1.0)
+                if _zm is not None and zlog is not None:
+                    zlog = (zlog + _zm) / 2.0
+            except Exception:
+                pass
             cfp = []
             for s in cands:
                 t = F.fp_and_mass(s)
                 cfp.append(t[0].astype(np.float32) if t is not None else np.zeros(6930, np.float32))
             cfp = np.stack(cfp)
+            from v13.fork_frag_raw import explain_score as their_explain
             fr = []
             for s in cands:
                 f = their_frags.get(s, np.zeros(0))
                 m2 = np.asarray(q["ms2_mzs"], float)
-                fr.append(float((np.isin(np.round(m2 / 0.01).astype(int),
-                                         np.round(f / 0.01).astype(int))).mean()) if len(f) else 0.0)
+                i2 = np.asarray(q["ms2_normalized_intensities"], float)
+                md = 1.0 if str(q["adduct"]).rstrip().endswith("]+") else -1.0
+                fr.append(float(their_explain(np.asarray(f, float), m2, i2,
+                                              mode=md, tol=0.01)) if len(f) else 0.0)
             fr = np.array(fr, np.float32)
             X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
             pt = np.mean([m.predict_proba(X)[:, 1] for m in rankers.values()], axis=0)
