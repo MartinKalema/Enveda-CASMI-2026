@@ -150,3 +150,10 @@
     theirs 0.056. Tuning is worth ~+0.01 over habits on 3 features; the
     8-feature set was worth +0.10. Features dominate params 10-to-1.
     Adopted as default for all future ranker training.
+
+## Params do not transfer across feature sets (GBM final)
+41. Grid-winning params (lr 0.05/31 leaves/l2 1.0, tuned on 3 feats) scored
+    0.203/0.134/0.133 (mean 0.157) on 8 feats vs 0.202/0.165/0.177
+    (mean 0.181) with the old params. The "adopt as default" conclusion was
+    overgeneralized: tune per feature set, never port params. v11/gbm_full.pkl
+    stays the production ranker; v13/gbm_final.pkl is NOT shipped.
