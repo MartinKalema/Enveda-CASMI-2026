@@ -177,6 +177,11 @@ def build_rep(L):
 # ===================================================================================
 #  711,705-Structure Candidate Pool with Bitpacked Precomputed Fingerprints
 # ===================================================================================
+def clean_spectrum(mz, it):
+    return _clean(np.asarray(mz, np.float32), np.asarray(it, np.float32),
+                  CFG.INT_FLOOR, CFG.MAX_PEAKS, CFG.INT_POWER, CFG.ENT_WEIGHT)
+
+
 def lib_sim(L, specs, target):
     """CLASS 1: Direct match against library spectra within tight neutral mass window."""
     cand_all = lib_window(L, target, target * CFG.PPM_WIN / 1e6)
