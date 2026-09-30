@@ -33,6 +33,13 @@ class Q:
         self.ionization_mode = r.get("ionization_mode", "positive")
 
 
+def ce_fallback(ce):
+    try:
+        return float(np.mean(np.atleast_1d(ce))) if ce is not None and len(np.atleast_1d(ce)) else 25.0
+    except Exception:
+        return 25.0
+
+
 def run(n_query=30, seed=30):
     from rdkit.Chem import MACCSkeys
     from rdkit.Chem.Descriptors import ExactMolWt
@@ -44,6 +51,7 @@ def run(n_query=30, seed=30):
     ck = torch.load("/tmp/fpmodels/fp_single_s2.pt", map_location="cpu", weights_only=False)
     tnet = FF.FPNet(ck["nbits"], d=ck["d"], layers=ck["layers"]).eval()
     tnet.load_state_dict(ck["model"])
+    FF._MODEL = ([tnet], [], "cpu", ck["nbits"])
     mynet = FpMLP(d_h=1536).to(device)
     mynet.load_state_dict(torch.load(f"{PROJECT}/data/fp_trans.pt", map_location=device))
     mynet.eval()
@@ -80,7 +88,7 @@ def run(n_query=30, seed=30):
         qo = Q(q)
         tz = FF._logits_raw([(q["ms2_mzs"], q["ms2_normalized_intensities"])],
                             [tnet], q["precursor_mz"], q["adduct"],
-                            qo.instrument_type, qo.collision_energy_ev, 1.0)
+                            qo.instrument_type, ce_fallback(qo.collision_energy_ev), 1.0)
         v = np.zeros(N_BINS + len(ADDUCTS) + 2, dtype=np.float32)
         v[:N_BINS] = bin_spectrum(q["ms2_mzs"], q["ms2_normalized_intensities"])
         v[N_BINS:] = meta_vec(q["adduct"], q["precursor_mz"], q["collision_energy_ev"])

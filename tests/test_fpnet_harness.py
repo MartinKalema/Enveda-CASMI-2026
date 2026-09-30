@@ -52,3 +52,17 @@ def test_model_logits_finite():
                       r["precursor_mz"], r["adduct"], r["instrument_type"],
                       ce, 1.0)
     assert z is not None and np.all(np.isfinite(z)) and len(z) == 6930
+
+
+def test_ce_fallback():
+    from v13.compare_fpnet import ce_fallback
+    assert ce_fallback(None) == 25.0
+    assert ce_fallback([20.0, 40.0]) == 30.0
+
+
+def test_null_ce_rate_documented():
+    import pandas as pd
+    tr = pd.read_parquet(
+        "/Users/martin/Desktop/enveda-casmi26-molecule-id/data/train.parquet",
+        columns=["collision_energy_ev"])
+    assert tr["collision_energy_ev"].isnull().mean() > 0.05
