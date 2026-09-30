@@ -88,7 +88,12 @@ def stage_bout(n_query=None, seeds=SEEDS):
         our_frags = pickle.load(f)
     from v7.submit_v7 import frag_match
     from v13.enrich_bde import ladder_score
-    _tm = tr.groupby("normalized_smiles")["neutral"].median() if "neutral" in tr.columns else None
+    tr = pd.read_parquet(
+        f"{PROJECT}/data/train.parquet",
+        columns=["normalized_smiles", "inchikey14", "molecular_formula", "adduct", "precursor_mz",
+                 "ms2_mzs", "ms2_normalized_intensities", "instrument_type",
+                 "collision_energy_ev", "ionization_mode"])
+    _tm = None
     tr["_neut"] = [nm(p, a) for p, a in zip(tr["precursor_mz"], tr["adduct"])]
     smass = tr.groupby("normalized_smiles")["_neut"].median().to_dict()
     sform = tr.groupby("normalized_smiles")["molecular_formula"].first().to_dict()
@@ -101,11 +106,6 @@ def stage_bout(n_query=None, seeds=SEEDS):
     from collections import Counter as _Counter
     fprior = _Counter(tr["molecular_formula"].tolist())
     gbm9m, gbm9f = gbm9["model"], gbm9["feats"]
-    tr = pd.read_parquet(
-        f"{PROJECT}/data/train.parquet",
-        columns=["normalized_smiles", "inchikey14", "molecular_formula", "adduct", "precursor_mz",
-                 "ms2_mzs", "ms2_normalized_intensities", "instrument_type",
-                 "collision_energy_ev", "ionization_mode"])
     res = {"theirs": [], "ours": []}
     for seed in seeds:
         d = pd.read_parquet(f"{PROJECT}/v5/feat_cache/seed{seed}.parquet")
@@ -218,7 +218,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
 
 if __name__ == "__main__":
     import sys
-    if "--stage prefrag" in sys.argv:
+    if "--stage" in sys.argv:
         stage_prefrag()
     else:
         stage_bout()
