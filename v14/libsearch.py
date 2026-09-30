@@ -2,6 +2,7 @@ import numpy as np, pandas as pd
 from numba import njit, prange
 from types import SimpleNamespace
 CFG = SimpleNamespace(PPM_WIN=8.5, MZ_TOL=0.01, INT_FLOOR=0.002, MAX_PEAKS=256, INT_POWER=1.0, ENT_WEIGHT=True, ANALOG_WIN=200.0, N_ANALOG=100, SIM_POWER=4.0)
+@njit(cache=True, fastmath=True)
 def _clean(mz, it, floor, topk, power, ent_weight):
     n = len(mz)
     if n == 0:
