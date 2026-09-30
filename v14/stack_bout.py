@@ -307,6 +307,13 @@ def stage_bout(n_query=None, seeds=SEEDS):
         _guard(f"seed {seed} end")
     print("BOUT: theirs=%.3f ours=%.3f (n=%d)" % (
         np.mean(res["theirs"]), np.mean(res["ours"]), len(res["theirs"])))
+    with open(f"{PROJECT}/v14/bout_log.csv", "w") as _lf:
+        _lf.write("side,mrr\n")
+        for _v in res["theirs"]:
+            _lf.write(f"theirs,{_v}\n")
+        for _v in res["ours"]:
+            _lf.write(f"ours,{_v}\n")
+    print("wrote v14/bout_log.csv", flush=True)
 
 
 if __name__ == "__main__":
