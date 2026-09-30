@@ -157,3 +157,10 @@
     (mean 0.181) with the old params. The "adopt as default" conclusion was
     overgeneralized: tune per feature set, never port params. v11/gbm_full.pkl
     stays the production ranker; v13/gbm_final.pkl is NOT shipped.
+
+## TDD is the process (rule, not aspiration)
+42. No measurement counts without a green test suite behind the harness that
+    produced it. Tests are written FIRST (watch them fail), implementation
+    second, numbers last. Background runs without tests are how the +H bug,
+    the decorator bug, the tail-pipe losses, and the positional merge all
+    shipped. The suite lives in tests/ and CI is `pytest tests/ -q`.
