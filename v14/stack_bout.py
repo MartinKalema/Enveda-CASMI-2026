@@ -85,7 +85,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
     def _guard(stage):
         gb = _rss_gb()
         print(f"[mem] {stage}: peak {gb:.1f}GB", flush=True)
-        if gb > 11.0:
+        if gb > 13.0:
             raise MemoryError(f"RSS cap exceeded at {stage}: {gb:.1f}GB")
 
     rankers = pickle.load(open(f"{PROJECT}/v13/their_ranker.pkl", "rb"))
