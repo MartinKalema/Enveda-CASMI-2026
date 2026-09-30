@@ -71,14 +71,14 @@ def main():
     feat[FE] = feat[FE].fillna(0)
     for held in SEEDS:
         trn = feat[feat["seed"] != held]; va = feat[feat["seed"] == held]
-        clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+        clf = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                              max_leaf_nodes=15, l2_regularization=10.0)
         clf.fit(trn[FE], trn["y"])
         for name, col in [("gbm25", None), ("gbm3", ["cos", "ent", "ana"]), ("ana", None)]:
             if name == "gbm25":
                 va = va.copy(); va["s"] = clf.predict_proba(va[FE])[:, 1]
             elif name == "gbm3":
-                c3 = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+                c3 = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                                     max_leaf_nodes=15, l2_regularization=10.0)
                 c3.fit(trn[["cos", "ent", "ana"]], trn["y"])
                 va = va.copy(); va["s"] = c3.predict_proba(va[["cos", "ent", "ana"]])[:, 1]
@@ -93,7 +93,7 @@ def main():
 
 
     feats = ["cos", "ent", "ana", "mass_err", "log_prior", "t_top1"]
-    final = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+    final = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                            max_leaf_nodes=15, l2_regularization=10.0)
     fall = feat.copy()
     final.fit(fall[feats], fall["y"])

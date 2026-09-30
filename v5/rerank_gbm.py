@@ -29,7 +29,7 @@ def main():
     for held in SEEDS:
         tr = feat[feat["seed"] != held]
         va = feat[feat["seed"] == held]
-        clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+        clf = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                              max_leaf_nodes=15, l2_regularization=10.0)
         clf.fit(tr[FEATS], tr["y"])
         va = va.copy()
@@ -39,7 +39,7 @@ def main():
               f"cos={mrr(va, 'cos'):.3f} ana={mrr(va, 'ana'):.3f}", flush=True)
     import pickle
     tr_all = feat
-    clf = HistGradientBoostingClassifier(max_iter=300, learning_rate=0.05,
+    clf = HistGradientBoostingClassifier(random_state=0, max_iter=300, learning_rate=0.05,
                                          max_leaf_nodes=15, l2_regularization=10.0)
     clf.fit(tr_all[FEATS], tr_all["y"])
     with open(f"{PROJECT}/v5/gbm_ranker.pkl", "wb") as f:
