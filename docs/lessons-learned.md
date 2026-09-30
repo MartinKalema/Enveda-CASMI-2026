@@ -164,3 +164,10 @@
     second, numbers last. Background runs without tests are how the +H bug,
     the decorator bug, the tail-pipe losses, and the positional merge all
     shipped. The suite lives in tests/ and CI is `pytest tests/ -q`.
+
+## Stack-vs-stack bout (n=150, identical queries)
+43. Theirs 0.595 vs ours 0.445. Component wins do not survive integration:
+    our BDE beats their frag alone, but their 31-feature ranker combining
+    four channels beats our 9-feature GBM combining six. Breadth +
+    calibration beats best-single-channel. Next: our channels as features
+    inside THEIR ranker shape (retrain), not our ranker with their pieces.
