@@ -1,0 +1,1353 @@
+                                              MIST-CF: Chemical formula inference from
+                                                                      tandem mass spectra
+
+
+
+
+arXiv:2307.08240v1 [q-bio.QM] 17 Jul 2023
+                                             Samuel Goldman,†,∥ Jiayi Xin,‡,∥ Joules Provenzano,¶ and Connor W. Coley∗,¶,§
+
+                                             †Computational and Systems Biology, Massachusetts Institute of Technology, Cambridge,
+                                                                              Massachusetts 02139, USA
+                                            ‡Statistics and Actuarial Science, The University of Hong Kong, Hong Kong 999077, China
+                                            ¶Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge,
+                                                                              Massachusetts 02139, USA
+                                             §Department of Electrical Engineering and Computer Science, Massachusetts Institute of
+                                                                Technology, Cambridge, Massachusetts 02139, USA
+                                                                                  ∥Equal contribution
+
+                                                                                E-mail: *ccoley@mit.edu
+
+
+                                                                                       Abstract
+
+                                                    Chemical formula annotation for tandem mass spectrometry (MS/MS) data is the
+
+                                                 first step toward structurally elucidating unknown metabolites. While great strides have
+
+                                                 been made toward solving this problem, the current state-of-the-art method depends on
+
+                                                 time-intensive, proprietary, and expert-parameterized fragmentation tree construction
+
+                                                 and scoring. In this work we extend our previous spectrum Transformer methodology
+
+                                                 into an energy based modeling framework, MIST-CF: Metabolite Inference with Spec-
+
+                                                 trum Transformers for Chemical Formulae, for learning to rank chemical formula and
+
+                                                 adduct assignments given an unannotated MS/MS spectrum. Importantly, MIST-CF
+
+                                                 learns in a data dependent fashion using a Formula Transformer neural network archi-
+
+                                                 tecture and circumvents the need for fragmentation tree construction. We train and
+
+                                                                                            1
+     evaluate our model on a large open-access database, showing an absolute improvement
+
+     of 10% top 1 accuracy over other neural network architectures. We further validate our
+
+     approach on the CASMI2022 challenge dataset, achieving nearly equivalent performance
+
+     to the winning entry within the positive mode category without any manual curation
+
+     or post-processing of our results. These results demonstrate an exciting strategy to
+
+     more powerfully leverage MS2 fragment peaks for predicting MS1 precursor chemical
+
+     formula with data driven learning.
+
+Keywords: mass spectrometry, machine learning, metabolomics, graph neural networks,
+chemical formulae
+
+
+
+Introduction
+
+The discovery of previously unknown small molecules in biological samples is rapidly expand-
+ing our knowledge of plant chemistry, 1,2 cancer biology, 3,4 host-microbiome interactions, 5–7
+and other metabolite-mediated human biology. 8 Similar small molecule discoveries in the
+environmental sciences have led to new insights regarding the exposome and pollutant ef-
+fects, resolving mysteries such as high salmon mortality rates. 9,10 Increasing our ability to
+detect and identify the so-called “dark metabolome” with analytical chemistry techniques
+represents an exciting opportunity in experimental and computational chemistry.
+   Tandem mass spectrometry (MS/MS) is a particularly well-suited analytical technique
+for this, as it allows for the high throughput characterization of small molecules from com-
+plex mixtures. 11 In an MS/MS experiment, both an intact ionized mass (MS1) and a set
+of fragment peak masses (MS2) can be measured for each unknown molecule. This frag-
+mentation spectrum serves as a structural representation of the molecule, ideally allowing
+the practitioner to match a small molecule structure to each resulting spectrum based upon
+database spectra matches. Due to the vastness of chemical space, however, many observed
+spectra have no precedent; in a large public MS/MS database, 87% of observed spectra
+remain unannotated. 12
+
+                                               2
+   In such instances without spectral matches, we must rely on informatics and predictive
+modeling to identify the likely molecular structure. This pipeline almost always begins by
+inferring a chemical formula from the observed spectrum (Figure 1a). There are many for-
+mula options for each observed MS1 value, especially for higher mass compounds. Specifying
+the chemical formula (e.g., C6H12O6, C9H11NO3, etc.) constrains the space of potential com-
+pound candidates to a set of isomers, whereas the MS1 alone only constrains the space of
+candidates to those with similar masses. Automated assignment is far from trivial; while
+the the maximum formula annotation accuracy was 94% in in the recent Critical Assessment
+of Metabolite Identification in 2022 (CASMI20220), 13 the median score was 71%, and these
+percentages were calculated only for the submitted predictions, rather than the total num-
+ber of spectra tested. Improving the automated prediction accuracy of this step promises to
+improve, simplify, and speed up downstream analyses.
+   Chemical formula annotation tools can be grouped into two categories: database depen-
+dent and database independent. Database dependent searches place restrictions on potential
+formulae, querying the candidate mass and spectrum against databases including NIST, 14
+GNPS, 15 HMDB, 16 or large compound libraries such as PubChem. 17 Relying on databases
+inherently limits annotations to formulae that have already been observed. On the other
+hand, database independent (de novo) chemical formula annotation considers all possible
+chemical formulae, though the task becomes more challenging due to the larger number of
+candidates. A recent bottom-up computational approach, BUDDY, 18 is a hybrid of the two
+approaches and assigns database formulae to MS2 peaks and neutral losses. By combining
+peak and neutral loss annotations, BUDDY generates potential candidates not present in
+databases. However, overall annotation performance is a function both of how the candidate
+space is defined and an algorithm’s ability to rank them; this limits our ability to perform a
+direct comparison to or analysis of BUDDY. Herein we focus specifically on de novo formula
+annotation for maximal flexibility using only MS/MS information.
+   Notably, both MZMine 19,20 and SIRIUS 21–23 have developed widely used methods for
+
+
+                                              3
+scoring chemical formula candidates using MS/MS information for de novo annotation.
+While MZMine evaluates each candidate formula based on the number of MS/MS peaks
+it can explain, 20 SIRIUS scores them through a more expressive fragmentation tree strat-
+egy. 21–23 SIRIUS first proposes candidate formulae through an exhaustive enumeration step
+up to a certain mass error from the observed MS1, labels the MS2 peaks with potential
+“subformulae” of the candidate MS1 annotation, performs an optimization to arrange these
+subformula annotations into a fragmentation tree, and finally computes a likelihood of the
+chemical formula based upon the tree and isotopic patterns. Despite their success and
+widespread use, these methods offer room for improvement in terms of both accuracy and
+speed. We recently observed program timeouts using SIRIUS for larger molecules (i.e.,
+over 800 Da) during fragmentation tree calculations. 24 An additional, lesser appreciated
+component of SIRIUS is that the method re-ranks candidate chemical formula based upon
+compound scores in the structure annotation step; this phase implicitly reposes SIRIUS as
+a database dependent search and led to a nearly 50% change in formula annotations in
+our previous study. 24 It is unclear which pipeline steps lead to the high empirical formula
+annotation rates and the extent to which the tree score can be improved.
+   In this work, we present MIST-CF: Metabolite Inference with Spectrum Transformers
+for Chemical Formulae, an energy-based modeling approach to improving the database-
+independent, de novo chemical formula assignment step conditioned on both the MS1 mass
+and MS/MS spectrum. We previously demonstrated that Formula Transformers can be used
+to replace fragmentation tree kernels in the annotation step. 24 This study now demonstrates
+that fragmentation trees can be replaced throughout the MS/MS processing pipeline for
+equally accurate, fast, and robust predictions. As part of this, we develop a simple peak
+subformula assignment routine, thus circumventing the need for fragmentation tree construc-
+tion. We rigorously evaluate the performance of MIST-CF on two datasets: a public dataset
+subset from the GNPS 15 we term NPLIB1 25,26 and a variant of NPLIB1 including spectra
+from the commercial NIST20 dataset. 14 By training and evaluating our model both with and
+
+
+                                             4
+without data from NIST20, we enable reproducible evaluation of select trained models even
+in the absence of a NIST20 license. MIST-CF achieves equivalent formula annotation accu-
+racy on the positive mode CASMI2022 challenge spectra to the winning SIRIUS solution and
+outperforms the out-of-the-box SIRIUS assignments by a margin of 18% . Altogether, this
+demonstrates a path forward for replacing fragmentation trees in MS/MS data processing
+with a fully integrated deep learning processing structure annotation pipeline.
+   We release MIST-CF as an open source tool that can be easily integrated into existing
+pipelines, with or without retraining, and is freely available under the MIT license at ref.
+Zenodo 8151513 and https://github.com/samgoldman97/mist-cf.
+
+
+
+
+                                             5
+  a
+                                                               MIST-CF
+
+
+                                                                                                        C9H10O3                           HO                       O
+                               MS/MS data
+                               acquisition                           m/z
+                                                                                                                                                         H2N       OH
+                                                             MS/MS data                             Chemical formula                          Molecular structure
+
+
+  b
+                                                                                                        Candidate chemical formulae
+
+
+      Unknown
+                               MS1 Precusor                                              C9H8N2O2 + H+               C6H9FN2O3 + H+        C5H11N3O2P + H+
+                               m/z: 177.0661
+                                                                              C4H7FN5O2 + H+                 C7H12N3 + K+     C4H8FN5O2 - e-
+
+
+   MS/MS spectrum
+                        MS2
+                                       Inten.
+                      Spectrum
+                                                    m/z                                                                       Model scoring
+
+
+                      Ground truth                                                                MIST-CF                             SIRIUS
+                     Formula: C9H8N2O2                                                  (Trained energy-based model)          (MAP parameter estimates)
+                    Adduct Type: [M+H]+
+
+                                                                                         C8H5O3
+                                                                              C3H5O2      C 2H 2O
+                                                                                                    Label MS2 subforms       Label MS2 subforms
+
+
+  Cand.                        Score Rank                                              m/z
+  C9H8N2O2 + H         +                                                   Formula transformer                                Fragmentation tree
+                                98.7            1
+
+                                                     TOP 3
+                                                                               {CXHYNZ}
+  C6H9FN2O3 + H            +
+                                80.7            2
+
+                                                             TOP 5
+  C5H11N3O2P + H+               70.2            3
+                                                                                                      MIST-CF score              Tree score
+  C4H7FN5O2 + H+                68.5            4
+                                                                                                                                                   P(T|D) = P(D|T)P(T)/P(D)
+  C4H8FN5O2 - e-                58.5            5                                                    Score                                                 Score
+  C7H12N3 + K+                  50.1            6
+
+
+
+Figure 1: MIST-CF and SIRIUS both address the MS/MS chemical formula an-
+notation problem. a. Input samples are first processed, recording a tandem mass spec-
+trum. Before assigning full molecular structures, the chemical formula can first be inferred
+to constrain structure assignment. b. Methodological similarities and differences between
+MIST-CF and SIRIUS. A candidate precursor mass is first decomposed into plausible chem-
+ical formulae and adduct pairs. MIST-CF (left) learns in a data-driven fashion to assign
+scores and circumvents the need of fragmentation tree construction compared to SIRIUS
+(right).
+
+
+
+
+                                                                                              6
+Methods
+
+Preliminaries
+
+In an MS/MS experiment, an input small molecule M is ionized, often by the addition of
+an adduct (denoted by one-hot vector, A), measured, and fragmented in order to produce
+an MS/MS spectrum S. The spectrum is composed of peaks that can each be represented
+as mass, intensity pairs:
+
+
+                      S := {(M (1) , I (1) ), (M (2) , I (2) ), . . . (M (|S|) , I (|S|) )}   (1)
+
+
+Herein we consider only positively charged ions and peaks and assume that each fragment
+carries only a single positive charge; m/z and mass are used interchangeably when describing
+observed peaks.
+   In addition to the observed MS/MS spectrum S, we also have access to the MS1 mea-
+surements denoted as the precursor mass M . The core challenge of formula annotation is
+to determine the chemical formula of M given M and S. We denote the target chemical
+formula as a vector of integers, F .
+   We represent the target chemical formula as a vector F , in which each index (F )j ∈ Z+
+corresponds to the integer count for the observed j th element, where the parenthetical de-
+notes an index into the vector. In total, we consider a set of common elements, “C”, “N”,
+“P”, “O”, “S”, “Si”, “I”, “H”, “Cl”, “F”, “Br”, “B”, “Se”, “Fe”, “Co”, “As”, “Na”, and “K” for
+formula vectors of size 18. We consider common positive mode adducts when generat-
+ing chemical formula candidates: [M+H]+ , [M+Na]+ , [M-H2 O+H]+ , [M+NH4 ]+ , [M]+ , and
+[M-2H2 O+H]+ . The adduct candidate is specified by a one-hot vector A. For de novo chem-
+ical formula annotation, M can be decomposed into potential formula and adduct candidate
+options exhaustively using a highly efficient dynamic programming algorithm 22 within small
+1 to 5 parts-per-million (ppm) mass tolerances. The generated (formula, adduct) candi-
+
+
+
+                                                       7
+dates {(F (1) , A(1) ), (F (2) , A(2) ), (F (k) , A(k) )} can be further filtered based on presence in
+a database or using various heuristics such as number of ring double bond equivalents if
+desired. 27
+    In addition to inferring the chemical formula for the full molecule, a step common to
+SIRIUS fragmentation tree generation 21 and CSI:FingerID 28 is to derive corresponding sub-
+formula annotations for the MS/MS peaks. In this way, a spectrum can be considered as a set
+of (subformulae, intensity) pairings, in which the set of peak masses {M (1) , M (2) , . . . M (|S|) }
+is replaced with a set of chemical formula vectors {f (1) , f (2) , . . . , f (Np ) }, where each chemical
+formula is a subset of the precursor formula, i.e., f (j) ⊆ F ; peaks for which no formula can
+be assigned are excluded from the list. Because the fragment peaks are also charged, the ob-
+served masses are a summation of the mass of the subformula and its adduct. We define the
+MS2 peak adduct for the ith peak a(i) , the mass of which must be subtracted when consid-
+ering chemical formula assignment. The parts-per-million difference at each peak between
+the adduct-adjusted peak mass and assigned subformula is referred to as ϵ(i) to indicate
+measurement error.
+
+
+Approaching chemical formula annotation with an energy based model
+
+formulation
+
+As exhaustive chemical formula candidate generation can be solved via dynamic program-
+ming, 22 the key challenge in de novo formula annotation is to score how well each candidate
+formula matches the observed MS1 and MS2 spectra. Taking a probabilistic lens and follow-
+ing previous work in metabolomics and proteomics, 22,29 our goal is to learn the probability
+of a candidate chemical formula and adduct, pθ (F (i) , A(i) |S, M ). We assume the MS1 is
+useful only for candidate generation, and so the problem is simplified to approximating
+pθ (F (i) , A(i) |S).
+    Energy based models (EBM) are a probabilistic modeling framework drawing inspiration
+from physics in which a probability distribution is defined by an energy function, Eθ . 30
+
+                                                    8
+Mathematically, EBMs take the form:
+
+
+                                                       e−Eθ (x)
+                                          pθ (x) =              ,                                             (2)
+                                                        Z(θ)
+                                  R
+where the denominator Z(θ) =       x
+                                       e−Eθ (x) dx is referred to as a partition function and serves
+to normalize the energy to a valid probability, but is typically intractable to evaluate exactly.
+EBMs have reemerged in recent years, with work across the chemical sciences for reaction
+prediction, 31 retrosynthesis, 32 and scoring protein side-chain positions. 33 These models are
+naturally suited for ranking applications. In our case, we factorize the probability of the
+candidate formula conditioned on the spectrum as an EBM of the form:
+
+
+                                                         eGθ (F (i) ,A(i) ,S)
+                               pθ (F (i) , A(i) |S) =                         ,                               (3)
+                                                              Z(θ)
+
+where Gθ (F , A, S) defines an arbitrary neural network energy function that takes as input
+the candidate formula, adduct, and full fragmentation spectrum. For any differentiable Gθ ,
+the energy function can be learned via a softmax loss function, aggregated over minibatches,
+and minimized via stochastic mini batch gradient descent:
+
+
+                                                              eGθ (F (True) ,A(True) ,S)
+          L(F (True) , A(True) , S) = − log                                 P                             ,   (4)
+                                              eGθ (F (True) ,A(True) ,S) + K   k=1  e Gθ (F (k) ,A(k) ,S)
+
+
+where {(F (k) , A(k) )}K
+                       k=1 defines a set of “decoy” formulae for which Gθ will learn to assign
+
+a low score. The trained model can be applied independently to each candidate formula at
+inference time to yield a ranked list of assignments.
+   Our approach is conceptually similar to SIRIUS, 21–23 but differs in that SIRIUS uses a
+heuristic maximum a posteriori (MAP) estimator to score fragmentation trees. This requires
+manually setting parameters such as the frequency of observing various fragments in the
+data. By using a flexible energy function trained via supervised learning, MIST-CF does not
+require manual parametrizations nor necessitate fragmentation tree generation. SIRIUS also
+allows for the incorporation of isotopic information from the MS1 to help identify chemical
+
+
+                                                     9
+formula candidates. We focus solely on the MS2-related score rather than isotopic MS1
+information, as this can be subsequently added and is often excluded from entries in spectral
+database such as the GNPS. 15
+
+
+The MIST-CF architecture
+
+MIST-CF parametrizes the energy function using a Chemical Formula Transformer 24 we
+             (MIST)
+denote as Gθ          (F , A, S). For the input (F , A, S), we first attempt to label each spectrum
+peak (M (i) , I (i) ) with a plausible chemical subformula f (i) such that the spectrum can be
+represented by a set of subformulae (i.e., f (1) , f (2) , . . . f (3) ). Peaks are sorted by intensity
+and a maximum number, Np are retained, set to 20 by default. MIST-CF then subsequently
+encodes these subformula peaks with a Chemical Formula Transformer, a Set Transformer
+variant 34,35 we previously defined as part of the MIST architecture. 24 The full MIST-CF
+pipeline is illustrated in Figure 1b, compared side-by-side to the SIRIUS model that requires
+a fragmentation tree calculation. We review the exact structure of this model below by
+describing each modeling step.
+
+
+Subformula annotation The first step in scoring a candidate formula for a spectrum is
+to assign a subformula to as many MS2 peaks as possible. We begin by subtracting the
+precursor adduct mass from all mass values in the MS2. This approach assumes that the
+subpeaks have the same adduct ionization as the precursor ion, but could be modified in
+future iterations of MIST-CF. All possible subformulae are enumerated and filtered with
+a ring double bond equivalent heuristic 27 to remove implausible formulae and generate a
+candidate set {f (i) : f (i) ⊆ F , RDBE(f (i) ) ≥ 0}. The mass for each subformula is compared
+to all adduct-adjusted spectrum masses and the peak masses are assigned their nearest
+subformula match within a 15 ppm tolerance. An important contribution of this work with
+respect to the original MIST model 24 is that this subformula assignment is now achieved
+with a compact and open source NumPy 36 module, reducing the reliance on SIRIUS for high
+
+
+                                                  10
+quality MS2 subformula annotations.
+
+
+Formula embeddings The subformula-annotated peaks are treated as integer vector in-
+puts. Rather than pass these into a neural network directly, we first featurize each integer
+vector count into a sinusoidal embedding vector 26,37 and concatenate the resulting output.
+Briefly, each integer element count, v, in the input formula is encoded by our counts-based
+encoder into the vector:
+
+                                                                                            
+                                          2πv                   2πv                   2πv
+                    ReLU        sin                 , sin                 , sin                 ,... ,   (5)
+                                           T1                    T2                    T3
+
+where the periods (T1 , T2 , etc.) are set at increasing powers of two up to 256 to discrimi-
+nate all possible element counts given in the input, and ReLU(·) is the rectified linear unit
+activation function that results in only non-negative embeddings. All individual integer en-
+codings within a formula are flattened and concatenated, leading to a full formula encoding
+Enc(F ) ∈ R144+ .
+
+
+Spectra context In addition to the encodings, the instrument type is considered as a
+one-hot vector covariate distinguishing between Ion Trap, Q-ToF, Orbitrap, and FTICR
+instruments. We denote this instrument type one-hot as c.
+
+
+Transformer architecture Each peak subformula is first encoded into a hidden state
+vector that is then passed into the Transformer, with the precursor formula included as a
+special formula annotation f (0) := F . In addition to encoding the formula, we add additional
+features for the formula difference between the MS1 formula and each MS2 formula candidate
+vector (also converted into a sinusoidal embedding), a floating point scalar value for the
+MS2 peak intensity (set to 1 for the MS1 precursor formula candidate), the observed mass
+error between the observed adduct-adjusted mass and the monoisotopic mass of the MS2
+subformula candidate (set to 0 for the MS1 precursor formula candidate), a one-hot encoding
+
+
+
+                                                            11
+for the adduct type (assumed to be the same within a single spectrum), the instrument type
+one-hot vector, a Boolean flag set to 1 only at the precursor MS1 formula, and the number
+of total annotated peaks with subformula. These representations are embedded into hidden
+dimension d with a shallow single hidden layer MLP:
+
+
+        h̃(i) = [Enc(f (i) ), Enc(F − f (i) ), I (i) , ϵ(i) I(f (i) ̸= F ), a(i) , c, I(f (i) = F ), Np ]   (6)
+
+                                             h(i) = MLP(h̃(i) )                                             (7)
+
+   A standard multi-head Transformer, with a slight modification to include featurized at-
+tention between peaks as described previously in the MIST architecture, 24 is then used to
+transform these peak representations into a score:
+
+
+                   (MIST)                                                                   
+                 Gθ         (F , A, S) = MLP Transformer [h(0) , h(1) , . . . h(Np ) ]                      (8)
+
+The representation from the Transformer is pooled into a fixed length vector by selecting the
+output representation at only the special h(0) position. Due to certain training set examples
+not including MS1 masses, we take care to avoid inputting the relative mass difference
+between the assigned precursor formula and MS1 mass which is artificially set to 0. This
+helps avoid additional machine bias, as many of the training spectra have theoretical MS1
+mass, rather than a measured MS1.
+
+
+Model training All models are trained using the aforementioned loss calculated using
+decoy formula. We sample minibatches of b spectra, where there are up to k = 32 decoys
+sampled for each spectrum in the minibatch, resulting in a total of O(bk) candidate formula
+encoded per batch. To sample the most plausible “hard” negative decoys in each batch, we
+utilize a FastFilter module described in detail below. All models are implemented in Python
+version 3.8 using PyTorch version 1.9 and PyTorch Lightning 38 version 1.6 and trained with
+the Adam optimizer. 39 Hyperparameters are optimized with Ray Tune 40 version 2.0. Each
+
+
+                                                       12
+model was trained on a single NVIDIA RTX A5000 GPU with training times taking under
+3 hours of wall time.
+
+
+Generating formula candidates
+
+By default, MIST-CF utilizes the mass decomposition algorithm embedded within the SIR-
+IUS software 23,41,42 (independent module from the rest of their pipeline) to decompose MS1
+precursor masses into candidate formula options. We do not restrict the number of com-
+mon elements C, N, O, or H. We set the maximum number of S and P atoms to 5 and 3,
+respectively, and limit each halogen (i.e., F, Cl, Br, I) to a maximum of one per formula,
+allowing for the recovery of 96% of formulae in the test set. This constraint can be changed
+at inference time as desired. The chemical filter option “COMMON” is used to generate
+formulae for energy-based model training, and the “RDBE” filter is applied during inference.
+The default mass deviation is set to 10 ppm during training for all spectra. At inference, we
+vary the ppm tolerance for different instrument types (Ion Trap: 15 ppm; Q-ToF: 10 ppm;
+Orbitrap/FTICR: 5 ppm) as in BUDDY. 18 We utilize SIRIUS version 5.6.3.
+   During inference, the user can choose to avoid this step in if they have their own, more
+narrow list of potential formulae candidates (e.g., generated by database search, knowledge
+about the chemical space being measured, or external tools such as BUDDY). In such cases,
+the exhaustive formula candidate generation step can be skipped and MIST-CF’s energy
+function can be used to directly evaluate the input candidate list.
+
+
+Downselecting candidate formulae with a learned filter
+
+Due to its energy-based formulation, the computational cost of MIST-CF scales linearly
+with the number of candidate precursor formulae. The evaluation of each formula requires
+assigning subformulae to peaks within a fragmentation spectrum, which is far faster than
+inducing a tree structure over subformulae but not negligible. To limit the space of candidate
+formulae, in addition to utilizingheuristics such as COMMON or RDBE as mentioned earlier,
+
+                                             13
+we train a data-driven filter we term FastFilter (Figure 2a) to further narrow the option set.
+     (FF)
+   Gθ       is a feedforward neural network that takes as input an encoded precursor formula
+candidate, Enc(F ), and learns, in the same fashion as MIST-CF, to predict an energy value
+based solely on the formula—not information about the spectrum—to approximate a non-
+normalized likelihood pθ (F (i) |M ). Because no spectrum information is needed, we train a
+single FastFilter model using a large database of molecules and chemical formulae extracted
+from varous sources such as PubChem 17 and prepared by Duhrkop et al. 25 To avoid dataset
+bleed, all chemical formulae that appear in spectral libraries used for model training/testing
+                         (FF)
+are excluded. We use Gθ         to select the top k candidates during inference (256 by default),
+                                                      (MIST)
+or decoys during training, to further score with Gθ            (F , A, S).
+
+
+Datasets
+
+We evaluate MIST-CF in terms of its ability to predict precursor chemical formulae for
+MS/MS spectra from NPLIB1, a public natural products dataset extracted from the GNPS
+database. 15 NPLIB1 is prepared as in Goldman et al. 26 and extracted from Duhrkop et al. 25
+The dataset contains positive mode MS/MS spectra for compounds under 1,500 Da contain-
+ing a predefined set of elements and adducts. In total NPLIB1 contains 10,709 spectra, 8,553
+unique structures and 5,433 unique chemical formulae. We employ chemical formula splits
+in which 10% of the 5,433 chemical formulae are selected randomly and added—with their
+corresponding spectra—to the test set. 10% of the remaining data is used for validation and
+early stopping.
+   In addition to the public data, we use the commercial NIST20 library 14 to supplement
+the training dataset. We extract all Orbitrap high resolution positive mode mass spectra
+containing common elements and adducts. Examples with chemical formulae found in the
+test set are excluded to avoid biasing the model. In total, the combined dataset has 45,838
+unique spectra, 30,950 unique 2D molecular structures, and 15,315 unique chemical formula.
+By using identical public test sets, we are able to report performance metrics with and
+
+
+                                                14
+without commercial library inclusion to enable replication studies and future methodological
+improvements.
+
+
+Baseline models
+
+In addition to learning Gθ using the MIST architecture, we select three separate baseline
+neural architectures: a feed forward network (FFN) inspired by MetFID 43 that acts on a
+                                             (FFN)                                  (FFN)
+binned representation of the spectrum, Gθ            ; ‘MS1 Only”, a variant of Gθ          in which
+the binned spectrum is set to 0 for all spectra; and a Transformer model that utilizes mul-
+                                                      (TF)
+tiscale sinusoidal embeddings (Transformer), 44 Gθ           . These models are trained and hyper-
+parameter optimized equivalently to MIST-CF. In the FFN baseline, the binned spectrum
+representation is concatenated to the encoded MS1 candidate formula, the one-hot adduct
+representation, and the context vector, then passed into a multilayer perceptron module.
+The Transformer baseline concatenates the MS1 candidate formula encoding and context
+vector to the sinusoidal embedding at each of the top 100 most intense peaks, along with
+the intensity. An additional “cls” token is added to the peaks containing the mass of the
+MS1 candidate and intensity of 2. These are subsequently passed into a set of multi-head
+attention Transformer layers. The output is pooled at a special “cls” token. A single linear
+layer then predicts a scalar energy value.
+
+
+
+
+                                               15
+Results
+
+FastFilter limits the number of candidate formulae for MIST-CF
+
+consideration with high precision
+
+a                                                 b                                         c
+      All cands.           Priortized cands.                                                               1.0
+                                                          6000
+ C9H8N2O2 + H      +
+                           C9H8N2O2 + H   +
+                                                                                                           0.8
+
+
+
+
+                                                                                                Accuracy
+ C6H9FN2O3 + H+            C6H9FN2O3 + H+                                                                  0.6
+
+                                                  Count
+                                                          4000
+ C5H11N3O2P + H        +
+                           C5H11N3O2P + H     +
+                                                                                                           0.4
+                                                          2000
+ C4H7FN5O2 + H+            C4H7FN5O2 + H+                                                                  0.2
+
+ C7H12N3 + K+              C7H12N3 + K+                                                                    0.0
+                                                             0
+    C4H8FN5O2 - e-         C4H8FN5O2 - e-                        1e0   1e2     1e4    1e6                        10 0     10 1    10 2   10 3
+                                                                       |All cands.|                                     Top k filtered
+
+Figure 2: Large numbers of formula candidates can be quickly filtered with a
+simple feed forward neural network, FastFilter. a. Generated candidate formulae
+for a spectrum can be prioritized with a learned model. A scalar score is generated for
+each candidate formula given an MS1 value and mass tolerance via a feed forward neural
+network. Only the top ranked formulae are selected for consideration with MIST-CF. b. The
+distribution of the number of candidates for all recorded MS1 spectra in our spectra libraries
+NPLIB1 and NIST20. All candidate chemical formulae are generated for all 6 adduct types
+considered with an allowed mass deviation of 10 ppm. c. FastFilter model accuracy at
+various top k cutoff values. The top formula is nearly always recovered within the top 256
+candidates. The 95% confidence interval of the mean for recovery is shown across the 3
+different formula splits considered in this work. All results are computed for a single trained
+FastFilter model on a large database of biologically-relevant molecules.
+
+
+A key limiting factor in de novo formula identification is the large size of the candidate space,
+particularly for molecules with higher masses. We first quantify the size of the candidate
+space. We process the full set of training spectra, including both NPLIB1 and NIST20,
+into chemical formula candidates with the permissive RDBE filter. Over 15% of spectra
+have greater than 5,000 formula candidates (Figure 2b). By training a light-weight model,
+FastFilter, to predict how likely each formula is to appear in a biologically-relevant database
+of small molecules, we are able to filter the candidates down to a smaller subset. We are
+able to recover the true formula 99% of the time within the top 256 candidates (Figure
+2c). This guarantees the computational tractability of the MIST-CF pipeline, as subformula
+labeling would be prohibitively expensive for spectra with hundreds of thousands or millions
+
+                                                                 16
+of candidate formulae.
+
+
+Chemical Formula Transformers provide meaningful representations
+
+for formula annotation
+
+        a                                                         Concatenate
+                            Context,
+           [M+H]+ C9H8N2O2
+                                                     Assign & embed
+                                                                                                                                                                                                      Attn.             Pooling                                             Linear
+                                                      subformulae                                                                                                                                                                                                                                             MIST-CF
+                   Inten.                                                                                                                                                                            layers                                                                 layers                             score
+
+                               m/z
+        b
+                                                         Encode                                                                                                                  Concatenate
+                            Context,
+                                                   Embed form / adduct
+           [M+H]+ C9H8N2O2
+
+                                                      Bin spectrum                                                                                                                                                                                                          MLP                                    FFN
+                   Inten.                                                                                                                                                                                                                                                  Layers                                 score
+
+                               m/z
+         c 1.0                                                      d                    1.0
+                                                                                                                                                                                                                    e                     1.0
+                                                                                                                                                                                                                                                                                                           MS1 Only
+                  0.9                                                                    0.8                                                                                                                                              0.8                                                              FFN
+
+
+
+
+ Top k accuracy                                                         Top 1 accuracy                                                                                                                                   Top 1 accuracy
+                                                                                                                                                                                                                                                                                                           Transformer
+                  0.8                                                                    0.6                                                                                                                                              0.6                                                              MIST-CF
+
+
+                  0.7                          MS1 Only                                  0.4                                                                                                                                              0.4
+                                                                                                                  MS1 Only
+                                               FFN
+                                                                                                                  FFN
+                  0.6                          Transformer                               0.2                                                                                                                                              0.2
+                                                                                                                  Transformer
+                                               MIST-CF
+                                                                                                                  MIST-CF
+                  0.5                                                                    0.0                                                                                                                                              0.0
+                        0     2        4       6     8       10
+                                                                                               [0, 200]
+                                                                                                          [200, 300]   [300, 400]   [400, 500]   [500, 600]   [600, 700]   [700, 800]   [800, 900]    [900, 1000]
+                                                                                                                                                                                                                                                [M+H]+   [M+Na]+
+                                                                                                                                                                                                                                                                   [M+H3N+H]+   [M-H2O+H]+   [M-H4O2+H]+
+                                                                                                                                                                                                                                                                                                           [M]+
+                                           k                                                                                                                                                                                                                                                                       [M+K]+
+
+
+
+
+                                                                                                                                    Mass bin                                                                                                                                Adduct
+
+
+Figure 3: MIST-CF is a highly-effective architecture for learning to rank plausible
+MS1 formula annotations a. The MIST-CF architecture uses the candidate chemical
+formulae to generate subformulae and encode these with a Formula Transformer. b. The
+baseline feed forward network (FFN) separately encodes the spectra and formula before
+feeding their concenation into a multilayer perceptron (MLP). c. For all spectra in the test
+set, the fraction recovered at various top k values for all methods is computed and shown.
+d-e. The top 1 accuracy for the methods is grouped by the mass of the MS1 precursor
+or adduct type. All results are computed for MIST-CF and the following baselines: MS1
+only (a feed forward network utilizing only the chemical formula and context vector), a feed
+forward network, and a Transformer. All results are computed over 3 random formula splits
+and respective training runs as described in Methods, where the NIST20 is included in the
+training sets. All spectra include up to 256 candidates to select from as selected with the
+“COMMON” filter 23 and FastFilter. Error bars and shaded regions show 95% confidence
+intervals of the mean.
+
+
+
+                                                                                                                                                       17
+We evaluated four different architectures for encoding spectra and formulae to determine
+the best neural network architecture for the energy-based modeling framework described
+in Methods. MIST-CF uses a Transformer model to convolve upon MS2 subformula with
+context information concatenated to each formula (e.g., adduct, instrument type) (Figure
+3a). We compare this model to a feed forward neural network (Figure 3b), a standard
+Transformer applied to sinusoidal embeddings of each m/z value, 44 and a variant of the
+feed forward network that does not embed the spectrum (“MS1 only”). Importantly, all
+baseline neural network models are provided with the same context vectors, training set,
+and hyperparameter optimization schemes to enable fair comparison.
+   We find that MIST-CF outperforms all other architectures tested, likely due to its ability
+to explicitly combine the representation of the spectrum and formula candidate, rather than
+via intra-architecture concatenations (Figure 3b). We test the model by holding out a number
+of spectra and chemical formulae from model training. For each test spectrum, up to 256
+formula and adduct candidates are re-ranked by each model. MIST-CF outperforms the
+next best model at top 1 accuracy by a 10% margin (Figure 3c; Table 1). Curiously, the feed
+forward network and Transformer network show little difference from each other, indicating
+that neural network architecture (i.e., FFN vs. Transformer) has less impact than the input
+information provided to the model (i.e., subformula labels)—the main strength of MIST-CF.
+All models are able to perform at least as well as the MS1 only model, consistent with our
+intuition that the models are learning more than just database bias.
+   All models decrease in accuracy as the masses of compounds increase (Figure 3d) due
+to the growing number of plausible candidates. Similarly, models struggle on adducts that
+appear less often in the training dataset, such as potassium adducts (Figure 3e). This is one
+such area where manually parametrized models such as SIRIUS 23 may be better suited to
+generalization. Data-driven methods such as MIST-CF are empirically better at correctly
+retrieving formulae with common proton or sodium adducts.
+   Integrating the higher quality Orbitrap training spectra from NIST20 leads to improved
+
+
+                                             18
+performance on the same test set. MIST-CF models trained on NPLIB1 alone achieve a
+top 1 accuracy of 0.741 compared to a top 1 accuracy of 0.769 for models that train on the
+NIST20 in addition (Table 1). This > 2% absolute improvement underscores that formula
+prediction accuracy may be enhanced with the upcoming release of new spectral libraries
+and higher quality data. 12
+
+Table 1: MIST-CF outperforms comparable neural network baselines at chemical formula
+annotation from MS/MS. Models were trained to predict held out NPLIB1 test examples
+using training sets consisting of “NPLIB1” or “NPLIB1 + NIST20.” The best value in each
+column is typeset in bold. Models were evaluated using three independent formula splits.
+Values are shown ± standard errors of the mean.
+
+ Training dataset                                        NPLIB1                                                                              NPLIB1 + NIST20
+ Top k                    1                                  2                            3                                    1                    2                3
+ MS1 Only           0.609 ± 0.002                    0.773 ± 0.003                0.833 ± 0.003                      0.623 ± 0.007            0.785 ± 0.008    0.847 ± 0.008
+ FFN                0.635 ± 0.009                    0.786 ± 0.009                0.847 ± 0.007                      0.652 ± 0.006            0.804 ± 0.009    0.867 ± 0.008
+ Transformer        0.639 ± 0.006                    0.791 ± 0.009                0.851 ± 0.006                      0.626 ± 0.014            0.772 ± 0.008    0.840 ± 0.011
+ MIST-CF            0.741 ± 0.010                    0.878 ± 0.009                0.919 ± 0.007                      0.769 ± 0.006 0.897 ± 0.007               0.931 ± 0.005
+
+
+
+
+                                  a 1.0                                                   b                1.0
+
+
+
+
+                              Top k accuracy                                              Top 1 accuracy
+                                               0.9                                                         0.9
+
+
+                                               0.8
+                                                                     Max peaks                             0.8
+                                                                         1         15
+                                                                         3         20
+                                               0.7                       5         30                      0.7
+                                                                         10        50
+
+                                               0.6                                                         0.6
+                                                     0   2       4       6    8     10                           0   10   20       30   40    50
+
+                                                                     k                                               Max subpeaks
+
+Figure 4: MS/MS subpeaks drive MIST-CF performance. a. The (sub)Formula
+Transformer in MIST-CF operates on only the Np highest intensity MS2 peaks. Here, from
+that set of labeled MS2 peaks, the number of peaks used as input to the spectrum is limited.
+As the number of included peaks increases, the formula retrieval accuracy does too. b. The
+top 1 retrieval accuracy is shown for all maximum subpeak numbers. All results are shown
+for MIST-CF trained on the joint NPLIB1 and NIST20 dataset and tested on a single test
+split of the data.
+
+
+   One of the core methodological decisions in MIST-CF is the application of a Formula
+Transformer to the set of labeled subformulae in the MS2 spectrum. To verify that these
+peaks are informative for the model, we repeated benchmarking experiments for a single split
+
+
+                                                                                         19
+of the data, this time modulating the maximum number of peaks (rank-ordered by intensity)
+viewable by MIST-CF.
+   Model performance rapidly increases as the maximum number of included peaks increases,
+sharply rising from 0.662 to 0.720 for 1 and 2 spectrum peaks respectively, where Np =
+0 is functionally equivalent to the MS1 Only baseline with an accuracy of 0.623 (Table
+1). There are diminishing returns of including lower intensity peaks, with 1, 5, 10, 20,
+50 maximum formula peaks achieving top 1 accuracies of 0.673, 0.729, 0.754, 0.756, and
+0.774 respectively (Figure 4). Making the model aware of a greater number of fragments
+enables more generalizable and accurate predictions. This builds confidence that the model
+is learning more than database biases, drawing information from even minor peaks to inform
+predictions. As can be seen, the absolute difference in performance appears to level off
+beyond 20 with only more marginal increases toward Np = 50. Given that the performance
+benefit is marginal for many more peak annotations, we maintain our peak default Np = 20
+unless otherwise stated to reduce the runtime of the method.
+
+
+
+
+                                           20
+MIST-CF compares favorably to existing formula annotation tools
+
+ a                                         b                                           c                                                        d
+                                                     0.0040                                       1.0
+                 100%                                             Both methods
+                                                     0.0035       MIST-CF only                                                                           >3   23 %     4%   2%      9%
+                                                                                                  0.8
+                 80%                                 0.0030
+
+
+
+
+Num. predicted                                                                   Top k accuracy
+                                                                                                                                           SIRIUS rank
+                                                     0.0025                                                                                               3   4%       0%   0%      0%
+                                                                                                  0.6
+
+
+                                           Density
+                 60%
+                                                     0.0020
+
+                 40%                                 0.0015                                       0.4                                                     2   9%       1%   0%      0%
+
+                                                     0.0010
+                 20%                                                                              0.2
+                                                                                                                            SIRIUS
+                                                     0.0005                                                                                               1   45 %     2%   0%      1%
+                                                                                                                            MIST-CF
+                  0%                                 0.0000                                       0.0
+                                                              0   500     1000                          0   2   4       6     8       10                       1       2     3      >3
+                        SIRIUS   MIST-CF                          Mass                                              k                                                MIST-CF rank
+
+
+Figure 5: MIST-CF more frequently assigns correct chemical formulae than the
+SIRIUS formula assignment module on the NPLIB1 test set. a. The number
+of spectra for which each method is able to predict a formula—regardless of accuracy. b.
+The distribution of molecular masses for the spectra both methods are able to annotate—
+regardless of accuracy— compared to the distribution of molecular masses for spectra on
+which only MIST-CF succeeds. c. Top k accuracy for both methods is shown. d. The
+rank at which each method is able to recover the true chemical formula. This visualization
+highlights that there are many spectra for which MIST-CF achieves rank 1 that SIRIUS
+does not predict in its top 3. MIST-CF models are trained on the joint NIST20 and NPLIB1
+dataset. SIRIUS is executed with a compound and tree timeout of 300 seconds. All values
+are shown for 3 random formula splits of the NPLIB1 data. Error bars and confidence
+intervals show 95% confidence intervals for the standard error of the mean. Accuracy is
+computed with respect to the total MS1 composition (i.e., summed adduct and formula) to
+avoid biasing results against SIRIUS.
+
+
+The widely used SIRIUS tool 23 is the de facto state of the art for the task of chemical formula
+annotation. We therefore perform a head-to-head comparison of MIST-CF and SIRIUS on
+the same NPLIB1 test set. Herein, MIST-CF considers all candidate MS1 formulae within
+10 ppm of the recorded MS1 mass and utilizes FastFilter to down select to 256 candidates
+for full evaluation. We run the SIRIUS formula module from the command line with tree
+and compound timeouts of 300 seconds to avoid excessive execution times. With these
+constraints, MIST-CF is able to predict a formula for every spectrum, whereas SIRIUS fails
+for 10.77% of the spectra (Figure 5a). Failed spectra are associated with larger masses on
+average (700.80 Da) than successful ones (378.06 Da).
+                 Model accuracy is evaluated in terms of the summed elemental composition of the formula
+
+                                                                                                  21
+and adduct. SIRIUS does not distinguish tree scores with different adduct assignments as
+we do in MIST-CF by design (e.g., [C6H12O6+H]+ and [C6H10O5+H-H2O]+ would appear
+to have equivalent tree scores). On the NPLIB1 test set, MIST-CF successfully predicts
+chemical formulae with a 71% top 1 accuracy, compared to SIRIUS’s 48% accuracy. This
+represents a >20% improvement in absolute top 1 prediction accuracy (Figure 5c). On a
+per-spectrum basis, SIRIUS rarely makes correct predictions MIST-CF does not, with a
+total of approximately 3% of spectra falling into this category, whereas MIST-CF appears
+to predict 36% of spectra correctly when SIRIUS cannot (Figure 5d).
+   Beyond the improvement in accuracy, MIST-CF required approximately one-third the
+wall time of SIRIUS (evaluated on compounds under 700 Da for which SIRIUS does not
+time out) when both methods are run on a single CPU core (Supplementary Information).
+
+
+ MIST-CF achieves competitive out-of-the-box performance on the
+
+CASMI2022 challenge
+
+We selected the dataset released as part of the Comparative Assessment of Small Molecule
+Identifications 2022 (CASMI2022) 13 for additional validation. Our training datasets were
+generated prior to the competition announcement, minimizing the risk of training dataset
+bias and simulating a prospective use case. Herein, we focus only on the formula identification
+challenge rather than the full task of structural elucidation.
+   We extract all positive mode MS/MS files from the provided mzML files using MZMine
+3 19 and apply both MIST-CF and SIRIUS to predict chemical formulae for each of the
+extracted 304 spectra. Using our constraints on element types, 296 of the 304 formulae are
+recoverable (97%), excluding species such as iodixanol (C35H44I6N6O15). We use an MS1
+tolerance of 5 ppm.
+   Model performance was evaluated on four key metrics: the accuracy of predicting formula
+correctly, the accuracy of predicting the adduct correctly, and the accuracy of predicting the
+total elemental composition of the formula and adduct combined. As discussed above, we
+
+                                              22
+use this last metric because evaluating the accuracy of the chemical formula alone would
+bias the comparison for MIST-CF.
+   We consider three variants of SIRIUS: SIRIUS, SIRIUS (CSI:FingerID) and SIRIUS
+(Submission). SIRIUS (CSI:FingerID) provides formulae as re-ranked by their CSI:FingerID
+score when searched against PubChem. SIRIUS (Submission) uses predictions submitted by
+the SIRIUS authors at the latest competition under file name “duehrkop_CASMI2022.csv.”
+This submission reportedly used a mix of ion identity molecular networking, 45 which can
+be used to more accurately resolve adduct types, along with manual curation to improve
+performance.
+   Encouragingly, we find that MIST-CF is competitive with SIRIUS (Submission), achiev-
+ing an equivalent collective joint formula and adduct accuracy of 0.868, despite our auto-
+mated classification and no additional manual curation (Table 2). If evaluating SIRIUS
+(Submission) on the subset of 272 spectra for which they submitted a prediction, a higher
+accuracy is achieved compared to MIST-CF, as MIST-CF predicts all test set spectra. Nev-
+ertheless, when using default parameters, MIST-CF reaches a top 1 formula accuracy of 0.822
+(including adduct prediction) compared to an accuracy of 0.516 for SIRIUS (CSI:FingerID).
+These results illustrate the competitiveness of MIST-CF and demonstrate that accurate,
+prospective formula annotation does not require computing full fragmentation trees. In ad-
+dition to testing our default MIST-CF model, we also test a variant with Np = 50 as a
+comparison. Performance is equivalent for the joint accuracy of formula and adduct pairs.
+However, accuracy in predicting the formula alone increases, as the model appears to be
+marginally better at adduct assignment.
+
+
+
+Conclusion
+
+We have introduced a data-driven neural network model, MIST-CF, for inferring chemical
+formulae from MS/MS spectra, trained using an energy-based modeling framework. We
+
+
+
+                                            23
+Table 2: Model accuracy of MIST-CF and SIRIUS evaluated on CASMI2022. “Accuracy
+(F )” indicates accuracy of predicting the exact formula correctly. “Accuracy (A)” indicates
+the fraction of spectra for which the first predicted (formula, adduct) pair includes the correct
+adduct. “Accuracy (F + A)” indicates the fraction of spectra for which the total elemental
+composition of the top predicted formula and adduct matches the elemental composition of
+the summed true formula and adduct. “Predicted” indicates the number of spectra for which
+a formula and adduct prediction was made. “SIRIUS” makes predictions with the default
+command line tool described above; “SIRIUS (CSI:FingerID)” predicts formula, adduct pairs
+using CSI:FingerID rankings against PubChem; SIRIUS (Submission) is taken directly from
+the previous CASMI2022 results. MIST-CF (20 peaks) uses default 20 subformula peaks,
+whereas MIST-CF (50 peaks) utilizes 50 subformula peaks. Accuracy (F ) and Accuracy
+(A) are not reported for SIRIUS as these numbers are unfairly low due to how we break
+ties between predictions with equivalent scores. All accuracies are reported for the top
+1 prediction and divided by the total number of spectra (304), not the total number of
+predicted spectra. Numbers typeset in bold indicate the best result in the column.
+
+                Method                                Accuracy   Accuracy   Accuracy
+                                                          (F )       (A)    (F + A)    Predicted
+                SIRIUS version 5.6.3                         -          -      0.641        274
+                SIRIUS version 5.6.3 (CSI:FingerID)      0.516      0.543      0.678        254
+                SIRIUS (Submission)                     0.865       0.855     0.868         272
+                MIST-CF (50 peaks)                       0.842     0.901       0.862        304
+                MIST-CF (20 peaks)                       0.822      0.885     0.868         304
+
+
+
+benchmark this model extensively to show how our recent Chemical Formula Transformer
+architecture is uniquely suited to this task of integrating formula and spectra information.
+MIST-CF outperforms other learning-to-rank neural network architectures and ties the win-
+ning solution at the CASMI 2022 competition within the positive mode category, despite
+using zero MS1 isotopic information or manual prediction refinement.
+   This work defines a clear problem formulation for learning to rank MS1 candidate formula
+from MS/MS data, including open source code and data splits. To address this task, we re-
+lease open source and trained models with low memory and run-time concerns, even for large
+molecules. In addition to these models, we develop a smaller and light-weight neural network
+formula filtering model to help prioritize biologically-relevant chemical formula candidates.
+This work continues to demonstrate the efficacy of our recent Chemical Formula Trans-
+former network architecture in thorough benchmarking comparisons. 24 As part of this, we
+have greatly simplified and improved the the Chemical Formula Transformer implementation
+
+
+                                                      24
+to now utilize custom formula embeddings, a simple and open source subformula assignment
+routine (i.e., no longer fragmentation trees), additional model inputs such as instrument
+type, and multiple adduct types. Applying these same changes to the Chemical Formula
+Transformer architecture for fingerprint prediction is likely to yield similar improvements.
+   There are many avenues for improving upon MIST-CF. We have trained models only for
+positive-mode data; we do not directly address the integration of MIST-CF scores with MS1
+isotopic scores; we do not consider adduct switching in MS2 subformula assignment; we still
+rely upon SIRIUS’s algorithmic decomposition of exact masses into formula candidates due
+to their fast implementation; and we have not yet explored the use of forward structure-to-
+spectrum models 26,46 for data augmentation. There is also an opportunity to combine MIST-
+CF with the recently reported BUDDY 18 by re-ranking formulae generated by BUDDY
+rather than relying on the FastFilter.
+   Altogether, we are optimistic about the potential to integrate this model into existing
+pipelines for small molecule metabolite identification. By addressing the task of chemical
+formula annotation, this work moves us one step closer to our vision of an integrated neural
+network driven metabolite annotation pipeline.
+
+
+
+Data and Software Availability
+
+All code to replicate experiments, train new models, and load pre-trained models is available
+at https://github.com/samgoldman97/mist-cf. The code to parse NIST can be found
+in https://github.com/samgoldman97/nist-parser but this optional subset of training
+data requires a license and cannot be shared publicly. The exact repository version used in
+this work has been archived at Zenodo record 8151490 (data) and Zenodo record 8151513
+(code).
+
+
+
+
+                                             25
+Authors’ contributions
+
+S.G. and J.X. jointly wrote the software and conducted experiments. J.P. assisted with
+CASMI2022 data processing and experiments. S.G., J.X., and C.W.C. conceptualized the
+project, designed model components, and wrote the manuscript. C.W.C supervised the work.
+
+
+
+Acknowledgement
+
+The authors thank K. Duhrkop for helpful discussions around the SIRIUS method. S.G.
+was supported by the MIT-Takeda Fellowship program and the Machine Learning for Phar-
+maceutical Discovery and Synthesis consortium. J.P. was supported by the MIT-Accenture
+Fellowship.
+
+
+
+References
+
+ (1) Pluskal, T.; Torrens-Spence, M. P.; Fallon, T. R.; De Abreu, A.; Shi, C. H.; Weng, J.-K.
+     The biosynthetic origin of psychoactive kavalactones in kava. Nature plants 2019, 5,
+     867–878.
+
+ (2) Torrens-Spence, M. P.; Bobokalonova, A.; Carballo, V.; Glinkerman, C. M.; Pluskal, T.;
+     Shen, A.; Weng, J.-K. PBS3 and EPS1 complete salicylic acid biosynthesis from iso-
+     chorismate in Arabidopsis. Molecular plant 2019, 12, 1577–1586, ISBN: 1674-2052
+     Publisher: Elsevier.
+
+ (3) Cao, Y.; Oh, J.; Xue, M.; Huh, W. J.; Wang, J.; Gonzalez-Hernandez, J. A.; Rice, T. A.;
+     Martin, A. L.; Song, D.; Crawford, J. M., et al. Commensal microbiota from patients
+     with inflammatory bowel disease produce genotoxic metabolites. Science 2022, 378,
+     eabm3233.
+
+ (4) Dang, L.; White, D. W.; Gross, S.; Bennett, B. D.; Bittinger, M. A.; Driggers, E. M.;
+
+
+                                             26
+     Fantin, V. R.; Jang, H. G.; Jin, S.; Keenan, M. C., et al. Cancer-associated IDH1
+     mutations produce 2-hydroxyglutarate. Nature 2009, 462, 739–744.
+
+ (5) Quinn, R. A.; Melnik, A. V.; Vrbanac, A.; Fu, T.; Patras, K. A.; Christy, M. P.;
+     Bodai, Z.; Belda-Ferre, P.; Tripathi, A.; Chung, L. K., et al. Global chemical effects of
+     the microbiome include new bile-acid conjugations. Nature 2020, 579, 123–129.
+
+ (6) Paik, D.; Yao, L.; Zhang, Y.; Bae, S.; D’Agostino, G. D.; Zhang, M.; Kim, E.; Fran-
+     zosa, E. A.; Avila-Pacheco, J.; Bisanz, J. E., et al. Human gut bacteria produce TH17-
+     modulating bile acid metabolites. Nature 2022, 603, 907–912.
+
+ (7) Sato, Y.; Atarashi, K.; Plichta, D. R.; Arai, Y.; Sasajima, S.; Kearney, S. M.; Suda, W.;
+     Takeshita, K.; Sasaki, T.; Okamoto, S., et al. Novel bile acid biosynthetic pathways are
+     enriched in the microbiome of centenarians. Nature 2021, 599, 458–464.
+
+ (8) Wishart, D. S. Metabolomics for Investigating Physiological and Pathophysiological
+     Processes. Physiological Reviews 2019, 99, 1819–1875.
+
+ (9) Bundy, J. G.; Davey, M. P.; Viant, M. R. Environmental metabolomics: a critical re-
+     view and future perspectives. Metabolomics 2009, 5, 3–21, ISBN: 1573-3890 Publisher:
+     Springer.
+
+(10) Tian, Z.; Zhao, H.; Peter, K. T.; Gonzalez, M.; Wetzel, J.; Wu, C.; Hu, X.; Prat, J.;
+     Mudrock, E.; Hettinger, R., et al. A ubiquitous tire rubber–derived chemical induces
+     acute mortality in coho salmon. Science 2021, 371, 185–189.
+
+(11) Neumann, S.; Böcker, S. Computational mass spectrometry for metabolomics: identifi-
+     cation of metabolites and small molecules. Analytical and bioanalytical chemistry 2010,
+     398, 2779–2788, ISBN: 1618-2650 Publisher: Springer.
+
+(12) Bittremieux, W.; Wang, M.; Dorrestein, P. C. The critical role that spectral libraries
+     play in capturing the metabolomics community knowledge. Metabolomics 2022, 18, 94.
+
+
+                                             27
+(13) CASMI, Critical Assessment of Small Molecule Identification. http://www.
+     casmi-contest.org/2022/index.shtml, Accessed 2022-12-01.
+
+(14) NIST, Tandem Mass Spectral Library. NIST 2020,
+
+(15) Wang, M.; Carver, J. J.; Phelan, V. V.; Sanchez, L. M.; Garg, N.; Peng, Y.;
+     Nguyen, D. D.; Watrous, J.; Kapono, C. A.; Luzzatto-Knaan, T. Sharing and commu-
+     nity curation of mass spectrometry data with Global Natural Products Social Molecular
+     Networking. Nature biotechnology 2016, 34, 828–837.
+
+(16) Wishart, D. S.; Feunang, Y. D.; Marcu, A.; Guo, A. C.; Liang, K.; Vázquez-Fresno, R.;
+     Sajed, T.; Johnson, D.; Li, C.; Karu, N., et al. HMDB 4.0: the human metabolome
+     database for 2018. Nucleic acids research 2018, 46, D608–D617.
+
+(17) Kim, S.; Thiessen, P. A.; Bolton, E. E.; Chen, J.; Fu, G.; Gindulyte, A.; Han, L.; He, J.;
+     He, S.; Shoemaker, B. A. PubChem substance and compound databases. Nucleic Acids
+     Research 2016, 44, D1202–D1213.
+
+(18) Xing, S.; Shen, S.; Xu, B.; Li, X.; Huan, T. BUDDY: molecular formula discovery via
+     bottom-up MS/MS interrogation. Nature Methods 2023, 1–10.
+
+(19) Schmid, R.; Heuckeroth, S.; Korf, A.; Smirnov, A.; Myers, O.; Dyrlund, T. S.;
+     Bushuiev, R.; Murray, K. J.; Hoffmann, N.; Lu, M., et al. Integrative analysis of multi-
+     modal mass spectrometry data in MZmine 3. Nature biotechnology 2023, 41, 447–449.
+
+(20) Pluskal, T.; Uehara, T.; Yanagida, M. Highly accurate chemical formula prediction
+     tool utilizing high-resolution mass spectra, MS/MS fragmentation, heuristic rules, and
+     isotope pattern matching. Analytical chemistry 2012, 84, 4396–4403.
+
+(21) Böcker, S.; Dührkop, K. Fragmentation trees reloaded. Journal of cheminformatics
+     2016, 8, 1–26.
+
+
+
+
+                                              28
+(22) Böcker, S.; Letzel, M. C.; Lipták, Z.; Pervukhin, A. SIRIUS: decomposing isotope
+     patterns for metabolite identification. Bioinformatics 2009, 25, 218–224.
+
+(23) Dührkop, K.; Fleischauer, M.; Ludwig, M.; Aksenov, A. A.; Melnik, A. V.; Meusel, M.;
+     Dorrestein, P. C.; Rousu, J.; Böcker, S. SIRIUS 4: a rapid tool for turning tandem
+     mass spectra into metabolite structure information. Nature Methods 2019, 16 .
+
+(24) Goldman, S.; Wohlwend, J.; Stražar, M.; Haroush, G.; Xavier, R. J.; Coley, C. W. An-
+     notating metabolite mass spectra with domain-inspired chemical formula transformers.
+     bioRxiv 2022,
+
+(25) Dührkop, K.; Nothias, L.-F.; Fleischauer, M.; Reher, R.; Ludwig, M.; Hoffmann, M. A.;
+     Petras, D.; Gerwick, W. H.; Rousu, J.; Dorrestein, P. C. Systematic classification of un-
+     known metabolites using high-resolution fragmentation mass spectra. Nature Biotech-
+     nology 2021, 39, 462–471.
+
+(26) Goldman, S.; Bradshaw, J.; Xin, J.; Coley, C. W. Prefix-tree Decoding for Predicting
+     Mass Spectra from Molecules. arXiv preprint arXiv:2303.06470 2023,
+
+(27) Pretsch, E.; Bühlmann, P.; Affolter, C.; Pretsch, E.; Bhuhlmann, P.; Affolter, C. Struc-
+     ture determination of organic compounds; Springer, 2000.
+
+(28) Dührkop, K.; Shen, H.; Meusel, M.; Rousu, J.; Böcker, S. Searching molecular structure
+     databases with tandem mass spectra using CSI:FingerID. Proceedings of the National
+     Academy of Sciences 2015, 112, 12580–12585.
+
+(29) Zhang, N.; Aebersold, R.; Schwikowski, B. ProbID: a probabilistic algorithm to iden-
+     tify peptides through sequence database searching using tandem mass spectral data.
+     Proteomics 2002, 2, 1406–1412.
+
+(30) LeCun, Y.; Chopra, S.; Hadsell, R.; Ranzato, M.; Huang, F. A tutorial on energy-based
+     learning. Predicting structured data 2006, 1 .
+
+
+                                             29
+(31) Lin, M. H.; Tu, Z.; Coley, C. W. Improving the performance of models for one-step
+     retrosynthesis through re-ranking. Journal of cheminformatics 2022, 14, 1–13.
+
+(32) Sun, R.; Dai, H.; Li, L.; Kearnes, S.; Dai, B. Energy-based view of retrosynthesis. arXiv
+     preprint arXiv:2007.13437 2020,
+
+(33) Du, Y.; Meier, J.; Ma, J.; Fergus, R.; Rives, A. Energy-based models for atomic-
+     resolution protein conformations. arXiv preprint arXiv:2004.13167 2020,
+
+(34) Ying, C.; Cai, T.; Luo, S.; Zheng, S.; Ke, G.; He, D.; Shen, Y.; Liu, T.-Y. Do Transform-
+     ers Really Perform Bad for Graph Representation? Advances in Neural Information
+     Processing Systems 34. 2021; pp 28877–28888.
+
+(35) Vaswani, A.; Shazeer, N.; Parmar, N.; Uszkoreit, J.; Jones, L.; Gomez, A. N.; Kaiser, L.;
+     Polosukhin, I. Attention Is All You Need. Advances in Neural Information Processing
+     Systems 30. 2017; pp 5998–6008.
+
+(36) Harris, C. R.; Millman, K. J.; Van Der Walt, S. J.; Gommers, R.; Virtanen, P.; Cour-
+     napeau, D.; Wieser, E.; Taylor, J.; Berg, S.; Smith, N. J., et al. Array programming
+     with NumPy. Nature 2020, 585, 357–362.
+
+(37) Tancik, M.; Srinivasan, P. P.; Mildenhall, B.; Fridovich-Keil, S.; Raghavan, N.; Sing-
+     hal, U.; Ramamoorthi, R.; Barron, J. T.; Ng, R. Fourier Features Let Networks Learn
+     High Frequency Functions in Low Dimensional Domains. Advances in Neural Informa-
+     tion Processing Systems 33. 2020; pp 7537–7547.
+
+(38) Falcon, W.; The PyTorch Lightning team, PyTorch Lightning. 2019; https://github.
+     com/Lightning-AI/lightning.
+
+(39) Kingma, D. P.; Ba, J. Adam: A method for stochastic optimization. arXiv preprint
+     arXiv:1412.6980 2014,
+
+
+
+
+                                             30
+(40) Liaw, R.; Liang, E.; Nishihara, R.; Moritz, P.; Gonzalez, J. E.; Stoica, I. Tune: A
+     research platform for distributed model selection and training. ICML 2018 AutoML
+     Workshop 2018,
+
+(41) Bocker, S.; Lipták, Z. A fast and simple algorithm for the Money Changing Problem.
+     Algorithmica 2007, 48, 413–432.
+
+(42) Dührkop, K.; Ludwig, M.; Meusel, M.; Böcker, S. Faster mass decomposition. Algo-
+     rithms in Bioinformatics: 13th International Workshop, WABI 2013, Sophia Antipolis,
+     France, September 2-4, 2013. Proceedings 13. 2013; pp 45–58.
+
+(43) Fan, Z.; Alley, A.; Ghaffari, K.; Ressom, H. W. MetFID: artificial neural network-
+     based compound fingerprint prediction for metabolite annotation. Metabolomics 2020,
+     16, 104.
+
+(44) Voronov, G.; Lightheart, R.; Davison, J.; Krettler, C. A.; Healey, D.; Butler, T. Multi-
+     scale Sinusoidal Embeddings Enable Learning on High Resolution Mass Spectrometry
+     Data. arXiv preprint arXiv:2207.02980 2022,
+
+(45) Schmid, R.; Petras, D.; Nothias, L.-F.; Wang, M.; Aron, A. T.; Jagels, A.; Tsugawa, H.;
+     Rainer, J.; Garcia-Aloy, M.; Dührkop, K., et al. Ion identity molecular networking for
+     mass spectrometry-based metabolomics in the GNPS environment. Nature communi-
+     cations 2021, 12, 3832.
+
+(46) Goldman, S.; Li, J.; Coley, C. W. Generating Molecular Fragmentation Graphs with
+     Autoregressive Neural Networks. arXiv preprint arXiv:2304.13136 2023,
+
+
+
+
+                                             31
+                                                                 Supporting Information:
+                                              MIST-CF: Chemical formula inference from
+                                                                   tandem mass spectra
+
+
+
+
+arXiv:2307.08240v1 [q-bio.QM] 17 Jul 2023
+                                             Samuel Goldman,†,∥ Jiayi Xin,‡,∥ Joules Provenzano,¶ and Connor W. Coley∗,¶,§
+
+                                               †Computational and Systems Biology, MIT, Cambridge, Massachusetts 02139, USA
+                                            ‡Statistics and Actuarial Science, The University of Hong Kong, Hong Kong 999077, China
+                                              ¶Department of Chemical Engineering, MIT, Cambridge, Massachusetts 02139, USA
+                                                 §Department of Electrical Engineering and Computer Science, MIT, Cambridge,
+                                                                          Massachusetts 02139, USA
+                                                                              ∥Equal contribution
+
+                                                                            E-mail: *ccoley@mit.edu
+
+
+
+
+                                                                                     S-1
+Supporting Information Available
+
+S1   SIRIUS configuration
+
+SIRIUS version 5.6.3 S1 is used as a baseline throughout the work. For consistency, we
+utilize a 300 second (5 minute) timeout for each compound and set equivalent adducts and
+formula as used in MIST-CF. An example call signature using our parameters, as we use in
+CASMI2022 is shown in Listing 1.
+
+Listing 1: An example call to SIRIUS for annotating the formula for an input MGF file,
+$INPUT_MGF
+$SIRIUS_PATH          \
+
+     -- cores $CORES \
+
+     -- output        $OUTFOLDER1 \
+
+     -- input $INPUT_MGF \
+
+     formula      \
+
+     -i " [ M + H ]+ ,[ M + K ]+ ,[ M + Na ]+ ,[ M +H - H2O ]+ ,[ M +H - H4O2 ]+ ,[ M + NH4 ]+ ,[ M ]+ " \
+
+     -e " C [0 -] N [0 -] O [0 -] H [0 -] S [0 -5] P [0 -3] I [0 -1] Cl [0 -1] F [0 -1] Br [0 -1] " \
+
+     -- ppm - max 5.0 \
+
+     -- tree - timeout 300 \
+
+     -- compound - timeout 300 \
+
+     fingerprint \
+
+     structure \
+
+     write - summaries \
+
+     -- output $OUTFOLDER2
+
+
+
+
+S2   Timing experiments
+
+To demonstrate that MIST-CF has reasonable runtime properties, we conduct a simple
+timed experiment. 10 random sample test set spectra under 700 Da from the NPLIB1
+
+
+                                                  S-2
+were selected and set aside in an MGF file. Using the command line call signature for
+formula prediction on a Linux workstation, we test the wall time to predict formula for these
+spectra with all pre-specified elements, a maximum ppm of 10 from the MS1, and all adduct
+possibilities considered within MIST-CF. We repeat the same procedure for SIRIUS, using
+a compound and tree timeout of 1 minute to avoid excessively large times. We conduct
+these experiments using only 1 CPU core. We find that in three separate trials, MIST-CF
+completed in 39.31 ± 0.49 seconds (mean ± standard error of the mean), whereas SIRIUS
+completed in 112.61 ± 0.21 seconds (mean ± standard error of the mean).
+
+
+S3   Hyperparameter setting
+
+To enable fair comparison across models, hyperparameters were tuned for MIST-CF, the FFN
+binned prediction baseline, the transformer binned prediction baseline, and the FastFilter
+model. Parameters were tuned using RayTune S2 with Optuna S3 and an ASHAScheduler.
+Each model was allotted 50 different hyperoptimization trials for fitting. MIST-CF, the
+FFN baseline, and the Transformer baseline were hyperparameter optimized on a smaller
+10, 000 spectra subset of the combined NPLIB1 and NIST20 datasets. MIST-CF was hy-
+perparameter optimized using a maximum of 10 peaks per spectrum. The FastFilter model
+was hyperparameter optimized directly on the biological molecules dataset. Parameters are
+listed in Table S1.
+
+
+
+
+                                            S-3
+Table S1: Hyperparameter settings for MIST-CF, FFN, Transformer, and the FastFilter
+model to select batches of chemical formula.
+
+
+ Model         Parameter                        Grid                             Value
+ MIST-CF       Learning rate                    [1e-4, 1e-3]                     0.00045
+               Learning rate decay fraction     [0.7, 1.0]                       0.8830
+               Weight decay                     {1e-6, 1e-7, 0.0}                0.0
+               Hidden size                      {32, 64, 128, 256}               128
+               Dropout                          [0, 0.5]                         0.1
+               Number of layers                 [1, 2, 3, 4]                     2
+               Batch size                       {4, 8, 16}                       4
+ FFN           Number of bins                   {1000, 2000, 3000, ..., 10000}   5000
+               Learning rate                    [1e-4, 1e-3]                     0.0005
+               Learning rate decay fraction     [0.7, 1.0]                       0.8477
+               Weight decay                     {1e-6, 1e-7, 0.0}                0
+               Hidden size                      {32, 64, 128, 256, 512}          512
+               Dropout                          [0, 0.5]                         0.4
+               Number of layers                 {1, 2, 3, 4}                     4
+               Batch size                       {16, 32, 64}                     64
+ Transformer Learning rate                      [1e-4, 1e-3]                     0.00025
+             Learning rate decay fraction       [0.7, 1.0]                       0.8601
+             Weight decay                       {1e-6, 1e-7, 0.0}                1e-7
+             Hidden size                        {32, 64, 128, 256, 512}          32
+             Dropout                            [0, 0.5]                         0.2
+             Number of layers                   {1, 2, 3, 4}                     2
+             Batch size                         {8, 16}                          8
+ FastFilter    Learning rate                    [1e-4, 1e-3]                     0.0003
+               Learning rate decay fraction     [0.7, 1.0]                       0.8642
+               Weight decay                     {1e-6, 1e-7, 0.0}                0
+               Hidden size                      {32, 64, 128, 256, 512}          256
+               Dropout                          [0, 0.5]                         0.1
+               Number of layers                 {1, 2, 3, 4}                     3
+               Batch size                       {16, 32, 64}                     64
+
+
+
+
+References
+
+(S1) Dührkop, K.; Fleischauer, M.; Ludwig, M.; Aksenov, A. A.; Melnik, A. V.; Meusel, M.;
+     Dorrestein, P. C.; Rousu, J.; Böcker, S. SIRIUS 4: a rapid tool for turning tandem
+
+                                              S-4
+     mass spectra into metabolite structure information. Nature Methods 2019, 16 .
+
+(S2) Liaw, R.; Liang, E.; Nishihara, R.; Moritz, P.; Gonzalez, J. E.; Stoica, I. Tune: A
+     research platform for distributed model selection and training. ICML 2018 AutoML
+     Workshop 2018,
+
+(S3) Akiba, T.; Sano, S.; Yanase, T.; Ohta, T.; Koyama, M. Optuna: A next-generation
+     hyperparameter optimization framework. Proceedings of the 25th ACM SIGKDD in-
+     ternational conference on knowledge discovery & data mining. 2019; pp 2623–2631.
+
+
+
+
+                                          S-5
+

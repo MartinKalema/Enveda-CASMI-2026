@@ -1,0 +1,1940 @@
+arXiv:2111.04824v3 [cs.LG] 1 May 2023
+                                          MassFormer: Tandem Mass Spectrum
+                                        Prediction for Small Molecules using Graph
+                                                        Transformers
+                                         Adamo Young1,4,5 , Hannes Röst1,2,4* and Bo Wang1,3,5,6*
+                                          1 Department of Computer Science, University of Toronto.
+                                         2 Department of Molecular Genetics, University of Toronto.
+                                           3 Department of Laboratory Medicine and Pathobiology,
+
+                                                               University of Toronto.
+                                               4 Terrence Donnelly Centre, University of Toronto.
+                                                                  5 Vector Institute.
+                                          6 Peter Munk Cardiac Centre, University Health Network.
+
+
+
+
+                                        *Corresponding author(s). E-mail(s): hannes.rost@utoronto.ca;
+                                                         bowang@vectorinstitute.ai;
+                                                Contributing authors: ayoung@cs.toronto.edu;
+
+
+                                                                       Abstract
+                                         Tandem mass spectra capture fragmentation patterns that provide key
+                                         structural information about a molecule. Although mass spectrome-
+                                         try is applied in many areas, the vast majority of small molecules
+                                         lack experimental reference spectra. For over seventy years, spectrum
+                                         prediction has remained a key challenge in the field. Existing deep
+                                         learning methods do not leverage global structure in the molecule,
+                                         potentially resulting in difficulties when generalizing to new data. In
+                                         this work we propose a new model, MassFormer, for accurately pre-
+                                         dicting tandem mass spectra. MassFormer uses a graph transformer
+                                         architecture to model long-distance relationships between atoms in
+                                         the molecule. The transformer module is initialized with parameters
+                                         obtained through a chemical pre-training task, then fine-tuned on spec-
+                                         tral data. MassFormer outperforms competing approaches for spectrum
+                                         prediction on multiple datasets, and is able to recover prior knowl-
+                                         edge about the effect of collision energy on the spectrum. By employing
+                                         gradient-based attribution methods, we demonstrate that the model
+                                         can identify relationships between fragment peaks. To further highlight
+
+
+                                                                           1
+2    MassFormer
+
+     MassFormer’s utility, we show that it can match or exceed exist-
+     ing prediction-based methods on two spectrum identification tasks.
+     We provide open-source implementations of our model and baseline
+     approaches, with the goal of encouraging future research in this area.
+
+     Keywords: Mass Spectrometry, Metabolomics, Deep Learning, Chemistry,
+     Transformers
+
+
+
+
+1 Main
+Mass spectrometry (MS, [1, 2]) is an analytical technique used for identifying
+and quantifying chemicals in a mixture. Molecules from the sample are ion-
+ized and then detected by a mass analyzer, which records information about
+the mass to charge ratio (m/z) of each ion in the form of a mass spectrum.
+Tandem mass spectrometry (MS/MS) is a variant of MS that includes a frag-
+mentation step to isolate and break down charged molecules (called precursors)
+into smaller fragments. These ions appear as peaks in the fragment spectrum,
+and their m/z position and relative abundance can be used to make inferences
+about the molecular structure of the original precursor. When coupled with
+online liquid chromatography (LC), a technique for chemical separation, the
+combined LC-MS/MS workflow is a powerful tool for analyzing aqueous solu-
+tions. Because of its versatility, LC-MS/MS is commonly employed in a variety
+of domains, including proteomics [3], metabolomics [4, 5], forensics [6, 7], and
+environmental chemistry [8].
+    For most molecules, it is not possible to accurately simulate the fragmen-
+tation that occurs in a mass spectrometer. In principle, theoretical physics
+provides the tools to understand this process; however, existing first principles
+simulations are too slow to be used in a high-throughput manner, and rely
+on approximations that limit their accuracy (for further discussion, see Sup-
+plementary Notes). This presents a fundamental problem for the field of mass
+spectrometry, limiting our ability to analyze the data that is collected. Devel-
+oping better spectrum simulators is critical for improving our understanding
+of mass spectrometry and facilitating its more widespread application.
+    Compound identification from MS/MS data is an important application
+of mass spectrometry, particularly in metabolomics. Practitioners often rely
+on database searches with large reference libraries, using spectrum similarity
+functions [9] in combination with domain expertise to identify matches. How-
+ever, these databases have relatively poor coverage, containing on the order of
+106 spectra which represent approximately 104 unique compounds. This fails
+to cover even the relatively small set of human metabolites, which is on the
+order of 105 according to the human metabolome database (HMDB, [10]). One
+strategy to overcome the scarcity of spectral libraries is to augment them with
+simulated (in silico) mass spectra for a large number of compounds from a
+chemical structure database [10–12]. This can dramatically increase coverage
+                                                              MassFormer        3
+
+for the reference library and improve the chance of finding a match, further
+motivating the development of accurate spectrum prediction models.
+    The increasing availability of public [10, 13–15] and commercial [16–19] MS
+datasets makes data-driven solutions to spectrum prediction appealing. One
+of the most popular spectrum prediction methods, competitive fragmentation
+modelling (CFM, [20–22]), combines combinatorial framgentation and data-
+driven probabilistic modelling to predict spectra. CFM has been shown to be
+effective at predicting and annotating spectra, and can be used for compound
+identification. However, due to its combinatorial bond-breaking algorithm,
+CFM struggles with modelling larger compounds (particularly those with mul-
+tiple rings). Deep learning has proven to be a useful tool for tackling complex
+problems in a variety of domains [23–26]. Recently, two types of deep learning
+methods have been proposed for spectrum prediction: fully-connected neu-
+ral networks based on molecular fingerprints [27] and graph neural networks
+that use a molecular graph representation [28, 29]. However, both of these
+strategies rely on local chemical structures, and do not easily model global
+interactions between far-away atoms in the molecule. Molecular fingerprints
+are typically restricted to capturing subgraphs of a fixed size, and cannot repre-
+sent global structures. Graph neural networks, while more flexible, only model
+local interactions in a single layer and require increased depth for long-range
+interactions [30]. However, excessive depth can often result in over-smoothing
+[31, 32], presenting challenges for larger molecules. While each fragmentation
+event appears to be a local phenomenon (involving a single bond breakage
+or a local re-arrangement), the fragment ion intensity recorded by the instru-
+ment corresponds to the relative propensity of such a fragmentation event to
+occur compared to all other possible events. Therefore, a fragment ion inten-
+sity cannot be interpreted on a local level without taking the global context
+of the whole molecule into consideration. Concurrently to this work, a number
+of deep learning spectrum predictors have been proposed [33–36]: these works
+are discussed in the Supplementary Notes.
+    In this work we adapt a state-of-the-art neural network architecture, the
+graph transformer [37], to tackle MS/MS spectrum prediction. Graph trans-
+formers model pairwise interactions between all nodes in the graph, and use
+degree and shortest path information to capture topological properties. Our
+experiments demonstrate how adapting a pre-trained graph transformer model
+to spectrum prediction can result in state of the art performance. Through
+rigorous comparisons with strong baseline methods, we demonstrate that our
+model can more accurately predict spectra for held-out compounds on two
+different spectrum datasets. We further validate the quality of our model’s
+predictions by investigating the effects of collision energy on the simulated
+spectra, and interpret MassFormer’s predictions with gradient-based attribu-
+tion methods. Finally, we demonstrate a realistic use case by applying the
+model to a spectrum identification problem.
+4     MassFormer
+
+2 Results
+2.1 Overview
+MassFormer uses a graph transformer architecture (Section 4.3) to predict
+fragment spectra from an input molecule, represented as a molecular graph
+(Section 4.2). A visual summary of our method is presented in Figure 1. The
+input graph is first preprocessed into node and edge embeddings. The former
+encode chemical information about the atoms, such as the element, and central-
+ity properties like degree. The latter capture spatial relations between atoms
+in the molecule, combining information about shortest path length and edges
+visited along it. A full description of the featurization can be found in Section
+4.2. After preprocessing, the embeddings are passed to a graph transformer,
+which iteratively applies multi-head self-attention (MHA) and multi-layer per-
+ceptrons (MLP) to manipulate the data. The learned self-attention weights
+capture associations globally between all pairs of nodes, and are directly influ-
+enced by edge embeddings at each iteration. After several rounds of processing,
+the final embeddings are summarized into a single embedding that represents
+the entire molecule. This chemical representation is combined with spectrum
+metadata and passed to an MLP that makes a prediction in the form of a
+sparse positive vector. Each dimension of the vector represents a binned peak
+location, with the magnitude corresponding to the peak’s intensity. The meta-
+data describe important information about the precursor (such as the adduct
+formed during ionization) and the instrument (such as the collision energy),
+both of which influence the fragmentation process and resulting spectrum [1].
+The input embedding and graph transformer parameters are initialized from
+a Graphormer model [37] that was pre-trained on a large chemical dataset
+(see Section 4.4), then jointly tuned with the spectrum predictor MLP on the
+MS/MS dataset.
+
+2.2 Predicting Spectra for Unseen Compounds
+To quantitatively evaluate our model’s predictions, we measured average cosine
+similarity on different types of held-out spectrum data. MassFormer was com-
+pared with two deep learning methods, a fingerprint (FP) neural network
+model and a Weisfeiler-Lehman (WLN) graph neural network model, as well as
+Competitive Fragmentation Modelling (CFM), a state of the art probabilistic
+method for spectrum prediction that does not use deep neural networks (see
+Section 4.8 for more details on the baselines). The three deep learning models
+were trained on the same data: a 70% portion of the NIST 2020 Tandem Mass
+Spectrometry dataset [17], with an additional 10% Validation set for hyperpa-
+rameter tuning and early stopping. However, to benchmark CFM we simply
+used the most recent publicly available pre-trained model [22], since re-training
+CFM on our dataset would be non-trivial due to its design.1 These differences
+
+  1
+    CFM was designed to predict Q-TOF spectra for [M+H]+ precursors, while NIST contains
+Orbitrap spectra for a variety of adduct types.
+                                                                                   MassFormer                  5
+
+                                                                          Node Features =
+                                                                      Atom + Degree Embeddings
+       Step 1:
+    Preprocessing                                                             Edge Features =
+                                                                          Shortest Path Embeddings
+
+                          Molecular              Input
+                           Graph               Embeddings                                      Pre-trained
+                                                                                              Initialization
+
+
+
+
+                                                                                  Readout
+       Step 2:
+  Graph Transformer                               MHA   MLP         MHA     MLP
+
+
+
+                           Input                              Transformer                      Molecule
+                         Embeddings                              Layers                       Embedding
+
+
+
+       Step 3:               +
+ Spectrum Prediction
+
+                          Metadata
+                         Embedding                MLP                                   Binned Spectrum
+
+
+
+Figure 1 Overview of the method. Extraction of node and edge embeddings from the
+molecular graph, application of the graph transformer, extraction of the chemical embed-
+ding from the readout node, addition of spectral metadata (such as collision energy), and
+prediction of the binned spectrum. The parameters for the input embeddings and the graph
+transformer layers are initialized from a pre-trained model, and the entire model is fine-tuned
+on the spectrum prediction task.
+
+
+in training data introduced some ambiguity in comparisons between CFM and
+other models.
+    Model evaluation was performed on the NIST Test set (consisting of the
+remaining 20% of spectra not used for training and validation), and an addi-
+tional dataset from MassBank of North America (MoNA, [13]). We considered
+two strategies for splitting the data: a simple random split by compound
+(InChiKey) and a more challenging split (Scaffold) that stratifies compounds
+by their Murcko scaffold [38, 39] before splitting. For more details on the
+datasets and training splits, refer to Section 4.7. To allow for a fairer compari-
+son with CFM, we focused on [M+H]+ spectra and removed compounds from
+the test sets that were overlapping with CFM’s training set. In Extended Data
+Figure 2, we demonstrate results for the deep learning models on the full range
+of supported precursor adducts and confirm that they are consistent with the
+results on the [M+H]+ subset.
+    MassFormer reliably outperformed other models across different datasets
+and split criteria (Figure 2). The performance of the three deep learning models
+was correlated across data splits, reflecting the underlying differences in split
+difficulty. NIST-InChIKey was the easiest, resulting in the best performance;
+NIST-Scaffold exhibited split-induced distribution shift; MoNA-InChIKey con-
+tained spectra from a different dataset; MoNA-Scaffold presented both of
+6     MassFormer
+
+
+
+
+        (a) Cosine Similarity: 0.91                   (b) Cosine Similarity: 0.99
+
+
+
+
+                                           (c)
+Figure 2 Spectrum similarity experiments. MassFormer can accurately predict spec-
+tra for Furanylfentanyl (2a, an opiod analgesic) and Liparin A (2b, a natural product),
+two examples from the NIST-Scaffold Test set. 2c compares the average cosine similarity
+of four models ( CFM = Competitive Fragmentation Modellin, FP = Fingerprint, WLN =
+Weisfeiler-Lehman Network, MF = MassFormer) on four different data splits. The number
+of molecules in the training set is provided for each split. To allow for direct comparison
+with CFM, we limited training and evaluation spectra to [M+ H]+ precursor adducts. Mass-
+Former was consistently the best-performing deep learning model. All models struggled more
+on MoNA than NIST, and Scaffold splitting was more challenging than InChIKey. Aver-
+ages and standard deviations from 10 independently trained models are reported (except
+for CFM, which was pre-trained). Statistical significance determined by one-sided Welch’s
+t-test with Šidák correction.
+
+the aforementioned challenges. Ground truth spectra for compounds that
+existed in both NIST and MoNA tended to be highly similar2 , suggesting that
+batch effect had limited impact. Thus, the decrease in performance on MoNA
+splits was most likely due to differences in compound and metadata coverage.
+
+ 2
+   When comparing ostensibly identical spectra from NIST and MoNA (same compound and
+metadata), on average they scored approximately 0.97 cosine similarity.
+                                                                MassFormer        7
+
+Altogether, the experiments demonstrate that model performance strongly
+depended on data splitting technique, and that MassFormer was consistently
+superior across all splits.
+    We also performed a more granular investigation of MassFormer’s per-
+formance by comparing average similarity across the top ten most frequent
+chemical classes in our dataset (Extended Data Figure 1), as indicated by
+ClassyFire [40], an automatic chemical ontology tool. While most classes had
+similar performance, the model seemed to perform exceptionally well on “lipids
+and lipid-like molecules”. This is perhaps unsurprising, as some types of lipids
+have predictable fragmentation patterns, facilitating the success of rule-based
+fragmenters in lipid spectrum predition [21, 41]. Conversely, simulating spec-
+tra for lipid-like compounds can be challenging for many generalist methods
+due to their large size [22], so MassFormer’s success in this area is encouraging.
+
+2.3 Modelling the Effect of Collision Energy
+Collision energy is a key experimental parameter that can strongly influ-
+ence the observed spectrum. Typically, increasing the collision energy results
+in more intense fragmentation, producing spectra with a higher proportion
+of smaller fragments. We wanted to investigate whether MassFormer could
+accurately model this effect. The relationship between collision energy and
+fragmentation is well represented in the NIST dataset, since each molecule
+was measured at ≈ 11 different collision energies on average (see Table 4).
+Figure 3a illustrates how collision energy typically affects fragmentation. The
+four spectra (and associated spectrum predictions) all correspond to the same
+molecule at varying normalized collision energies (NCEs), an expression of col-
+lision energy relative to precursor mass (see Equation 6). As collision energy
+increases, the peak intensities in the real mass spectra shift to the left, with the
+model’s predictions closely following this pattern. Figure 3c shows this rela-
+tionship more generally, by plotting the distribution of mean peak m/z in the
+spectrum, where each peak is weighted by its relative intensity. Qualitatively,
+the real and predicted distributions for the held-out spectra were difficult to
+distinguish.
+
+2.4 Explaining Peak Predictions with Gradient-Based
+    Attribution
+While neural networks are often viewed as black boxes, gradient-based attri-
+bution methods can provide some understanding of model behaviour. Broadly
+speaking, these methods work by taking the gradient of the model’s output
+with respect to the input features to identify parts of the data that the model
+is most sensitive to. Gradient × Input (GI) attribution [42, 43] is one of the
+simplest methods for gradient-based attribution, and can be useful analyzing
+transformer models [44]. GI works by measuring the dot product between the
+8      MassFormer
+
+
+
+
+                                                (a)
+
+
+
+
+                  (b)                                               (c)
+Figure 3 Collision energy experiments. 3a demonstrates how increasing collision
+energy influences a compound’s mass spectrum. Four spectra corresponding to ben-
+zhydrylpiperazine (3b, a piperazine derivative) at different normalized collision energies
+(NCEs) were selected from the NIST Test set. Notice how the mass distribution shifts to
+smaller fragments as NCE increases. MassFormer is able to predict the spectrum well at each
+of the four collision energies, and correctly models the shift in intensity. 3c is a pair of density
+maps comparing the relationship between average mass-to-charge ratio and collision energy
+for real and predicted spectra from the NIST Test set. In addition to confirming the general
+negative correlation between collision energy and peak location, these plots demonstrate
+that MassFormer accurately models this property on held-out data.
+
+
+input vector and its gradient: this can give information about the effects (pos-
+itive or negative) of changing that feature on the model’s output. For more
+details on GI computation refer to Section 4.6.
+    Each peak in a mass spectrum corresponds to a fragment of the origi-
+nal precursor. In organic compounds, non-Oxygen heteroatoms are much less
+common than the core Carbon/Hydrogen/Oxygen building blocks, so frag-
+ments that contain such heteroatoms are in some sense unique and related. We
+hypothesized that the model might be able to identify which peaks correspond
+to heteroatom-containing fragments. If this were true, one might expect the
+input dependencies for these peaks to be related: more concretely, the GI maps
+for such peaks would be correlated. A positive result would demonstrate that
+that, in some sense, the model understands which fragments are represented
+by each peak, and that such information can be revealed with gradient-based
+attribution methods.
+                                                                      MassFormer           9
+
+
+
+
+                                            (a)
+
+
+
+
+                     (b)                                            (c)
+Figure 4 Explainability using Gradient Attributions. GI attribution maps for each
+peak in Propanolol spectrum (4a) were computed and then projected to two dimensions with
+PCA (4b). The peaks were annotated with mass formulae using the SIRIUS toolkit, to allow
+assignment of binary labels based on heteroatom presence (in this example, Nitrogen). The
+projected GI maps for peaks that contained Nitrogen (in green) were linearly separable from
+those that did not (in purple), suggesting that these maps contained interpretable infor-
+mation about the peaks. The GI maps were normalized, with red values corresponding to
+positive attributions and blue values corresponding to negative attributions. 4c shows that
+this trend holds across the entire dataset. The distribution of optimal linear classification
+accuracy induced by the Nitrogen labelling strategy was markedly different from the ran-
+dom labelling distribution (higher accuracy indicates improved separability of the peaks).
+Furthermore, 35% of the peaks were perfectly linearly separable when using the Nitrogen
+labelling, compared to only 7% with the random baseline approach (p < 10−48 by one-sided
+Welch’s t-test).
+10      MassFormer
+
+    For each peak, we computed a GI map using the gradient of the model’s
+output at the peak location with respect to the input molecule’s atom embed-
+dings. These GI maps were high dimensional, so we projected them using
+principal component analysis (PCA) down to two dimensions for interpreta-
+tion. Then, we applied the SIRIUS formula annotation tool [45] to identify
+which peaks contained a heteroatom of interest. If a spectrum’s GI map pro-
+jections were linearly separable based on heteroatom labelling, this would be
+strong evidence that the GI maps capture heteroatom information about their
+corresponding peaks. Thus, we fitted a logistic regression model in the 2D pro-
+jection space using the heteroatom peak labels, and reported its accuracy as
+a measurement of peak separability. The entire process is illustrated in Figure
+4. The GI maps for a particular spectrum (Figure 4a) were computed, pro-
+jected, and plotted in two dimensions (Figure 4b). In this example, it is clear
+that the Nitrogen and non-Nitrogen peaks are perfectly linearly separable.
+By repeating this analysis for many spectra from the dataset (Figure 4c), we
+showed that the Nitrogen labelling in the projected GI map space resulted in
+markedly higher linear separability than random labelling. In Extended Data
+Figure 6 we show that this pattern holds for four other heteroatoms (Cl,P,S,F).
+Altogether these data suggest that MassFormer can learn implicit heteroatom-
+based relationships between predicted peaks in the spectrum, and that these
+relationships can be revealed using gradient-based attribution methods.
+
+2.5 Identifying Spectra by Ranking Candidates
+Spectrum identification is a major application that motivates the develop-
+ment of spectrum prediction models. MS compound identification tools (see
+Supplementary Notes for examples) are typically benchmarked on the Criti-
+cal Assessment of Small Molecule Identification (CASMI) competition [46, 47].
+The basic setup of the CASMI task is as follows: experimental spectra are
+acquired for a small set of compounds (called queries) that are not repre-
+sented in existing public libraries, and competing methods are scored based on
+their ability to identify the correct structure. We performed a variation of the
+CASMI competition using MassFormer and the three comparison models from
+Section 2.2: FP, WLN, and CFM. In this variation, we used positive mode
+[M+H]+ spectra from the CASMI 2016 competition (1243 unique queries in
+total). We trained each of the three deep learning models on the same data (the
+NIST-InChIKey Train set, see Section 2.2), with additional filtering to prevent
+data leakage of CASMI query compounds. As in the previous section, we used
+a pre-trained version of CFM, similar to what the authors did in the origi-
+nal CASMI 2016 competition [47] as well as their most recent paper [22]. All
+models used the original candidate structure list provided by the contest orga-
+nizers, which was constructed by searching ChemSpider [48] for compounds
+with masses similar to the precursor (see original paper [47] for more details).
+
+  3
+    There were 127 positive mode spectra in CASMI 2016, but we removed 3 compounds with
+charged atoms to maintain compatibility with our training setup, which assumes neutral molecules.
+This also allows for fairer comparison with CFM, which does not natively support charged atoms.
+                                                                    MassFormer              11
+
+Candidate rankings for each model were established based on the similarity
+of predicted candidate spectra with the query. The results are summarized
+in Tables 1 and 2 (additional plots of the rank distributions can be found in
+Extended Data Figure 3). Overall, the deep learning models seemed to con-
+sistently outperform CFM in all metrics. MassFormer was generally superior
+to other methods, except for CASMI Top-1 (where it was outperformed by
+the Fingerprint model). While it would be possible to improve scores of all
+methods with a more refined candidate structure selection [22, 45], we stuck
+with a simple approach to demonstrate a worst-case scenario where there is
+little a priori information about the query compound other than its mass and
+precursor adduct.
+
+                           CASMI                                  pCASMI
+   Model     Rank (⇓)      Top-1 (⇑)    Top-5 (⇑)    Rank (⇓)     Top-1 (⇑)    Top-5 (⇑)
+   CFM         46.0            .25         .44         391.5          .07         .23
+    FP      42.2 ± 5.4     .34 ± .03    .60 ± .02   135.9 ± 9.5   .19 ± .02     .44 ± .02
+   WLN      47.0 ± 11.8    .24 ± .04    .56 ± .02    91.8 ± 8.5    .16 ± .01    .41 ± .02
+    MF      27.1 ± 5.3     .29 ± .02   .61 ± .03    85.4 ± 5.8     .18 ± .02   .47 ± .01
+Table 1 Spectrum Identification Ranking Metrics. Ranking metrics for the CASMI
+and pCASMI spectrum identification tasks. Rank corresponds to the average rank of the
+correct candidate. Top-k accuracy reports the frequency with which the correct candidate
+is in set of the k highest ranked candidates. MassFormer (MF) performed best across all
+metrics except Top-1, where it was outperformed by the fingerprint model (FP) in both
+CASMI and pCASMI. Averages and standard deviations from 10 independently trained
+models are reported, except for CFM (which was pre-trained).
+
+
+
+
+                           CASMI                                  pCASMI
+  Model    N-Rank (⇓)     Top-1% (⇑)   Top-5% (⇑)   N-Rank (⇓)    Top-1% (⇑)   Top-5% (⇑)
+   CFM        .091           .54          .68          .198          .26          .44
+    FP     .050 ± .005    .65 ± .03     .81 ± .02   .097 ± .006   .45 ± 0.02    .66 ± .02
+   WLN     .055 ± .006     .58 ± .03   .79 ± 0.02   .073 ± .003   .47 ± 0.02    .70 ± .03
+   MF      .036 ± .005     .63 ± .03   .84 ± 0.02   .065 ± .004   .52 ± 0.02   .74 ± .02
+Table 2 Spectrum Identification Normalized Ranking Metrics. The normalized
+counterparts of the ranking metrics displayed in Table 1 for the CASMI and pCASMI
+spectrum identification tasks. Normalizing by the number of candidates reduces sensitivity
+to query spectra with large candidate sets. MassFormer (MF) seemed to perform best
+across all metrics, except for CASMI Top-1 where the fingerprint model (FP) was slightly
+better. Averages and standard deviations from 10 independently trained models are
+reported, except for CFM (which was pre-trained).
+
+
+
+    CASMI is a useful way of evaluating spectrum identification methods, but
+it has a number of limitations. Because of the small number of query spectra
+(124 compounds) and limited coverage of precursor adducts (only [M+H]+ for
+positive mode) and collision energies (20,35,50 NCE), it is difficult to draw
+12     MassFormer
+
+conclusions about the performance of models with more diverse spectrum con-
+figurations. Additionally, many of the compounds in the CASMI 2016 set
+have high similarity with existing compounds in modern spectral libraries.
+To address these concerns, we proposed a new spectrum identification task
+called pseudo-CASMI (pCASMI). Full details about the setup of this challenge
+can be found in Section 4.9. Briefly, we selected outlier compounds from the
+NIST dataset to create the query list. The results of this challenge are also
+included in Tables 1 and 2. Overall, pCASMI was a more challenging task,
+with lower scores for all methods when compared with CASMI. MassFormer
+performed strongly in all metrics. Interestingly, the WLN model seemed to
+have problems with average rank in the CASMI competition, but was signifi-
+cantly better in pCASMI. Unsurprisingly, CFM performed worse in pCASMI
+than CASMI, likely because the query spectra represent a more diverse set of
+collision energies for which CFM was neither designed nor optimized.
+    Altogether, these experiments demonstrate how gains in spectrum pre-
+diction will often, but not always, translate to improvements in spectrum
+identification. MassFormer was the superior spectrum predictor, and this was
+reflected in its strong ranking metrics. However, the Fingerprint model per-
+formed surprisingly well in Top-k, sometimes eclipsing other methods (like
+MassFormer and WLN) which were far better at predicting spectra. Spec-
+trum identification requires making predictions for a large number of candidate
+structures, many of which are out-of-distribution with respect to the training
+set. Performance on an independent and identically distributed (IID) held-out
+test set does not fully describe a model’s behaviour on out-of-distribution data,
+which is generally more difficult to estimate. In fact, optimized models which
+perform similarly on an in-distribution validation set often perform differently
+on out-of-distribution data [49–51].
+
+3 Discussion
+In this work we introduced MassFormer, a novel method for predicting MS/MS
+spectra for small molecules using a graph transformer architecture. We val-
+idated our model’s performance with two independent MS datasets, NIST
+and MoNA, and showed that it can produce realistic spectra. We verified
+that the model captures prior knowledge about the fragmentation process by
+investigating the effect of collision energy on the predicted spectrum. Using
+gradient-based attributions, we demonstrated model explainability by show-
+ing it can identify peaks with similar element composition. We benchmarked
+the model with two different molecule ranking task and showed that it can be
+useful for MS/MS spectrum identification. Our work represents one of the first
+open-source deep learning spectrum predictors for MS/MS data, with extensive
+benchmarking and implementations of other models from the literature.
+    Our method has a number of limitations. The current model is restricted to
+positive mode ESI Orbitrap spectra with specific precursor adducts. Extend-
+ing the model to accommodate additional ionization modes (such as EI and
+                                                             MassFormer        13
+
+negative mode ESI), adduct types, and instrument types (such as Q-TOF)
+would broaden MassFormer’s impact. By supporting additional mass spectrum
+modalities, the model would be able to leverage new sources of MS data. Pre-
+diction resolution is another limitation: all experiments in this work use spectra
+binned to 1 Da, but many MS/MS spectra have much higher resolution (in
+NIST, up to 0.0001 Da for Orbitrap spectra). This additional resolution can
+help distinguish between fragments with similar masses, and is particularly use-
+ful for larger molecules. Finally, while our model is explainable to some degree
+(through gradient-based attribution), it does not provide true fragment peak
+annotations like some other methods [22, 45]. Structural and formula fragment
+annotations are often useful for practitioners: they can improve confidence in
+the model’s predictions by allowing experienced users to manually validate
+predicted peak patterns against prior knowledge about fragmentation mecha-
+nisms. Additionally, when predicting spectra for identification purposes, peak
+annotations can be helpful for inferring the identity of the correct compound
+(or compound class), even when the overall prediction contains considerable
+noise. Developing a deep learning model that is capable of producing these
+annotations would be a valuable contribution to the field.
+    MassFormer has a number of exciting applications, largely focused on
+MS-based compound identification. We have already demonstrated how Mass-
+Former can be used to identify a spectrum given a list of candidate structures.
+SIRIUS [45] is a popular tool for identification that does not rely on spectrum
+prediction. It may be possible to combine MassFormer with SIRIUS (or another
+existing tool) to improve structure identifications. For example, SIRIUS uses
+information in the query spectrum to predict chemical features (such as pre-
+cursor formulae and fingerprints) that help with identification. These features
+could be used refine a set of candidate compounds that would subsequently
+be ranked by predicted spectrum similarity with the query. Alternatively, for-
+going a candidate database entirely, MassFormer could instead be combined
+with a generative model for small molecules to help search the chemical space
+for high-scoring spectrum matches, as seen in other works [52, 53]. Finally,
+MassFormer has potential for use in decoy generation [54, 55], which plays
+an important role in false discovery rate (FDR) calibration for untargeted
+metabolomics experiments. Target-decoy methods work by introducing a num-
+ber of pseudo-random data points (realistic but synthetic spectra) that are
+ground truth negatives, allowing for empirical estimation and tuning of confi-
+dence thresholds to meet an FDR criterion. Applying MassFormer to predict
+noisy spectra for compounds that are unlikely to exist already in the sample
+(such as pesticide molecules in human blood) is a potentially powerful strat-
+egy for generating realistic decoys, which would improve FDR estimates and
+reduce the chance of incorrect compound identifications.
+14     MassFormer
+
+4 Methods
+4.1 Problem Formulation
+Spectrum prediction can be viewed as a supervised learning problem, with
+a dataset {xi , z i , y i }ni=1 where xi is a molecule and y i is its spectrum under
+experimental conditions z i . The goal is to learn the parameters θ of the pre-
+diction function fθ : X × Z → Y, where X is the space of chemicals and Y is
+the spectrum space. Mass spectra can be represented as a set of peaks, each
+of which have an m/z location and an intensity. By discretizing the peak loca-
+tions into m fixed-width bins (as was done in [27, 28]), a mass spectrum can
+be represented as an m-dimensional sparse vector, where each peak at loca-
+tion j has intensity yj ≥ 0. The problem of spectrum prediction can thus be
+formulated as vector regression, with Y = Rm  0. The spectral metadata
+z ∈ Z (such as collision energy and precursor adduct) are provided as side
+information to the input molecule x.
+
+4.2 Chemical Featurization
+The featurization of an input molecule x is critical, as it influences the struc-
+ture of the prediction function fθ and can have an impact on downstream
+performance. Molecular fingerprints (also called molecular descriptors) repre-
+sent molecules using hand-designed chemical features. Common feature choices
+include presence of predefined substructures (MACCS, [56]) and hashed local
+substructure counts (ECFP, [57]). Molecular graph representations capture the
+structure of a molecule by explicitly representing atoms as nodes and bonds
+as edges. The node features can encode various chemical properties associated
+with the atom (i.e. element, formal charge, number of bonded hydrogens),
+while the edge features can encode bond information (i.e. bond type, aromatic-
+ity). Such representations naturally lend themselves to graph neural networks
+and graph transformers (see Section 4.3 below), and can be more expressive
+than fingerprints. Our graph representations do not include any stereochem-
+ical, conformer, or 3D coordinate information since such information is not
+provided in our MS datasets.
+    The node, edge, and spectrum metadata features used for MassFormer are
+summarized in Table 3. Note that the node and edge features were chosen
+to be identical to the pre-trained Graphormer model (see Section 4.4), to
+preserve compatibility. However, some of these features used in this model
+(formal charge, radical state, stereochemical information) were not applicable
+to our data, and have been omitted.
+
+4.3 Chemical Graph Transformer
+Transformers [58] are a family of neural networks characterized by their use of
+attention to model sequences. Originally developed for neural machine trans-
+lation [59], transformer models have proven useful in a number of domains,
+from computer vision [60] to reinforcement learning [61], achieving state of
+                                                                   MassFormer        15
+
+      Feature Type           Feature Name                       Values
+          Node                  Element                    C,N,O,P,S,F,Cl
+          Node                  Degree                      0, . . . , 10, 11+
+          Node           Number of Hydrogens                0, . . . , 8, 9+
+                                                            SP,SP2,SP3,
+          Node           Orbital Hybridization
+                                                         SP3D,SP3D2,Other
+          Node                Aromaticity                     True,False
+          Node             Ring Membership                   True,False
+                                                        Single,Double,Triple,
+          Edge                Bond Type
+                                                          Aromatic,Other
+          Edge             Bond Conjugation                   True,False
+        Metadata      Normalized Collision Energy             (0, 200]
+                                                       [M+H]+ , [M+H-H2 O]+ ,
+        Metadata           Precursor Adduct          [M+H-2 H2 O]+ , [M+2 H]2+ ,
+                                                       [M+H-NH3 ]+ , [M+Na]+
+        Metadata          Precursor Mass (Da)                  (0, 1000]
+
+Table 3 Featurization. Input features provided to the MassFormer model. Node
+features capture atom information, edge features capture bond information, and metadata
+features capture information specific to the spectrum.
+
+
+
+the art performance even in problems that do not naturally lend themselves
+to sequence modelling. They represent an input sequence as a set of embed-
+dings, each of which capture the meaning and position of a single element. By
+interleaving layers of multi-head attention (MHA) with small multi-layer per-
+ceptrons (MLPs), transformers iteratively process the set of embeddings and
+learn relationships between elements.
+    A number of graph transformers have been proposed [37, 62–65], motivated
+by the ability to model pairwise global interactions between all nodes in the
+graph. Many graph neural networks (i.e. graph attention network [66]) are
+similar in structure to graph transformers but can only model local relations
+in a single layer, and require large depth to model interactions over longer
+distances [30]. Graph transformers are useful when the input graph is small
+enough such that the quadratic memory footprint of the attention mechanism
+does not become prohibitively expensive. They have achieved state-of-the-art
+performance in both 2D (graph) and 3D molecule property prediction tasks
+[37, 67].
+    Our approach adapts the Graphormer [37] architecture, a recent graph
+transformer model that boasts impressive results on chemical property pre-
+diction tasks [37, 68], particularly in the low-data regime (on the order of
+104 samples). The distinguishing characteristic of this graph transformer is its
+unique positional encoding scheme. The model uses shortest path information
+between nodes, and associated edge embeddings along that path, as a form of
+relative positional encoding. The shortest path information is computed as a
+preprocessing step for each graph, using the Floyd-Warshall algorithm [69].
+16     MassFormer
+
+    The attention mechanism aij is described in detail in Equations 1 and
+                        0
+2, where hi , hj ∈ Rd ×1 are representations for nodes i and j respectively.
+                   0
+WK , WQ ∈ Rd×d are the standard learnable key and query projection matri-
+ces. bij ∈ R is a learnable scalar indexed by the shortest path distance between
+i and j (which is always a positive integer). cij ∈ R is the edge embedding
+term, described by Equation 2. Allowing a slight abuse of notation, ep ∈ Rd×1
+is the embedding corresponding to the pth edge in the shortest path between
+i and j, and wp ∈ Rd×1 is a learnable weight for that position.
+
+
+                                    (WQ hi )T (WK hj )
+                                                                    
+                aij = softmax              √           + bij + cij          (1)
+                                              d
+                        1 X T
+                cij =      w ep                                             (2)
+                        N p p
+
+    For graph-level prediction tasks, it is useful to add a readout node to the
+input graph that can extract graph-level embeddings, similar to the CLS token
+in NLP transformers [70]. This “fake” node is initialized with a unique embed-
+ding and connected to all other nodes in the graph with a special edge type.
+In the final layer of the transformer, the readout node’s embedding is inter-
+preted as a summarized representation of the input graph and can be used for
+downstream property prediction.
+
+4.4 Pre-training and Fine-tuning
+Adapting a pre-trained model can offer improved performance over training
+a radomly initialized model from scratch, particularly when data scarcity is
+a concern. We initialized the parameters of our graph transformer module
+and the learned input node and edge embeddings (see Figure 1) with the
+corresponding parameters of a pre-trained Graphormer model. This model
+was originally trained on the PCQM4Mv2 dataset [67, 71], a large dataset of
+approximately 4 million 2D molecular graphs and their Density Functional
+Theory (DFT) simulated HOMO-LUMO energy gap. The pre-training task
+was a supervised graph-level regression problem of predicting the energy gap.
+While this task is not directly related to mass spectrometry, the roughly
+100-fold larger compound coverage of the PCQM4Mv2 dataset provided an
+opportunity for the model to learn general chemical representations that trans-
+fer to the spectrometry task. In Extended Data Table 1, we performed model
+ablations to determine relative contributions of different aspects of the fine-
+tuning process. Our experiments demonstrate that using pre-trained weights
+is necessary to scale up the number of model parameters while maintaining
+training stability and performance. We also found re-initializing the statistics
+of the layer normalization [72] modules to be helpful. The other key compo-
+nent of MassFormer, the spectrum prediction MLP, was initialized randomly.
+Both modules were fine-tuned jointly for 20 epochs using a linearly decaying
+                                                                      MassFormer           17
+
+learning rate. For full details on the training procedure, please refer to the
+code repository (Section 6).
+
+4.5 Loss and Similarity Calculations
+Since MS peak intensities are relative 4 , it is advisable to use loss functions that
+are invariant to scaling. We choose cosine distance (Eq. 3) as the loss function,
+where ŷ = fθ (x, z) is the predicted spectrum and y is the real spectrum. Cosine
+similarity is commonly used to compare spectra, so minimizing the cosine
+distance (thus maximizing similarity) is a natural choice and has been shown
+to work well in other models [27, 28].
+
+                                                      Pm
+                                     y T ŷ                  yi ŷi
+                 CD(y, ŷ) = 1 −              = 1 − qP i=1 P                              (3)
+                                     y 2 ŷ 2         m    2     m     2
+                                                      j=1 yj     k=1 ŷk
+
+
+    The spectral similarity experiments (Figure 2, Extended Data Figures 1
+and 2, Extended Data Table 1) report average cosine similarity using a partic-
+ular method of aggregating the results across spectra. Since there were often
+multiple spectra with different collision energies corresponding to the same pre-
+cursor, both target and predicted spectra were averaged (in binned spectrum
+space) across collision energy before computing similarity. This helped prevent
+inflated similarity scores resulting from spectra with very few peaks, which
+tends to happen when the collision energy is either too high or too low. These
+similarity scores were subsequently averaged per molecule (i.e. across precursor
+adducts), then averaged again across molecules. This effectively down-weighted
+the individual importance of spectra corresponding to molecules with multiple
+precursor adducts in the dataset.
+
+4.6 Gradient-based Feature Attribution
+Gradient × Input (GI, [42, 43]) is an attribution method that assigns impor-
+tance scores to input variables based on the sensitivity of the model’s
+predictions to changes in those variables, estimated using gradients. It satis-
+fies the conservation axiom, an underlying assumption for many explainable
+AI approaches which posits that “scores assigned to input variables and form-
+ing the explanation must sum to the output of the network” [44]. If a model is
+sensitive to changes in certain parts of the input, these features are taken to
+be more important for making a correct prediction. GI methods compute the
+attribution score as the the dot product of the gradient vector with the input.
+Inputs with scores close to 0 are unimportant, while those with large posi-
+tive or negative scores are interpreted as contributing positively or negatively
+(respectively) to the prediction.
+
+  4
+    The unnormalized value of a peak intensity can provide useful information in some contexts
+(such as quantification and noise removal), but reference spectra have already been normalized
+and denoised.
+18     MassFormer
+
+    More formally, let x ∈ RD be an input vector with D dimensions, let
+y ∈ RK be an output value associated with x, and fθ (x) : RD → RK be a
+neural network. Let L(y, ŷ) : RK × RK → R be a scalar loss function (for
+example, cosine distance). The GI score for the model on this input vector is
+defined precisely by Equation 4:
+
+
+                          GI(x, y) = x · ∇x L(y, fθ (x))                      (4)
+
+    While GI score calculation is generally applicable to any type of fully
+differentiable neural network, there are certain aspects of the transformer archi-
+tecture (the self-attention mechanism [58] and layer normalization module
+[72]) that violate the conservation axiom and, in practice, reduce the quality
+of model explanations [44]. To address this problem, we made slight modifi-
+cations to these modules when calculating GI scores, as recommended in [44]
+(refer to their paper for full details).
+    In our experiments, the neural network fθ in Equation 4 was MassFormer,
+which maps input molecules to K-dimensional binned spectrum vectors (where
+K = 1000). To compute the GI scores for a peak at particular location k,
+we used a loss function that zeros out all other peaks in the spectrum. More
+precisely, we defined the loss Lk for peak k using Equation 5:
+
+
+                               Lk (x) = ek · fθ (x)                           (5)
+
+    In the above formulation, ek is the k th standard basis vector for RK (in
+other words, a one-hot vector where the k th entry is 1).
+    Note that MassFormer takes a molecular graph as input, which is sub-
+sequently preprocessed into different types of embeddings (see Figure 1 and
+Section 4.2). We computed attribution scores only with respect to the element
+embeddings, as our experiments in Section 2.4 involved discriminating peaks
+by element composition. To visualize the GI attribution maps (i.e. Figure 4b),
+we estimated GI scores for each atom and then L2 normalized across atoms, to
+remove information about gradient magnitude and focus only on direction. We
+employed a slight variation of the aforementioned GI computation (Equation
+4) for the linear projections in Section 2.4: instead of summing over the embed-
+ding dimension to produce a single scalar score per atom, we performed PCA
+on the unreduced GI map. Summing over the dimensions is useful for produc-
+ing an easily interpretable score, but might remove variation that could inform
+the PCA projection.
+
+4.7 Datasets and Training Splits
+We used the NIST 2020 MS/MS dataset [17] for both training and evaluation.
+NIST is a commercial dataset notable for its large coverage (over 1 million
+tandem spectra in total), standardized spectrum acquisition protocol, and high
+                                                                MassFormer          19
+
+degree of manual validation. We also used the publicly available MassBank of
+North America (MoNA) as a held-out evaluation set. Massbank is an important
+dataset for the MS community, as it is one of the largest open online repository
+of MS data for small molecules. This dataset contained spectra from a variety
+of other online repositories, including GNPS [14], HMDB [10], and ReSpect
+[15]. For simplicity, we only considered spectra from Orbitrap instruments that
+use HCD collision [1], as this corresponds to the largest subset of data in NIST.
+Furthermore, we restricted the dataset to only include positive mode spectra
+with 6 of the most highly occurring precursor adducts ([M+H]+ , [M+H-H2 O]+ ,
+[M+H-2 H2 O]+ , [M+2 H]2+ , [M+H-NH3 ]+ , [M+Na]+ ). The dataset statistics
+are summarized in Table 4. After filtering, NIST is a much larger dataset than
+MoNA, both in terms of number of spectra and compounds. For this reason,
+we relied on NIST data to train the models and used MoNA exclusively for
+evaluation.
+
+        Dataset    # Spectra    # Compounds      Average # NCE / Compound
+         NIST       375,406         22,105                   11.33
+         MoNA        13,225         1,376                    9.29
+
+Table 4 Summary statistics for each MS dataset, after filtering for positive mode
+Orbitrap spectra and desired precursor adducts ([M+H]+ , [M+H-H2 O]+ , [M+H-2 H2 O]+ ,
+[M+2 H]2+ , [M+H-NH3 ]+ , [M+Na]+ ).
+
+
+
+    Two kinds of data splitting techniques were employed in Section 2.2. Both
+methods involved splitting spectra based on compound identity, to avoid leak-
+age of spectra that differ only in metadata (such as collision energy or precursor
+type) but not in structure. The “InChIKey” split used non-sterochemical
+InChIKey strings [73], which are hashed chemical string representations, as
+molecular identifiers. This approach was, in essence, a simple random split
+based on compound identity. In contrast, the “Scaffold” split used Murcko
+Scaffolds [38] to coarsely cluster compounds before splitting in a manner such
+that all the compounds (and associated spectra) from one cluster would end up
+in the same partition. Scaffold splitting introduces distributional shift between
+training and test data, and is commonly used to evaluate deep learning models
+in small molecule applications [74].
+
+4.8 Baseline Models
+We compare our method with two related deep learning models, based on exist-
+ing approaches from the literature. The Fingerprint model combines ECFP,
+MACCS, and RDKit fingerprints (all of which are available from the RDKit
+library [39]) and uses those directly as the chemical embedding. The WLN
+model uses a molecular graph representation in combination with a Weisfeiler-
+Lehman Network ([75]), which is a particular kind of graph neural network, to
+produce the chemical embedding. These models are based on two previously
+20      MassFormer
+
+published MS prediction models: [27] and [28] respectively. However, both
+models required reimplementation for direct comparison: the former [27] was
+trained on a different type of MS data (EI-MS), while the latter [28] did not
+have available public code. 5 Compared to MassFormer’s 56 million param-
+eters, the WLN model had approximately 6 million parameters and the FP
+model had approximately 35 million parameters.
+
+              Dataset            InChIKey Overlap/Total        Scaffold Overlap/Total
+                NIST                    2,728/22,114                1,372/6,893
+               MoNA                      499/1,372                    362/649
+         CASMI (Queries)                   48/124                      58/92
+       CASMI (Candidates)               139/197,465                  580/71,477
+         pCASMI (Queries)                  32/300                      37/300
+       pCASMI (Candidates)              114/650,225                 820/192,980
+
+Table 5 Structure overlap of the CFM training set (4054 molecules, 1576 scaffolds) with
+other datasets used in the experiments. Overlap reported in terms of identical InChIKeys
+(ignoring stereochemical information) and identical Scaffolds.
+
+
+
+    In addition, we compare our model to Competitive Fragmentation Mod-
+elling (CFM, [20, 22]), a well-known tool for small molecule spectrum predic-
+tion. CFM is not a deep learning approach: it uses combinatorial fragmentation
+to determine the set of possible peak locations, then fits a probabilistic model
+to predict the relative intensity of the fragments. CFM was designed to predict
+Q-TOF spectra at 3 specific collision energies (10,20,40) and with a limited
+set of precursor adducts (for positive mode, only [M+H]+ ). It is not straight-
+forward to re-train CFM on the NIST dataset, which contains roughly 10x
+more spectra than CFM’s original training set, from a different kind of instru-
+ment (Orbitrap) and covering a wider range of precursor adducts and collision
+energies. CFM makes assumptions about fragmentation that are specific to
+the types of spectra that it models, complicating application to new datasets.
+Additionally, scaling CFM’s training procedure to such a large dataset would
+be challenging. For these reasons, we used the most recent pre-trained version
+of the model [22] for all experiments. This version was trained on a 4054-
+molecule subset of the Metlin dataset [18]: see Table 5 for information about
+the overlap of CFM’s training set with the other datasets. In our experiments
+with CFM, we mapped the input normalized collision energy to whichever of
+the three CFM-supported absolute collision energies was closest. To convert
+from normalized to absolute collision energy, we used Equation 6, where m(p)
+is the precursor mass and c(p) is the charge factor, which is 1.0 for singly
+charged precursors and 0.9 for doubly charged precursors.
+
+  5
+    We communicated with the authors of [28] and designed our WLN model to be similar to their
+best configuration.
+                                                            MassFormer        21
+
+
+
+                                  m(p) × c(p) × NCE
+                         ACE =                                               (6)
+                                         500
+
+   CFM also contains a rule-based module for lipid spectrum prediction [21].
+We preferentially employed this module to make predictions instead of the
+combinatorial/probabilistic approach, wherever applicable.
+
+4.9 Spectrum Identification Task Setup
+CASMI 2016 contains Orbitrap spectra for 188 unique compounds, 127 of
+which are positive mode ([M+H]+ adducts). Each spectrum was merged over
+three normalized collision energies: 20, 35, and 50. Additionally, each query had
+an associated candidate list, which was originally developed by searching the
+ChemSpider database [48] for compounds with similar masses to the precursor.
+After preprocessing, there were on average 1250 candidate compounds per
+spectrum.
+    To construct the pCASMI dataset, we selected compounds from the NIST
+dataset with unique Murcko Scaffolds. We sampled 400 of such compounds
+in total, stratified by molecular weight: 75 with weight < 200 Da, 75 with
+weight in [200, 300) Da, 75 with weight in [300, 400) Da, and 75 with weight
+≥ 400 Da. The motivation was to select a diverse group of outlier compounds
+to use as queries in the identification task. For each compound, all [M+H]+
+spectra (of any collision energy) were used as query information. The candi-
+date sets were established by sampling compounds from PubChem (up to 10k)
+with molecular mass within 0.5 ppm of the true query mass. We filtered the
+candidate list to remove rare elements and multi-molecular compounds. Stere-
+ochemical information was also removed, and stereoisomeric candidates were
+deduplicated. After preprocessing, there were on average 2201 candidates per
+spectrum, which is roughly double that of the CASMI challenge.
+    The models were scored using an array of different unnormalized (Table
+1) and normalized (3, Table 2) ranking metrics, inspired by those typically
+employed in CASMI competitions [47]. Average Rank (Table 1) corresponds
+to the average rank of the true candidate compound, with 1 being the best
+score. Its normalized counterpart, Average Normalized Rank (Table 2) corre-
+sponds to the average rank of the true candidate expressed as a fraction of
+the total number of candidates, with 0 being the best score and 1 being the
+worst. Top-k Accuracy (Table 1) represents the frequency with which the true
+candidate is ranked in the top k candidates, and ranges from 0 to 1. Top-k%
+Accuracy (Table 2) is the normalized equivalent, measuring how often the cor-
+rect candidate appeared in the top k% of candidates. In contrast to the average
+rank metrics, Top-k and Top-k% metrics do not strongly penalize ranking the
+correct candidate extremely poorly (any rank outside of the top k or k% is
+equally bad). Orthogonally, the normalized metrics are less sensitive to differ-
+ences caused by variation in the number of candidates per query, which can
+be useful.
+22    MassFormer
+
+4.10 Implementation Details
+All models were implemented in PyTorch [76]. Our model, MassFormer, used
+a modified version of the Graphormer v2 implementation [37]. The WLN
+model used the Deep Graph Library [77, 78] package for geometric deep learn-
+ing. We also adapted some code from [28] for spectrum preprocessing. Before
+benchmarking the FP and WLN baseline models, we ran a bayesian hyperpa-
+rameter sweep using Weights & Biases [79], with budget of 100 initializations,
+to find the best-performing configuration on the NIST validation set. The
+list of hyperparameters that we optimized is as follows: learning rate, weight
+decay, dropout, minibatch size, and network-architecture specific parameters
+(such as hidden dimension and number of layers). For MassFormer we stuck
+with the Graphormer “Large” architecture, which had available pre-trained
+weights. For full model details and hyperparameter configurations, please see
+the code repository (linked in Section 6).
+
+5 Data Availability
+We used the NIST 2020 LC-ESI-MS/MS library, which is commercial and
+can be purchased from NIST or licensed distributors. In our code reposi-
+tory (see Section 6), we include instructions for exporting the NIST data
+and preprocessing it to work with our models. We also used data hosted on
+MoNA (the “LC-MS/MS Spectra” partition, https://mona.fiehnlab.ucdavis.
+edu/downloads) and data from the CASMI 2016 Competition (the “Chal-
+lenge Data” section, http://casmi-contest.org/2016/challenges-cat2+3.shtml).
+Exact versions of these data are available on Zenodo (https://doi.org/10.5281/
+zenodo.7874421), and can be preprocessed following instructions in our code
+repository.
+
+6 Code Availability
+The code for data preprocessing, model implementations, and experiment con-
+figurations is open-source (BSD-2-Clause license) and can be found in this
+GitHub repository: https://github.com/Roestlab/massformer/.
+                                                           MassFormer        23
+
+References
+ [1] Gross, J.H.: Mass Spectrometry. Springer, Cham (2017). https://
+     doi.org/10.1007/978-3-319-54398-7. http://link.springer.com/10.1007/
+     978-3-319-54398-7 Accessed 2022-11-02
+
+ [2] Niessen, W.M.A., Falck, D.: Introduction to Mass Spectrometry, a
+     Tutorial. In: Analyzing Biomolecular Interactions by Mass Spec-
+     trometry, pp. 1–54. John Wiley & Sons, Ltd, ??? (2015). https:
+     //doi.org/10.1002/9783527673391.ch1. https://onlinelibrary.wiley.com/
+     doi/abs/10.1002/9783527673391.ch1 Accessed 2021-10-01
+
+ [3] Aebersold, R., Mann, M.: Mass-spectrometric exploration of proteome
+     structure and function. Nature 537(7620), 347–355 (2016)
+
+ [4] Gowda, G.A.N., Djukovic, D.: Overview of Mass Spectrometry-Based
+     Metabolomics: Opportunities and Challenges. Methods in molecular
+     biology (Clifton, N.J.) 1198, 3–12 (2014). https://doi.org/10.1007/
+     978-1-4939-1258-2 1. Accessed 2021-11-04
+
+ [5] De Vijlder, T., Valkenborg, D., Lemière, F., Romijn, E.P., Laukens, K.,
+     Cuyckens, F.: A tutorial in small molecule identification via electrospray
+     ionization-mass spectrometry: The practical art of structural elucidation.
+     Mass Spectrometry Reviews 37(5), 607–629 (2018). https://doi.org/10.
+     1002/mas.21551. Accessed 2021-11-05
+
+ [6] Peters, F.T.: Recent advances of liquid chromatography–(tandem) mass
+     spectrometry in clinical and forensic toxicology. Clinical Biochemistry
+     44(1), 54–65 (2011). https://doi.org/10.1016/j.clinbiochem.2010.08.008.
+     Accessed 2023-01-05
+
+ [7] Van Bocxlaer, J.F., Clauwaert, K.M., Lambert, W.E., Deforce, D.L.,
+     Van den Eeckhout, E.G., De Leenheer, A.P.: Liquid chromatography-
+     mass spectrometry in forensic toxicology. Mass Spectrometry Reviews
+     19(4), 165–214 (2000). https://doi.org/10.1002/1098-2787(200007)19:
+     4h165::AID-MAS1i3.0.CO;2-Y
+
+ [8] Lebedev, A.T.: Environmental Mass Spectrometry. Annual Review of
+     Analytical Chemistry 6(1), 163–189 (2013). https://doi.org/10.1146/
+     annurev-anchem-062012-092604. Accessed 2021-11-05
+
+ [9] Stein, S.E., Scott, D.R.: Optimization and testing of mass spectral library
+     search algorithms for compound identification. Journal of the American
+     Society for Mass Spectrometry 5(9), 859–866 (1994). https://doi.org/10.
+     1016/1044-0305(94)87009-8. Accessed 2021-11-05
+
+[10] Wishart, D.S., Feunang, Y.D., Marcu, A., Guo, A.C., Liang, K.,
+24    MassFormer
+
+     Vázquez-Fresno, R., Sajed, T., Johnson, D., Li, C., Karu, N., Sayeeda,
+     Z., Lo, E., Assempour, N., Berjanskii, M., Singhal, S., Arndt, D., Liang,
+     Y., Badran, H., Grant, J., Serra-Cayuela, A., Liu, Y., Mandal, R., Neveu,
+     V., Pon, A., Knox, C., Wilson, M., Manach, C., Scalbert, A.: HMDB
+     4.0: the human metabolome database for 2018. Nucleic Acids Research
+     46(D1), 608–617 (2018). https://doi.org/10.1093/nar/gkx1089
+
+[11] Kim, S., Chen, J., Cheng, T., Gindulyte, A., He, J., He, S., Li, Q.,
+     Shoemaker, B.A., Thiessen, P.A., Yu, B., Zaslavsky, L., Zhang, J.,
+     Bolton, E.E.: PubChem 2019 update: improved access to chemical data.
+     Nucleic Acids Research 47(Database issue), 1102–1109 (2019). https:
+     //doi.org/10.1093/nar/gky1033. Accessed 2021-04-16
+
+[12] Kanehisa, M., Furumichi, M., Sato, Y., Ishiguro-Watanabe, M., Tanabe,
+     M.: KEGG: integrating viruses and cellular organisms. Nucleic Acids
+     Research 49(D1), 545–551 (2021). https://doi.org/10.1093/nar/gkaa970
+
+[13] Horai, H., Arita, M., Kanaya, S., Nihei, Y., Ikeda, T., Suwa, K., Ojima,
+     Y., Tanaka, K., Tanaka, S., Aoshima, K., Oda, Y., Kakazu, Y., Kusano,
+     M., Tohge, T., Matsuda, F., Sawada, Y., Hirai, M.Y., Nakanishi, H.,
+     Ikeda, K., Akimoto, N., Maoka, T., Takahashi, H., Ara, T., Sakurai, N.,
+     Suzuki, H., Shibata, D., Neumann, S., Iida, T., Tanaka, K., Funatsu, K.,
+     Matsuura, F., Soga, T., Taguchi, R., Saito, K., Nishioka, T.: MassBank: a
+     public repository for sharing mass spectral data for life sciences. Journal
+     of Mass Spectrometry 45(7), 703–714 (2010). https://doi.org/10.1002/
+     jms.1777. Accessed 2020-10-27
+
+[14] Wang, M., Carver, J.J., Phelan, V.V., Sanchez, L.M., Garg, N., Peng, Y.,
+     Nguyen, D.D., Watrous, J., Kapono, C.A., Luzzatto-Knaan, T., Porto,
+     C., Bouslimani, A., Melnik, A.V., Meehan, M.J., Liu, W.T., Crüsemann,
+     M., Boudreau, P.D., Esquenazi, E., Sandoval-Calderón, M., Kersten,
+     R.D., Pace, L.A., Quinn, R.A., Duncan, K.R., Hsu, C.C., Floros, D.J.,
+     Gavilan, R.G., Kleigrewe, K., Northen, T., Dutton, R.J., Parrot, D.,
+     Carlson, E.E., Aigle, B., Michelsen, C.F., Jelsbak, L., Sohlenkamp, C.,
+     Pevzner, P., Edlund, A., McLean, J., Piel, J., Murphy, B.T., Gerwick,
+     L., Liaw, C.C., Yang, Y.L., Humpf, H.U., Maansson, M., Keyzers, R.A.,
+     Sims, A.C., Johnson, A.R., Sidebottom, A.M., Sedio, B.E., Klitgaard,
+     A., Larson, C.B., P, C.A.B., Torres-Mendoza, D., Gonzalez, D.J., Silva,
+     D.B., Marques, L.M., Demarque, D.P., Pociute, E., O’Neill, E.C., Briand,
+     E., Helfrich, E.J.N., Granatosky, E.A., Glukhov, E., Ryffel, F., Hou-
+     son, H., Mohimani, H., Kharbush, J.J., Zeng, Y., Vorholt, J.A., Kurita,
+     K.L., Charusanti, P., McPhail, K.L., Nielsen, K.F., Vuong, L., Elfeki, M.,
+     Traxler, M.F., Engene, N., Koyama, N., Vining, O.B., Baric, R., Silva,
+     R.R., Mascuch, S.J., Tomasi, S., Jenkins, S., Macherla, V., Hoffman, T.,
+     Agarwal, V., Williams, P.G., Dai, J., Neupane, R., Gurr, J., Rodrı́guez,
+     A.M.C., Lamsa, A., Zhang, C., Dorrestein, K., Duggan, B.M., Almaliti,
+                                                        MassFormer       25
+
+    J., Allard, P.M., Phapale, P., Nothias, L.F., Alexandrov, T., Litaudon,
+    M., Wolfender, J.L., Kyle, J.E., Metz, T.O., Peryea, T., Nguyen, D.T.,
+    VanLeer, D., Shinn, P., Jadhav, A., Müller, R., Waters, K.M., Shi, W.,
+    Liu, X., Zhang, L., Knight, R., Jensen, P.R., Palsson, B.O., Pogliano,
+    K., Linington, R.G., Gutiérrez, M., Lopes, N.P., Gerwick, W.H., Moore,
+    B.S., Dorrestein, P.C., Bandeira, N.: Sharing and community curation of
+    mass spectrometry data with Global Natural Products Social Molecular
+    Networking. Nat Biotechnol 34(8), 828–837 (2016)
+
+[15] Sawada, Y., Nakabayashi, R., Yamada, Y., Suzuki, M., Sato, M., Sakata,
+     A., Akiyama, K., Sakurai, T., Matsuda, F., Aoki, T., Hirai, M.Y.,
+     Saito, K.: RIKEN tandem mass spectral database (ReSpect) for phyto-
+     chemicals: A plant-specific MS/MS-based data resource and database.
+     Phytochemistry 82, 38–45 (2012). https://doi.org/10.1016/j.phytochem.
+     2012.07.007. Accessed 2023-03-09
+
+[16] Stein, S.: Mass Spectral Reference Libraries: An Ever-Expanding
+     Resource for Chemical Identification. Analytical Chemistry 84(17),
+     7274–7282 (2012). https://doi.org/10.1021/ac301205z. Accessed 2021-
+     10-01
+
+[17] Yang, X., Neta, P., Stein, S.E.: Quality Control for Building Libraries
+     from Electrospray Ionization Tandem Mass Spectra. Analytical Chem-
+     istry 86(13), 6393–6400 (2014). https://doi.org/10.1021/ac500711m.
+     Accessed 2021-07-05
+
+[18] Guijas, C., Montenegro-Burke, J.R., Domingo-Almenara, X., Palermo,
+     A., Warth, B., Hermann, G., Koellensperger, G., Huan, T., Uritboon-
+     thai, W., Aisporna, A.E., Wolan, D.W., Spilker, M.E., Benton, H.P.,
+     Siuzdak, G.: METLIN: A Technology Platform for Identifying Knowns
+     and Unknowns. Analytical Chemistry 90(5), 3156–3164 (2018). https:
+     //doi.org/10.1021/acs.analchem.7b04424. Accessed 2020-11-25
+
+[19] Wiley, J., Sons: Wiley Registry of Mass Spectral Data, 12th Edition
+     (2020)
+
+[20] Allen, F., Greiner, R., Wishart, D.: Competitive fragmentation
+     modeling of ESI-MS/MS spectra for putative metabolite identifica-
+     tion. Metabolomics 11(1), 98–110 (2015). https://doi.org/10.1007/
+     s11306-014-0676-4. Accessed 2020-10-13
+
+[21] Djoumbou-Feunang, Y., Pon, A., Karu, N., Zheng, J., Li, C., Arndt,
+     D., Gautam, M., Allen, F., Wishart, D.S.: CFM-ID 3.0: Signifi-
+     cantly Improved ESI-MS/MS Prediction and Compound Identification.
+     Metabolites 9(4), 72 (2019). https://doi.org/10.3390/metabo9040072.
+     Accessed 2021-12-29
+26   MassFormer
+
+[22] Wang, F., Liigand, J., Tian, S., Arndt, D., Greiner, R., Wishart, D.S.:
+     CFM-ID 4.0: More Accurate ESI-MS/MS Spectral Prediction and Com-
+     pound Identification. Analytical Chemistry (2021). https://doi.org/10.
+     1021/acs.analchem.1c01465. Accessed 2021-08-23
+
+[23] Silver, D., Hubert, T., Schrittwieser, J., Antonoglou, I., Lai, M., Guez,
+     A., Lanctot, M., Sifre, L., Kumaran, D., Graepel, T., Lillicrap, T.,
+     Simonyan, K., Hassabis, D.: Mastering Chess and Shogi by Self-Play with
+     a General Reinforcement Learning Algorithm. arXiv. arXiv:1712.01815
+     [cs] (2017). https://doi.org/10.48550/arXiv.1712.01815. http://arxiv.
+     org/abs/1712.01815 Accessed 2023-01-25
+
+[24] Jumper, J., Evans, R., Pritzel, A., Green, T., Figurnov, M., Ron-
+     neberger, O., Tunyasuvunakool, K., Bates, R., Žı́dek, A., Potapenko,
+     A., Bridgland, A., Meyer, C., Kohl, S.A.A., Ballard, A.J., Cowie, A.,
+     Romera-Paredes, B., Nikolov, S., Jain, R., Adler, J., Back, T., Petersen,
+     S., Reiman, D., Clancy, E., Zielinski, M., Steinegger, M., Pacholska,
+     M., Berghammer, T., Bodenstein, S., Silver, D., Vinyals, O., Senior,
+     A.W., Kavukcuoglu, K., Kohli, P., Hassabis, D.: Highly accurate protein
+     structure prediction with AlphaFold. Nature 596(7873), 583–589 (2021).
+     https://doi.org/10.1038/s41586-021-03819-2. Number: 7873 Publisher:
+     Nature Publishing Group. Accessed 2023-01-25
+
+[25] Rombach, R., Blattmann, A., Lorenz, D., Esser, P., Ommer, B.:
+     High-Resolution Image Synthesis with Latent Diffusion Models.
+     arXiv. arXiv:2112.10752 [cs] (2022). https://doi.org/10.48550/arXiv.
+     2112.10752. http://arxiv.org/abs/2112.10752 Accessed 2023-01-25
+
+[26] Brown, T.B., Mann, B., Ryder, N., Subbiah, M., Kaplan, J., Dhari-
+     wal, P., Neelakantan, A., Shyam, P., Sastry, G., Askell, A., Agarwal,
+     S., Herbert-Voss, A., Krueger, G., Henighan, T., Child, R., Ramesh,
+     A., Ziegler, D.M., Wu, J., Winter, C., Hesse, C., Chen, M., Sigler,
+     E., Litwin, M., Gray, S., Chess, B., Clark, J., Berner, C., McCan-
+     dlish, S., Radford, A., Sutskever, I., Amodei, D.: Language Models are
+     Few-Shot Learners. arXiv. arXiv:2005.14165 [cs] (2020). https://doi.org/
+     10.48550/arXiv.2005.14165. http://arxiv.org/abs/2005.14165 Accessed
+     2023-01-25
+
+[27] Wei, J.N., Belanger, D., Adams, R.P., Sculley, D.: Rapid prediction of
+     electron–ionization mass spectrometry using neural networks. ACS Cen-
+     tral Science 5(4), 700–708 (2019). https://doi.org/10.1021/acscentsci.
+     9b00085. Accessed 2021-03-03
+
+[28] Zhu, H., Liu, L., Hassoun, S.: Using Graph Neural Networks for Mass
+     Spectrometry Prediction. arXiv:2010.04661 [cs] (2020). Accessed 2021-
+     02-20
+                                                          MassFormer       27
+
+[29] Li, X., Zhu, H., Liu, L.-p., Hassoun, S.: Ensemble Spectral Prediction
+     (ESP) Model for Metabolite Annotation. arXiv:2203.13783 [cs, q-bio]
+     (2022). arXiv: 2203.13783. Accessed 2022-04-28
+
+[30] Xu, K., Hu, W., Leskovec, J., Jegelka, S.: How Powerful are Graph
+     Neural Networks? arXiv:1810.00826 [cs, stat] (2019). arXiv: 1810.00826.
+     Accessed 2020-05-11
+
+[31] Chen, D., Lin, Y., Li, W., Li, P., Zhou, J., Sun, X.: Measuring and
+     Relieving the Over-smoothing Problem for Graph Neural Networks from
+     the Topological View. arXiv. arXiv:1909.03211 [cs, stat] (2019). http:
+     //arxiv.org/abs/1909.03211 Accessed 2023-03-08
+
+[32] Liu, M., Gao, H., Ji, S.: Towards Deeper Graph Neural Networks.
+     In: Proceedings of the 26th ACM SIGKDD International Conference
+     on Knowledge Discovery & Data Mining, pp. 338–348 (2020). https:
+     //doi.org/10.1145/3394486.3403076. arXiv:2007.09296 [cs, stat]. http:
+     //arxiv.org/abs/2007.09296 Accessed 2023-03-08
+
+[33] Murphy, M., Jegelka, S., Fraenkel, E., Kind, T., Healey, D., Butler, T.:
+     Efficiently predicting high resolution mass spectra with graph neural
+     networks. arXiv. arXiv:2301.11419 [cs, q-bio] (2023). http://arxiv.org/
+     abs/2301.11419 Accessed 2023-03-02
+
+[34] Goldman, S., Bradshaw, J., Xin, J., Coley, C.W.: Prefix-tree Decoding
+     for Predicting Mass Spectra from Molecules. arXiv. arXiv:2303.06470 [cs,
+     q-bio] (2023). https://doi.org/10.48550/arXiv.2303.06470. http://arxiv.
+     org/abs/2303.06470 Accessed 2023-03-17
+
+[35] Hong, Y., Li, S., Welch, C.J., Tichy, S., Ye, Y., Tang, H.: 3DMolMS:
+     Prediction of Tandem Mass Spectra from Three Dimensional Molec-
+     ular Conformations. bioRxiv. Pages: 2023.03.15.532823 Section: New
+     Results (2023). https://doi.org/10.1101/2023.03.15.532823. https://
+     www.biorxiv.org/content/10.1101/2023.03.15.532823v1 Accessed 2023-
+     03-17
+
+[36] Zhu, R.L., Jonas, E.: Rapid Approximate Subset-Based Spectra Pre-
+     diction for Electron Ionization–Mass Spectrometry. Analytical Chem-
+     istry 95(5), 2653–2663 (2023). https://doi.org/10.1021/acs.analchem.
+     2c02093. Publisher: American Chemical Society. Accessed 2023-03-23
+
+[37] Ying, C., Cai, T., Luo, S., Zheng, S., Ke, G., He, D., Shen, Y., Liu, T.-
+     Y.: Do transformers really perform bad for graph representation? Neural
+     Information Processing Systems (NeurIPS) (2021)
+
+[38] Bemis, G.W., Murcko, M.A.: The Properties of Known Drugs. 1. Molec-
+     ular Frameworks. Journal of Medicinal Chemistry 39(15), 2887–2893
+28   MassFormer
+
+     (1996). https://doi.org/10.1021/jm9602928. Accessed 2021-11-04
+
+[39] Landrum, G.: RDKit: Open-source cheminformatics. http://www.rdkit.
+     org
+
+[40] Djoumbou Feunang, Y., Eisner, R., Knox, C., Chepelev, L., Hastings, J.,
+     Owen, G., Fahy, E., Steinbeck, C., Subramanian, S., Bolton, E., Greiner,
+     R., Wishart, D.S.: ClassyFire: automated chemical classification with a
+     comprehensive, computable taxonomy. Journal of Cheminformatics 8(1),
+     61 (2016). https://doi.org/10.1186/s13321-016-0174-y. Accessed 2023-
+     01-05
+
+[41] Kind, T., Liu, K.-H., Lee, D.Y., DeFelice, B., Meissen, J.K., Fiehn, O.:
+     LipidBlast in silico tandem mass spectrometry database for lipid identifi-
+     cation. Nature Methods 10(8), 755–758 (2013). https://doi.org/10.1038/
+     nmeth.2551. Number: 8 Publisher: Nature Publishing Group. Accessed
+     2023-03-07
+
+[42] Shrikumar, A., Greenside, P., Kundaje, A.: Learning Important Features
+     Through Propagating Activation Differences. arXiv. arXiv:1704.02685
+     [cs] (2019). https://doi.org/10.48550/arXiv.1704.02685. http://arxiv.
+     org/abs/1704.02685 Accessed 2023-02-13
+
+[43] Ancona, M., Ceolini, E., Öztireli, C., Gross, M.: Towards better
+     understanding of gradient-based attribution methods for Deep Neural
+     Networks. arXiv. arXiv:1711.06104 [cs, stat] (2018). https://doi.org/
+     10.48550/arXiv.1711.06104. http://arxiv.org/abs/1711.06104 Accessed
+     2023-02-13
+
+[44] Ali, A., Schnake, T., Eberle, O., Montavon, G., Müller, K.-R., Wolf, L.:
+     XAI for Transformers: Better Explanations through Conservative Prop-
+     agation. arXiv. arXiv:2202.07304 [cs] (2022). http://arxiv.org/abs/2202.
+     07304 Accessed 2023-01-19
+
+[45] Dührkop, K., Fleischauer, M., Ludwig, M., Aksenov, A.A., Melnik, A.V.,
+     Meusel, M., Dorrestein, P.C., Rousu, J., Böcker, S.: SIRIUS 4: a rapid
+     tool for turning tandem mass spectra into metabolite structure informa-
+     tion. Nature Methods 16(4), 299–302 (2019). https://doi.org/10.1038/
+     s41592-019-0344-8. Accessed 2020-10-29
+
+[46] Schymanski, E.L., Neumann, S.: CASMI: And the Winner is . . . Metabo-
+     lites 3(2), 412–439 (2013). https://doi.org/10.3390/metabo3020412.
+     Number: 2 Publisher: Multidisciplinary Digital Publishing Institute.
+     Accessed 2022-01-12
+
+[47] Schymanski, E.L., Ruttkies, C., Krauss, M., Brouard, C., Kind, T.,
+     Dührkop, K., Allen, F., Vaniya, A., Verdegem, D., Böcker, S., Rousu,
+                                                          MassFormer        29
+
+    J., Shen, H., Tsugawa, H., Sajed, T., Fiehn, O., Ghesquière, B., Neu-
+    mann, S.: Critical Assessment of Small Molecule Identification 2016:
+    automated methods. Journal of Cheminformatics 9(1), 22 (2017). https:
+    //doi.org/10.1186/s13321-017-0207-1. Accessed 2021-09-27
+
+[48] Pence, H.E., Williams, A.: ChemSpider: An Online Chemical Infor-
+     mation Resource. Journal of Chemical Education 87(11), 1123–1124
+     (2010). https://doi.org/10.1021/ed100697w. Publisher: American Chem-
+     ical Society. Accessed 2023-03-06
+
+[49] McCoy, R.T., Min, J., Linzen, T.: BERTs of a feather do not gener-
+     alize together: Large variability in generalization across models with
+     similar test set performance. arXiv. arXiv:1911.02969 [cs] (2020). https:
+     //doi.org/10.48550/arXiv.1911.02969. http://arxiv.org/abs/1911.02969
+     Accessed 2023-01-16
+
+[50] Zhou, X., Nie, Y., Tan, H., Bansal, M.: The Curse of Performance
+     Instability in Analysis Datasets: Consequences, Source, and Suggestions.
+     arXiv. arXiv:2004.13606 [cs] (2020). https://doi.org/10.48550/arXiv.
+     2004.13606. http://arxiv.org/abs/2004.13606 Accessed 2023-01-16
+
+[51] D’Amour, A., Heller, K., Moldovan, D., Adlam, B., Alipanahi, B., Beu-
+     tel, A., Chen, C., Deaton, J., Eisenstein, J., Hoffman, M.D., Hormozdiari,
+     F., Houlsby, N., Hou, S., Jerfel, G., Karthikesalingam, A., Lucic, M., Ma,
+     Y., McLean, C., Mincu, D., Mitani, A., Montanari, A., Nado, Z., Natara-
+     jan, V., Nielson, C., Osborne, T.F., Raman, R., Ramasamy, K., Sayres,
+     R., Schrouff, J., Seneviratne, M., Sequeira, S., Suresh, H., Veitch, V.,
+     Vladymyrov, M., Wang, X., Webster, K., Yadlowsky, S., Yun, T., Zhai,
+     X., Sculley, D.: Underspecification Presents Challenges for Credibility
+     in Modern Machine Learning. arXiv. arXiv:2011.03395 [cs, stat] (2020).
+     https://doi.org/10.48550/arXiv.2011.03395. http://arxiv.org/abs/2011.
+     03395 Accessed 2023-01-16
+
+[52] Stravs, M.A., Dührkop, K., Böcker, S., Zamboni, N.: MSNovelist: de
+     novo structure generation from mass spectra. Nature Methods 19(7),
+     865–870 (2022). https://doi.org/10.1038/s41592-022-01486-3. Number:
+     7 Publisher: Nature Publishing Group. Accessed 2022-12-21
+
+[53] Shrivastava, A.D., Swainston, N., Samanta, S., Roberts, I., Wright Mue-
+     las, M., Kell, D.B.: MassGenie: A Transformer-Based Deep Learn-
+     ing Method for Identifying Small Molecules from Their Mass
+     Spectra. Biomolecules 11(12), 1793 (2021). https://doi.org/10.3390/
+     biom11121793. Accessed 2021-12-29
+
+[54] Hoffmann, M.A., Nothias, L.-F., Ludwig, M., Fleischauer, M., Gentry,
+     E.C., Witting, M., Dorrestein, P.C., Dührkop, K., Böcker, S.: High-
+     confidence structural annotation of metabolites absent from spectral
+30   MassFormer
+
+     libraries. Nature Biotechnology, 1–11 (2021). https://doi.org/10.1038/
+     s41587-021-01045-9. Bandiera abtest: a Cc license type: cc by Cg type:
+     Nature Research Journals Primary atype: Research Publisher: Nature
+     Publishing Group Subject term: Data processing;Molecular biology Sub-
+     ject term id: data-processing;molecular-biology. Accessed 2021-11-26
+
+[55] Scheubert, K., Hufsky, F., Petras, D., Wang, M., Nothias, L.-F.,
+     Dührkop, K., Bandeira, N., Dorrestein, P.C., Böcker, S.: Significance
+     estimation for large scale metabolomics annotations by spectral match-
+     ing. Nature Communications 8(1), 1494 (2017). https://doi.org/10.1038/
+     s41467-017-01318-5. Number: 1 Publisher: Nature Publishing Group.
+     Accessed 2022-12-21
+
+[56] Durant, J.L., Leland, B.A., Henry, D.R., Nourse, J.G.: Reoptimization of
+     MDL keys for use in drug discovery. Journal of Chemical Information and
+     Computer Sciences 42(6), 1273–1280 (2002). https://doi.org/10.1021/
+     ci010132r
+
+[57] Rogers, D., Hahn, M.: Extended-Connectivity Fingerprints. Journal of
+     Chemical Information and Modeling 50(5), 742–754 (2010). https://doi.
+     org/10.1021/ci100050t. Accessed 2021-05-18
+
+[58] Vaswani, A., Shazeer, N., Parmar, N., Uszkoreit, J., Jones, L.,
+     Gomez, A.N., Kaiser, L., Polosukhin, I.: Attention Is All You Need.
+     arXiv:1706.03762 [cs] (2017). Accessed 2021-10-27
+
+[59] Tan, Z., Wang, S., Yang, Z., Chen, G., Huang, X., Sun, M., Liu, Y.:
+     Neural machine translation: A review of methods, resources, and tools.
+     AI Open 1, 5–21 (2020). https://doi.org/10.1016/j.aiopen.2020.11.001.
+     Accessed 2021-11-04
+
+[60] Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X.,
+     Unterthiner, T., Dehghani, M., Minderer, M., Heigold, G., Gelly, S.,
+     Uszkoreit, J., Houlsby, N.: An Image is Worth 16x16 Words: Trans-
+     formers for Image Recognition at Scale. arXiv:2010.11929 [cs] (2021).
+     Accessed 2021-11-04
+
+[61] Janner, M., Li, Q., Levine, S.: Reinforcement Learning as One Big
+     Sequence Modeling Problem. arXiv:2106.02039 [cs] (2021). Accessed
+     2021-11-04
+
+[62] Khasahmadi, A.H., Hassani, K., Moradi, P., Lee, L., Morris, Q.: Memory-
+     Based Graph Networks. arXiv:2002.09518 [cs, stat] (2020). Accessed
+     2021-06-16
+
+[63] Mialon, G., Chen, D., Selosse, M., Mairal, J.: GraphiT: Encoding Graph
+                                                           MassFormer        31
+
+    Structure in Transformers. arXiv:2106.05667 [cs] (2021). Accessed 2021-
+    06-16
+
+[64] Maziarka, L., Danel, T., Mucha, S., Rataj, K., Tabor, J., Jastrzȩbski, S.:
+     Molecule Attention Transformer. arXiv:2002.08264 [physics, stat] (2020).
+     Accessed 2021-02-22
+
+[65] Rong, Y., Bian, Y., Xu, T., Xie, W., Wei, Y., Huang, W., Huang,
+     J.: Self-Supervised Graph Transformer on Large-Scale Molecular Data.
+     arXiv:2007.02835 [cs, q-bio] (2020). Accessed 2021-11-04
+
+[66] Veličković, P., Cucurull, G., Casanova, A., Romero, A., Liò, P., Bengio,
+     Y.: Graph Attention Networks. arXiv:1710.10903 [cs, stat] (2018). arXiv:
+     1710.10903. Accessed 2021-04-16
+
+[67] Hu, W., Fey, M., Ren, H., Nakata, M., Dong, Y., Leskovec, J.: OGB-
+     LSC: A Large-Scale Challenge for Machine Learning on Graphs. arXiv.
+     arXiv:2103.09430 [cs] (2021). http://arxiv.org/abs/2103.09430 Accessed
+     2023-01-05
+
+[68] Hu, W., Fey, M., Zitnik, M., Dong, Y., Ren, H., Liu, B., Catasta, M.,
+     Leskovec, J.: Open Graph Benchmark: Datasets for Machine Learning
+     on Graphs. arXiv:2005.00687 [cs, stat] (2021). Accessed 2021-11-04
+
+[69] Floyd, R.W.: Algorithm 97: Shortest path. Communications of the ACM
+     5(6), 345 (1962). https://doi.org/10.1145/367766.368168. Accessed
+     2021-11-05
+
+[70] Devlin, J., Chang, M.-W., Lee, K., Toutanova, K.: BERT: Pre-
+     training of Deep Bidirectional Transformers for Language Understand-
+     ing. arXiv:1810.04805 [cs] (2019). Accessed 2021-11-04
+
+[71] Nakata, M., Shimazaki, T.: PubChemQC Project: A Large-Scale First-
+     Principles Electronic Structure Database for Data-Driven Chemistry.
+     Journal of Chemical Information and Modeling 57(6), 1300–1308 (2017).
+     https://doi.org/10.1021/acs.jcim.7b00083. Accessed 2021-11-04
+
+[72] Ba, J.L., Kiros, J.R., Hinton, G.E.: Layer Normalization. arXiv.
+     arXiv:1607.06450 [cs, stat] (2016). https://doi.org/10.48550/arXiv.1607.
+     06450. http://arxiv.org/abs/1607.06450 Accessed 2023-02-13
+
+[73] Heller, S.R., McNaught, A., Pletnev, I., Stein, S., Tchekhovskoi, D.:
+     InChI, the IUPAC International Chemical Identifier. Journal of Chem-
+     informatics 7(1), 23 (2015). https://doi.org/10.1186/s13321-015-0068-4.
+     Accessed 2023-02-13
+
+[74] Wu, Z., Ramsundar, B., Feinberg, E.N., Gomes, J., Geniesse, C., Pappu,
+32   MassFormer
+
+     A.S., Leswing, K., Pande, V.: MoleculeNet: a benchmark for molecular
+     machine learning. Chemical Science 9(2), 513–530 (2018). https://doi.
+     org/10.1039/C7SC02664A. Publisher: The Royal Society of Chemistry.
+     Accessed 2023-02-13
+
+[75] Jin, W., Coley, C.W., Barzilay, R., Jaakkola, T.: Predicting Organic
+     Reaction Outcomes with Weisfeiler-Lehman Network. arXiv:1709.04555
+     [cs, stat] (2017). Accessed 2021-09-30
+
+[76] Paszke, A., Gross, S., Massa, F., Lerer, A., Bradbury, J., Chanan, G.,
+     Killeen, T., Lin, Z., Gimelshein, N., Antiga, L., Desmaison, A., Köpf, A.,
+     Yang, E., DeVito, Z., Raison, M., Tejani, A., Chilamkurthy, S., Steiner,
+     B., Fang, L., Bai, J., Chintala, S.: PyTorch: An Imperative Style, High-
+     Performance Deep Learning Library. arXiv:1912.01703 [cs, stat] (2019).
+     Accessed 2021-11-04
+
+[77] Wang, M., Zheng, D., Ye, Z., Gan, Q., Li, M., Song, X., Zhou, J., Ma,
+     C., Yu, L., Gai, Y., Xiao, T., He, T., Karypis, G., Li, J., Zhang, Z.:
+     Deep Graph Library: A Graph-Centric, Highly-Performant Package for
+     Graph Neural Networks. arXiv:1909.01315 [cs, stat] (2020). Accessed
+     2021-05-18
+
+[78] Li, M., Zhou, J., Hu, J., Fan, W., Zhang, Y., Gu, Y., Karypis, G.: DGL-
+     LifeSci: An Open-Source Toolkit for Deep Learning on Graphs in Life
+     Science. arXiv:2106.14232 [cs, q-bio] (2021). Accessed 2021-09-30
+
+[79] Biewald, L.: Experiment Tracking with Weights and Biases. Software
+     available from wandb.com (2020). https://www.wandb.com/
+
+[80] Rosenstock, H.M., Wallenstein, M.B., Wahrhaftig, A.L., Eyring, H.:
+     Absolute Rate Theory for Isolated Systems and the Mass Spectra
+     of Polyatomic Molecules*. Proceedings of the National Academy of
+     Sciences 38(8), 667–678 (1952). https://doi.org/10.1073/pnas.38.8.667.
+     Publisher: Proceedings of the National Academy of Sciences. Accessed
+     2023-01-15
+
+[81] Rosenstock, H.M., Krauss, M.: CURRENT STATUS OF THE
+     STATISTICAL THEORY OF MASS SPECTRA. In: Elliott, R.M.
+     (ed.) Advances in Mass Spectrometry, pp. 251–284. Pergamon, ???
+     (1963). https://doi.org/10.1016/B978-0-08-009775-6.50029-3. https:
+     //www.sciencedirect.com/science/article/pii/B9780080097756500293
+     Accessed 2023-01-15
+
+[82] Lorquet,    J.C.:    Whither    the   statistical theory   of    mass
+     spectra?     Mass      Spectrometry     Reviews    13(3),     233–257
+     (1994).        https://doi.org/10.1002/mas.1280130304.         eprint:
+     https://onlinelibrary.wiley.com/doi/pdf/10.1002/mas.1280130304.
+                                                        MassFormer       33
+
+    Accessed 2023-01-15
+
+[83] Lorquet, J.C.: Landmarks in the theory of mass spectra. International
+     Journal of Mass Spectrometry 200(1), 43–56 (2000). https://doi.org/10.
+     1016/S1387-3806(00)00303-1. Accessed 2023-01-15
+
+[84] Murphy, R.C.: Tandem Mass Spectrometry of Lipids, (2014).
+     https://books-rsc-org.myaccess.library.utoronto.ca/books/monograph/
+     1091/Tandem-Mass-Spectrometry-of-Lipids Accessed 2023-01-31
+
+[85] Steen, H., Mann, M.: The abc’s (and xyz’s) of peptide sequencing.
+     Nature Reviews Molecular Cell Biology 5(9), 699–711 (2004). https:
+     //doi.org/10.1038/nrm1468. Number: 9 Publisher: Nature Publishing
+     Group. Accessed 2023-01-05
+
+[86] Gessulat, S., Schmidt, T., Zolg, D.P., Samaras, P., Schnatbaum, K.,
+     Zerweck, J., Knaute, T., Rechenberger, J., Delanghe, B., Huhmer, A.,
+     Reimer, U., Ehrlich, H.-C., Aiche, S., Kuster, B., Wilhelm, M.: Prosit:
+     proteome-wide prediction of peptide tandem mass spectra by deep learn-
+     ing. Nature Methods 16(6), 509–518 (2019). https://doi.org/10.1038/
+     s41592-019-0426-7. Number: 6 Publisher: Nature Publishing Group.
+     Accessed 2023-01-05
+
+[87] Tiwary, S., Levy, R., Gutenbrunner, P., Salinas Soto, F., Palaniap-
+     pan, K.K., Deming, L., Berndl, M., Brant, A., Cimermancic, P., Cox,
+     J.: High-quality MS/MS spectrum prediction for data-dependent and
+     data-independent acquisition data analysis. Nature Methods 16(6),
+     519–525 (2019). https://doi.org/10.1038/s41592-019-0427-6. Number: 6
+     Publisher: Nature Publishing Group. Accessed 2023-01-05
+
+[88] MassFrontier. https://www.thermofisher.com/ca/en/home/industrial/
+     mass-spectrometry/liquid-chromatography-mass-spectrometry-lc-ms/
+     lc-ms-software/multi-omics-data-analysis/
+     mass-frontier-spectral-interpretation-software.html
+
+[89] MS           Fragmenter.         https://www.acdlabs.com/products/
+     spectrus-platform/ms-fragmenter/
+
+[90] Wolf, S., Schmidt, S., Müller-Hannemann, M., Neumann, S.: In silico
+     fragmentation for computer assisted identification of metabolite mass
+     spectra. BMC Bioinformatics 11(1), 148 (2010). https://doi.org/10.
+     1186/1471-2105-11-148. Accessed 2021-10-27
+
+[91] Ruttkies, C., Schymanski, E.L., Wolf, S., Hollender, J., Neumann, S.:
+     MetFrag relaunched: incorporating strategies beyond in silico fragmen-
+     tation. Journal of Cheminformatics 8(1), 3 (2016). https://doi.org/10.
+     1186/s13321-016-0115-9. Accessed 2021-10-27
+34   MassFormer
+
+[92] Tsugawa, H., Kind, T., Nakabayashi, R., Yukihira, D., Tanaka, W.,
+     Cajka, T., Saito, K., Fiehn, O., Arita, M.: Hydrogen Rearrangement
+     Rules: Computational MS/MS Fragmentation and Structure Elucidation
+     Using MS-FINDER Software. Analytical Chemistry 88(16), 7946–7958
+     (2016). https://doi.org/10.1021/acs.analchem.6b00770. Accessed 2023-
+     01-31
+
+[93] Lai, Z., Tsugawa, H., Wohlgemuth, G., Mehta, S., Mueller, M., Zheng,
+     Y., Ogiwara, A., Meissen, J., Showalter, M., Takeuchi, K., Kind, T.,
+     Beal, P., Arita, M., Fiehn, O.: Identifying metabolites by integrat-
+     ing metabolome databases with mass spectrometry cheminformatics.
+     Nature Methods 15(1), 53–56 (2018). https://doi.org/10.1038/nmeth.
+     4512. Number: 1 Publisher: Nature Publishing Group. Accessed 2023-
+     03-07
+
+[94] Ridder, L., Hooft, J.J.J.v.d., Verhoeven, S.: Automatic Compound
+     Annotation from Mass Spectrometry Data Using MAGMa. Mass Spec-
+     trometry 3(Special Issue 2), 0033–0033 (2014). https://doi.org/10.5702/
+     massspectrometry.S0033
+
+[95] Bauer, C.A., Grimme, S.: How to Compute Electron Ionization Mass
+     Spectra from First Principles. The Journal of Physical Chemistry A
+     120(21), 3755–3766 (2016). https://doi.org/10.1021/acs.jpca.6b02907.
+     Publisher: American Chemical Society. Accessed 2022-11-09
+
+[96] Irikura, K.K.: Ab Initio Computation of Energy Deposition During Elec-
+     tron Ionization of Molecules. The Journal of Physical Chemistry A
+     121(40), 7751–7760 (2017). https://doi.org/10.1021/acs.jpca.7b07993.
+     Publisher: American Chemical Society. Accessed 2023-01-15
+
+[97] Guerra, M., Parente, F., Indelicato, P., Santos, J.P.: Modified binary
+     encounter Bethe model for electron-impact ionization. International
+     Journal of Mass Spectrometry 313, 1–7 (2012). https://doi.org/10.1016/
+     j.ijms.2011.12.003. arXiv:1306.2826 [physics]. Accessed 2023-01-15
+
+[98] Spackman, P.R., Bohman, B., Karton, A., Jayatilaka, D.: Quan-
+     tum chemical electron impact mass spectrum prediction for
+     de novo structure elucidation: Assessment against experimental
+     reference data and comparison to competitive fragmenta-
+     tion modeling. International Journal of Quantum Chemistry
+     118(2), 25460 (2018). https://doi.org/10.1002/qua.25460. eprint:
+     https://onlinelibrary.wiley.com/doi/pdf/10.1002/qua.25460. Accessed
+     2022-11-09
+
+[99] Koopman, J., Grimme, S.: From QCEIMS to QCxMS: A Tool to Rou-
+     tinely Calculate CID Mass Spectra Using Molecular Dynamics. Journal
+     of the American Society for Mass Spectrometry 32(7), 1735–1751 (2021).
+                                                             MassFormer        35
+
+      https://doi.org/10.1021/jasms.1c00098. Accessed 2021-11-14
+
+[100] Schreckenbach, S.A., Anderson, J.S.M., Koopman, J., Grimme, S., Simp-
+      son, M.J., Jobst, K.J.: Predicting the Mass Spectra of Environmental
+      Pollutants Using Computational Chemistry: A Case Study and Criti-
+      cal Evaluation. Journal of the American Society for Mass Spectrometry
+      32(6), 1508–1518 (2021). https://doi.org/10.1021/jasms.1c00078. Pub-
+      lisher: American Society for Mass Spectrometry. Published by the
+      American Chemical Society. All rights reserved. Accessed 2022-11-09
+
+[101] Spackman, P.R., Bohman, B., Karton, A., Jayatilaka, D.: Quan-
+      tum chemical electron impact mass spectrum prediction for
+      de novo structure elucidation: Assessment against experimental
+      reference data and comparison to competitive fragmenta-
+      tion modeling. International Journal of Quantum Chemistry
+      118(2), 25460 (2018). https://doi.org/10.1002/qua.25460. eprint:
+      https://onlinelibrary.wiley.com/doi/pdf/10.1002/qua.25460. Accessed
+      2022-11-09
+
+[102] Wang, S., Kind, T., Tantillo, D.J., Fiehn, O.: Predicting in silico electron
+      ionization mass spectra using quantum chemistry. Journal of Cheminfor-
+      matics 12(1), 63 (2020). https://doi.org/10.1186/s13321-020-00470-3.
+      Accessed 2023-01-15
+
+[103] He, K., Zhang, X., Ren, S., Sun, J.: Deep Residual Learning for
+      Image Recognition. arXiv. arXiv:1512.03385 [cs] (2015). https://doi.org/
+      10.48550/arXiv.1512.03385. http://arxiv.org/abs/1512.03385 Accessed
+      2023-01-16
+
+[104] Buchanan, B.G., Feigenbaum, E.A.: DENDRAL and Meta-DENDRAL:
+      Their Applications Dimension. Technical report, STANFORD UNIV
+      CALIF DEPT OF COMPUTER SCIENCE (February 1978). https:
+      //apps.dtic.mil/sti/citations/ADA054289 Accessed 2021-11-04
+
+[105] Scheubert, K., Hufsky, F., Rasche, F., Böcker, S.: Computing Fragmenta-
+      tion Trees from Metabolite Multiple Mass Spectrometry Data. In: Bafna,
+      V., Sahinalp, S.C. (eds.) Research in Computational Molecular Biol-
+      ogy. Lecture Notes in Computer Science, pp. 377–391. Springer, Berlin,
+      Heidelberg (2011). https://doi.org/10.1007/978-3-642-20036-6 36
+
+[106] Böcker, S., Dührkop, K.: Fragmentation trees reloaded. Journal of Chem-
+      informatics 8(1), 5 (2016). https://doi.org/10.1186/s13321-016-0116-8.
+      Accessed 2021-11-04
+
+[107] Dührkop, K., Shen, H., Meusel, M., Rousu, J., Böcker, S.:
+36    MassFormer
+
+     Searching molecular structure databases with tandem mass spec-
+     tra using csi:fingerid. Proceedings of the National Academy of Sci-
+     ences 112(41), 12580–12585 (2015) https://arxiv.org/abs/https://www.
+     pnas.org/content/112/41/12580.full.pdf. https://doi.org/10.1073/pnas.
+     1509788112
+
+[108] Curry, B.U., Rumelhart, D.: A Neural Network That Classi-
+      fies Mass Spectra (2001). https://www.semanticscholar.org/paper/
+      A-Neural-Network-That-Classifies-Mass-Spectra-Curry-Rumelhart/
+      09cc37106e61f2fd1f1dc881de24951a6498b354 Accessed 2021-10-25
+
+[109] Lim, J., Wong, J., Wong, M.X., Tan, L.H.E., Chieu, H.L., Choo, D.,
+      Neo, N.K.N.: Chemical Structure Elucidation from Mass Spectrome-
+      try by Matching Substructures. arXiv:1811.07886 [physics, stat] (2018).
+      Accessed 2021-11-04
+                                                                       MassFormer         37
+
+7 Extended Data Figures
+
+                        Total                      Reinit      Reinit         Cosine
+     Configuration                  Pre-trained
+                       # Layers                    Layers    Layernorm       Similarity
+         Small            6              No          -           -          .662 ± .002
+         Large             12            No           -           -         .609 ± .037
+       Large+PT            12           Yes         11-12        No         .679 ± .001
+    Large+PT+TL            12           Yes         1-12         No         .678 ± .001
+    Large+PT+LN            12           Yes         11-12        Yes        .686 ± .001
+      Large+PT
+                           12           Yes         1-12         Yes        .689 ± .001
+      +TL+LN
+
+Extended Data Table 1 A table summarizing the different model configurations in the
+ablation experiments (all results are on the NIST-Scaffold Test set). The Large configuration
+used a standard Graphormer module, without pre-training. The Small configuration used a
+scaled-down Graphormer module (≈ 27% of the Large model’s parameters), also without
+pre-training. PT refers to initializing the graph transformer and input embedding layers
+with pre-trained parameters (from the PubChemQC task, see Section 4.4 for more details)
+and then fine-tuning. The default fine-tuning strategy (Large+PT) involved randomly
+re-initializing only the last 2 transformer layers (out of a possible 12) before fine-tuning.
+LN refers to layer norm parameter re-initialization, and TL refers to re-initializing all of
+the transformer layers (instead of just the last 2). It appears that pre-training (PT) was
+essential for training a Large model, and layer norm parameter re-initialization (LN) was
+also beneficial. Surprisingly, full transformer layer reinitialization (TL) did not seem to
+result in degraded performance. In fact, the only difference in parameter initialization
+between Large+PT+TL+LN and Large was the token embedding parameters (which were
+pre-trained); all other parameters of both models were randomly initialized. This suggests
+that the token embeddings were the most transferable component of the pre-training
+procedure, since the other parts of the model could be reset without losing performance.
+Averages and standard deviations from 10 independently trained models are reported.
+38      MassFormer
+
+
+
+
+                                     (a) MassFormer
+
+
+
+
+                                         (b) CFM
+Extended Data Figure 1 ClassyFire Similarity Experiments. Performance on the
+top 10 most frequent chemical classes, as identified by ClassyFire, in the NIST-Scaffold Test
+Set ([M+H]+ adducts only). Scores reported for both MassFormer (1a) and CFM (1b). The
+chemical classes are sorted from most to least frequent on the x-axis, and are not disjoint.
+Note the difference in y-axis range between the two plots. The average performance for each
+model (across all compounds) is indicated by a black dashed line. MassFormer had superior
+performance to CFM in each category. Strikingly, MassFormer seemed to perform best on
+“lipids and lipid-like molecules”, which is one class that CFM seems to struggle with. This
+could be explained by the fact that many lipids are known to have simple fragmentation
+rules, which might make them easier to learn. However, since lipids can be quite large, any
+algorithm which relies on combinatorial fragmentation (like CFM) would struggle. Averages
+and standard deviations from 10 independently trained models are reported (except for
+CFM, which was pre-trained).
+                                                                    MassFormer          39
+
+
+
+
+                                  (a) [M+H]+ Adduct
+
+
+
+
+                                    (b) All Adducts
+Extended Data Figure 2 Additional Spectrum Similarity Experiments. These
+experiments were similar to Figure 2c, but did not involve filtering compounds from the
+test set based on overlap with CFM’s training set. This allowed for larger test set sizes
+and more rigorous comparisons between deep learning approaches. In 2a, all models were
+trained and evaluated only on [M+H]+ spectra, but in 2b all six supported precursor adducts
+were included. MassFormer boasted strong performance in both cases. Training set sizes are
+indicated for each split. Averages and standard deviations from 10 independently trained
+models are reported. Statistical significance determined by one-sided Welch’s t-test with
+Šidák correction.
+40     MassFormer
+
+
+
+
+                              (a) Log Rank Distribution
+
+
+
+
+                        (b) Log Normalized Rank Distribution
+Extended Data Figure 3 Spectrum Identification Ranking Distributions. The
+unnormalized (3a) and normalized (3b) distributions of the true candidate rank, for CASMI
+and pCASMI queries. Note that for rank metrics, a lower score is better. MassFormer’s rank
+distributions are more strongly skewed towards lower values, with fewer extreme outliers.
+Boxplot lines represent median and interquartile range, whiskers represent 1.5 times the
+interquartile range, and the “X” symbol represents the mean.
+                                                                        MassFormer            41
+
+
+
+
+            (a) Similarity = 0.40                            (b) Similarity = 0.46
+
+
+
+
+            (c) Similarity = 0.54                            (d) Similarity = 0.58
+
+
+
+
+            (e) Similarity = 0.60                            (f) Similarity = 0.65
+
+Extended Data Figure 4 Additional Spectra (Inaccurate Examples). True and
+predicted spectra, roughly covering a range of 0.4 to 0.7 cosine similarity, and their associated
+attention map visualizations. All spectra correspond to [M+H]+ precursor adducts and have
+been merged over multiple collision energies.
+42      MassFormer
+
+
+
+
+           (a) Similarity = 0.76                           (b) Similarity = 0.79
+
+
+
+
+           (c) Similarity = 0.82                           (d) Similarity = 0.88
+
+
+
+
+           (e) Similarity = 0.92                           (f) Similarity = 0.97
+
+Extended Data Figure 5 Additional Spectra (Accurate Examples). True and pre-
+dicted spectra, roughly covering a range of 0.7 to 1.0 cosine similarity, and their associated
+attention map visualizations. All spectra correspond to [M+H]+ precursor adducts and have
+been merged over multiple collision energies.
+                                                                       MassFormer           43
+
+
+
+
+    (a) Chlorine (N = 752, p < 10−15 )               (b) Sulfur (N = 212, p < 10−17 )
+
+
+
+
+    (c) Fluorine (N = 118, p < 10−4 )              (d) Phosphorus (N = 33, p < 10−3 )
+Extended Data Figure 6 Additional Heteroatom Peak Separability Experi-
+ments. Linear peak classification accuracy distributions, similar to Figure 4c but for the
+other non-Oxygen heteroatoms: Chlorine (6a), Sulfur (6b), Fluorine (6c), Phosphorus (6d).
+For each heteroatom, the distribution of optimal linear classification accuracy induced by the
+heteroatom labelling strategy was markedly different from the random labelling distribution
+(higher accuracy indicates improved separability of the peaks). Sample size and statistical
+significance (Welch’s t-test with Šidák correction) for separability differences are provided
+for each plot.
+44     MassFormer
+
+8 Supplementary Notes
+8.1 Previous Work in Spectrum Prediction
+The statistical theory of mass spectrometry was first formulated in the 1950s
+[80, 81]. While significant progress has been made, an accurate and general
+model for spectrum prediction remains elusive [82, 83]. Over the past 30
+years, the proliferation of accessible, powerful computing has resulted in the
+development of a variety of computational methods for spectrum prediction.
+Rule-based fragmentation algorithms use experimentally derived fragmenta-
+tion rules to predict fragment peak locations. They are simple to implement,
+and can be particularly useful for certain classes of compounds (like lipids
+[21, 41, 84] and peptides [85–87]) whose regular structure results in pre-
+dictable fragmentation locations. These methods can also work for more
+structurally diverse groups of molecules like metabolites [88, 89], but have dif-
+ficulty generalizing to unseen compounds. Combinatorial methods [90–94] rely
+on iterative bond-breaking to identify possible fragments and their associated
+peak locations. These methods have high fragment recall, but provide lim-
+ited information about peak intensity. Competitive Fragmentation Modelling
+(CFM [20, 22]) extends the combinatorial approach by defining a probabilistic
+graphical model over the fragment space. Through modelling bond breakages
+as a markov process, CFM runs a stochastic simulation to identify which frag-
+ments are most likely to appear in the spectrum, and uses this to inform its
+intensity predictions. While highly interpretable, all combinatorial approaches
+suffer when the space of fragments explodes, as is the case with larger molecules
+and particularly molecules with multiple rings.
+    In contrast to heuristic and data-driven approaches, first principles meth-
+ods rely on quantum chemical simulations of the fragmentation process to
+estimate spectra. A number of techniques have been developed for predict-
+ing electron ionization mass spectrometry (EI-MS) [95–97], which is simpler
+to model than the electrospray ionization spectrometry (ESI-MS) that is
+commonly used for LC-MS/MS. QCxMS is a Born-Oppenheimer Molecular
+Dynamics approach originally developed for EI-MS [98], but recently extended
+to ESI-MS [99]. It uses trajectories sampled from ab initio molecular dynam-
+ics simulations to define a distribution over fragments. While first-principles
+approaches promise improved generalization and are highly interpretable,
+existing implementations require computationally expensive simulations. Such
+methods are suitable for targeted studies [100, 101], but have limited utility
+for high-throughput analysis [102]. Additionally, current models only support
+a small range of experimental conditions [99] and lack extensive benchmarking
+[102].
+    More recently, deep learning approaches for spectrum prediction have been
+introduced. The NEIMS model [27], developed for EI-MS data, uses a ResNet-
+inspired architecture [103] to predict spectra from a molecular fingerprint
+representation [57] of the input molecule. Graph neural networks (GNNs)
+[28, 29] have also successfully been applied for ESI-MS prediction. While less
+                                                            MassFormer        45
+
+interpretable than other methods, deep learning approaches offer a number
+of compelling advantages. Neural networks can learn complex fragmentation
+patterns without relying on expensive combinatorial or quantum chemical cal-
+culations, which makes their runtimes faster and less dependent on the size of
+the input molecule. Compared to other data-driven approaches (like CFM),
+deep learning models can more efficiently leverage larger spectral datasets.
+They are also more flexible with respect to the properties of the compounds
+(i.e. inorganic atoms, ring structures) and spectra (i.e. ionization type, colli-
+sion energy) that are modelled, and can be easily adapted to work with new
+kinds of data.
+
+8.2 Concurrent Work in Spectrum Prediction
+A number of deep learning spectrum predictors, developed concurrently to
+this work, explore different strategies for spectrum prediction. 3DMolMS (3D
+Molecular Network for Mass Spectra Prediction, [35]) is perhaps most similar
+to Massformer, producing relatively low-resolution binned spectrum predic-
+tions. However, it incorporates 3D molecule information by running conformer
+simulations (generated by RDKit [39]) as a preprocessing step on the input
+molecular graph, and uses a custom GNN-like architecture to levereage the
+estimated atom locations in 3D space. Despite the limited accuracy of such
+simple conformer simulations, the additional positional information seems to
+improve performance, particularly in the low-data regime. Crucially, 3DMolMS
+is trained on Q-TOF data, unlike MassFormer which is only trained on Orbi-
+trap spectra. GrAFF (Graph neural network for Approximation via Fixed
+Formulas of Mass Spectra, [33]) models spectra as a distribution over a fixed
+vocabulary of formulae. This method depends on the empirical observation
+that most peaks in small molecule spectra likely can be explained with either
+a common small formula or a less common larger formula that can be derived
+from the precursor formula and a common neutral loss. Formulating spec-
+trum prediction as formula classification allows for arbitrarily high resolution
+predictions with automatic formula annotations, which is compelling. How-
+ever, this approach is fundamentally limited by the heuristically-derived set of
+formulae, and may not generalize to new data. SCARF (Subformulae Classi-
+fication for Autoregressively Reconstructing Fragmentations, [34]) is a closely
+related method that also performs formula classification. Instead of using a
+fixed vocabulary of formulae, SCARF parameterizes a distribution over all pos-
+sible sub-formulae of the precursor formula using a prefix tree. This approach
+allows auto-regressive formula prediction, which can be trained in a supervised
+manner using formula annotations derived from formula annotation tools like
+SIRIUS [45] or MAGMa [94]. A major limitation of SCARF is that it cannot
+model collision energy, and can only predict spectra that are merged across
+multiple energies. Additionally, while both GrAFF and SCARF provide for-
+mula annotations, they do not provide full substructure annotations like CFM.
+RASSP (Rapid Approximate Subset-Based Spectra Prediction for Electron
+Ionization-Mass Spectrometry, [36]) is another recent model that attempts
+46     MassFormer
+
+to provide more complete annotations, albeit for EI spectra instead of ESI-
+MS/MS. It works by applying a heuristic bond-breaking algorithm (like CFM)
+to generate subfragments of the input molecule, then predicting a distribution
+over these subfragments, which induces a distribution on formulae and can
+then be mapped to a spectrum.
+    It is not possible to directly compare MassFormer with these other mod-
+els without a standardized training and evaluation protocol. Three of the four
+methods (all except GrAFF) provide public code implementations, but differ
+significantly in terms of the types of spectra that they model: namely, the ion-
+ization mode, precursor adducts, and collision energies which are supported.
+Three of the methods (GrAFF, SCARF, RASSP) present clear advantages in
+terms of prediction resolution and peak annotations when compared to Mass-
+Former. However, these methods also rely on hand-designed heuristics (either
+for vocabulary generation or recursive bond breaking), which may affect their
+generalization on different types of compounds (particularly larger compounds
+where the heuristics may not apply). Additionally, in terms of prediction speed,
+MassFormer is likely to be faster than both SCARF (due to its autoregressive
+formula prediction) and RASSP (due to its combinatorial fragmentation), but
+may be comparable with 3DMolMS and GrAFF. Rigorous benchmarking is
+necessary to properly characterize each model’s strengths and weaknesses.
+
+8.3 Compound Identification
+The first algorithms for MS-based compound identification arose in the 1960s.
+DENDRAL and Meta-DENDRAL [104] were early AI projects aimed at auto-
+matically learning fragmentation rules from MS data, to help identify new
+molecules. Since then, algorithmic advances and increased data availability
+have resulted in more powerful methods. Many of the spectrum prediction
+models from Sections 8.1 and 8.2 have also been applied to spectrum identi-
+fication [22, 27–29, 34, 36, 88, 89, 91–94, 99], typically by generating in silico
+libraries to compare against query spectra. However, there are other meth-
+ods that do not require directly predicting spectra. Many modern approaches
+rely on fragmentation trees [105, 106] to represent spectra. Such tree repre-
+sentations are useful because they provide an interpretable description of the
+fragmentation process, and can be inferred directly from the peak information
+in the spectrum. Tree kernels are used to compute similarity between spectra
+[107]. This allows for the development of kernel algorithms that infer compound
+identity by predicting properties from the fragmentation tree directly and
+searching chemical databases to find candidates that match those properties
+[45, 52, 107]. There are also methods for predicting substructure directly from
+the spectrum, without relying on fragmentation trees. Some works [108, 109]
+use neural networks to predict substructure labels and find candidate molecules
+that match those substructures. More recently, transformer approaches for
+spectrum-to-structure prediction [53] have shown promise with identification of
+Q-TOF spectra, relying on large libraries of combinatorially simulated spectra
+[91] for pre-training.
+
