@@ -144,3 +144,9 @@
     0.482 vs single-+H 0.224. The ladder more than doubles fragmentation
     scoring. It is the single biggest verified sub-component win: BDE
     enumeration selects better pieces, the ladder matches much more of them.
+
+## Hyperparameter grid (GBM, 3-fold seed holdout, 20 configs)
+40. Winner: lr 0.05, leaves 31, l2 1.0 (mean 0.084). Mine-made-up 0.073,
+    theirs 0.056. Tuning is worth ~+0.01 over habits on 3 features; the
+    8-feature set was worth +0.10. Features dominate params 10-to-1.
+    Adopted as default for all future ranker training.
