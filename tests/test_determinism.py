@@ -29,3 +29,14 @@ def test_all_trainers_seeded():
             continue
         for m in re.finditer(r"HistGradientBoostingClassifier\((.*?)\)", s, re.S):
             assert "random_state" in m.group(1), f"unseeded GBM in {p}"
+
+
+def test_enriched_row_counts_match_input():
+    import pandas as pd
+    for seed in (10, 11, 12):
+        d = pd.read_parquet(
+            f"/Users/martin/Desktop/enveda-casmi26-molecule-id/v5/feat_cache/seed{seed}.parquet")
+        q = pd.read_parquet(
+            f"/Users/martin/Desktop/enveda-casmi26-molecule-id/v13/feat_bde_keyed{seed}.parquet")
+        assert len(q) == len(d), f"seed {seed}: {len(q)} != {len(d)}"
+        assert set(q.columns) >= {"seed", "truth", "cand", "bde"}
