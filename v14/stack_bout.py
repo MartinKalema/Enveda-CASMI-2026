@@ -73,15 +73,39 @@ def stage_bout(n_query=None, seeds=SEEDS):
     mynet = FpMLP(d_h=1536).to(device)
     mynet.load_state_dict(torch.load(f"{PROJECT}/data/fp_trans.pt", map_location=device))
     mynet.eval()
+    import gc
+    import resource
+    import os as _os
+    _os.environ.setdefault("OMP_NUM_THREADS", "4")
+    torch.set_num_threads(4)
+
+    def _rss_gb():
+        return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024 ** 3)
+
+    def _guard(stage):
+        gb = _rss_gb()
+        print(f"[mem] {stage}: peak {gb:.1f}GB", flush=True)
+        if gb > 11.0:
+            raise MemoryError(f"RSS cap exceeded at {stage}: {gb:.1f}GB")
+
     rankers = pickle.load(open(f"{PROJECT}/v13/their_ranker.pkl", "rb"))
     gbm9 = pickle.load(open(f"{PROJECT}/v13/gbm9_keyed.pkl", "rb"))
     tf = pd.read_parquet(f"{PROJECT}/data/fingerprints.parquet")
     scol = "normalized_smiles" if "normalized_smiles" in tf.columns else "smiles"
-    myfp = {s: np.unpackbits(np.asarray(x, dtype=np.uint8)).astype(np.float32)
-            for s, x in zip(tf[scol], tf["fp"])}
+    # PACKED uint8 kept on purpose: ~35x smaller than float32 (12GB budget)
+    myfp = {s: np.asarray(x, dtype=np.uint8) for s, x in zip(tf[scol], tf["fp"])}
+    del tf
     cf = pd.read_parquet(f"{PROJECT}/data/coconut_fp.parquet", columns=["canonical_smiles", "fp"])
     for s, x in zip(cf["canonical_smiles"], cf["fp"]):
-        myfp.setdefault(s, np.unpackbits(np.asarray(x, dtype=np.uint8)).astype(np.float32))
+        myfp.setdefault(s, np.asarray(x, dtype=np.uint8))
+    del cf
+    gc.collect()
+
+    from functools import lru_cache
+
+    @lru_cache(maxsize=8192)
+    def _up(s):
+        return np.unpackbits(myfp[s]).astype(np.float32)
     with open(f"{PROJECT}/v14/their_frag_uni.pkl", "rb") as f:
         their_frags = pickle.load(f)
     with open(f"{PROJECT}/data/frag_cache.pkl", "rb") as f:
@@ -108,6 +132,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
     gbm9m, gbm9f = gbm9["model"], gbm9["feats"]
     res = {"theirs": [], "ours": []}
     for seed in seeds:
+        _guard(f"seed {seed} start")
         d = pd.read_parquet(f"{PROJECT}/v5/feat_cache/seed{seed}.parquet")
         groups = list(d.groupby(["seed", "truth"]))
         if n_query is not None:
@@ -195,10 +220,19 @@ def stage_bout(n_query=None, seeds=SEEDS):
                 _Z = mynet(torch.from_numpy(np.stack(_ff))).numpy().mean(axis=0)
             Zn = _Z / (np.linalg.norm(_Z) + 1e-9)
             _top = g.sort_values("ana", ascending=False)["cand"].head(3).tolist()
-            _tv = [myfp[t] for t in _top if t in myfp]
+            _tv = []
+            for t in _top:
+                if t in myfp:
+                    try:
+                        _tv.append(_up(t))
+                    except KeyError:
+                        pass
             _feats, _order = [], []
             for _, c in g.iterrows():
-                f = myfp.get(c["cand"])
+                try:
+                    f = _up(c["cand"])
+                except KeyError:
+                    f = None
                 _tt1 = 0.0
                 if f is not None and _tv:
                     _fb = f > 0.5
@@ -232,6 +266,10 @@ def stage_bout(n_query=None, seeds=SEEDS):
             res["ours"].append(1 / ro_rank if ro_rank <= 25 else 0.0)
         print(f"seed {seed}: theirs={np.mean(res['theirs'][-50:]):.3f} "
               f"ours={np.mean(res['ours'][-50:]):.3f}", flush=True)
+        del d, _dbfull, _libfull
+        _up.cache_clear()
+        gc.collect()
+        _guard(f"seed {seed} end")
     print("BOUT: theirs=%.3f ours=%.3f (n=%d)" % (
         np.mean(res["theirs"]), np.mean(res["ours"]), len(res["theirs"])))
 

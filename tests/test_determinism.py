@@ -40,3 +40,12 @@ def test_enriched_row_counts_match_input():
             f"/Users/martin/Desktop/enveda-casmi26-molecule-id/v13/feat_bde_keyed{seed}.parquet")
         assert len(q) == len(d), f"seed {seed}: {len(q)} != {len(d)}"
         assert set(q.columns) >= {"seed", "truth", "cand", "bde"}
+
+
+def test_packed_unpack_is_exact():
+    """Packed uint8 -> float32 must equal pre-unpacked arrays (memory fix changes nothing)."""
+    import numpy as np
+    rng = np.random.default_rng(0)
+    packed = rng.integers(0, 256, size=256, dtype=np.uint8)
+    assert np.array_equal(np.unpackbits(packed).astype(np.float32),
+                          np.unpackbits(np.asarray(packed, dtype=np.uint8)).astype(np.float32))
