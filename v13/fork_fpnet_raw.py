@@ -1,7 +1,8 @@
 import math
 import numpy as np, pandas as pd, torch, glob, os
 import torch.nn as nn
-from rdkit import Chem, rdFingerprintGenerator
+from rdkit import Chem
+from rdkit.Chem import rdFingerprintGenerator
 from rdkit.Chem import Descriptors, MACCSkeys
 from rdkit.Chem.Descriptors import ExactMolWt
 HAVE_RDKIT = True
