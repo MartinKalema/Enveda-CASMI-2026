@@ -130,3 +130,11 @@
 37. Never submit without confirming new code actually ran: check kernel
     version output freshness, not just COMPLETE status. A COMPLETE badge on
     a stale version burned a submission for an identical 0.317.
+
+## Harness bugs produce false findings (frag channel incident)
+38. A stray pasted decorator made their code unrunnable in my harness; it
+    scored all zeros and I reported "their channel is dead." Corrected
+    numbers: OLD mean 0.247 (94% nonzero), rank-corr 0.531 with ours.
+    Rule: a surprising zero is a harness suspect first, a finding second -
+    verify the harness runs the target code correctly before believing any
+    number it prints, especially zeros.
