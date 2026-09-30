@@ -50,3 +50,15 @@ def test_rep_pool_masses_match_map():
     tr["_n"] = [nm(p, a) for p, a in zip(tr["precursor_mz"], tr["adduct"])]
     med = tr.groupby("normalized_smiles")["_n"].median()
     assert med.notna().mean() > 0.95
+
+
+def test_filtered_read_satisfies_loader_contract():
+    import re
+    loader_src = open("/Users/martin/Desktop/enveda-casmi26-molecule-id/v14/loaders.py").read()
+    needed = set(re.findall(r'df\["(\w+)"\]', loader_src))
+    bout_src = open("/Users/martin/Desktop/enveda-casmi26-molecule-id/v14/stack_bout.py").read()
+    m = re.search(r"_spec = pd.read_parquet\(.*?columns=\[(.*?)\]",
+                  bout_src, re.S)
+    assert m, "filtered read not found"
+    have = set(re.findall(r'"(\w+)"', m.group(1)))
+    assert needed <= have, f"missing columns for loader: {needed - have}"

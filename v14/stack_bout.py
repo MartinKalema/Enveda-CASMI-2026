@@ -138,24 +138,24 @@ def stage_bout(n_query=None, seeds=SEEDS):
     _rep_smi = _rep_smi["normalized_smiles"].tolist()
     del _meta
     gc.collect()
-    _spec = pd.read_parquet(
+    _rspec = pd.read_parquet(
         f"{PROJECT}/data/train.parquet",
         columns=["normalized_smiles", "adduct", "ms2_mzs", "ms2_normalized_intensities"],
         filters=[("normalized_smiles", "in", _rep_smi)])
-    _spec["_m"] = _spec["normalized_smiles"].map(smass)
-    _spec = _spec.sort_values(["_m", "normalized_smiles"]).drop_duplicates(
+    _rspec["_m"] = _rspec["normalized_smiles"].map(smass)
+    _rspec = _rspec.sort_values(["_m", "normalized_smiles"]).drop_duplicates(
         ["normalized_smiles", "adduct"], keep="last").reset_index(drop=True)
-    _ml = [np.asarray(m, dtype=np.float32) for m in _spec["ms2_mzs"]]
-    _il = [np.asarray(v, dtype=np.float32) for v in _spec["ms2_normalized_intensities"]]
-    _oo = np.zeros(len(_spec) + 1, np.int64)
+    _ml = [np.asarray(m, dtype=np.float32) for m in _rspec["ms2_mzs"]]
+    _il = [np.asarray(v, dtype=np.float32) for v in _rspec["ms2_normalized_intensities"]]
+    _oo = np.zeros(len(_rspec) + 1, np.int64)
     for _i, _m in enumerate(_ml):
         _oo[_i + 1] = _oo[_i] + len(_m)
-    _rep = np.arange(len(_spec))
-    _rep_key = np.asarray(_spec["normalized_smiles"].tolist(), dtype=object)
-    _rep_nm = np.asarray(_spec["_m"].tolist(), dtype=float)
-    _rep_ad = np.asarray(_spec["adduct"].astype(str).tolist(), dtype=object)
+    _rep = np.arange(len(_rspec))
+    _rep_key = np.asarray(_rspec["normalized_smiles"].tolist(), dtype=object)
+    _rep_nm = np.asarray(_rspec["_m"].tolist(), dtype=float)
+    _rep_ad = np.asarray(_rspec["adduct"].astype(str).tolist(), dtype=object)
     _rep_lib = {"off": _oo, "mz": np.concatenate(_ml), "it": np.concatenate(_il)}
-    del _spec, _ml, _il
+    del _rspec, _ml, _il
     gc.collect()
     _guard("rep pool built")
     res = {"theirs": [], "ours": []}
@@ -172,7 +172,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
         _uni.update([_t for (_sd, _t), _ in groups])
         _spec = pd.read_parquet(
             f"{PROJECT}/data/train.parquet",
-            columns=["normalized_smiles", "adduct", "precursor_mz", "ms2_mzs",
+            columns=["normalized_smiles", "inchikey14", "adduct", "precursor_mz", "ms2_mzs",
                      "ms2_normalized_intensities", "instrument_type",
                      "collision_energy_ev", "ionization_mode"],
             filters=[("normalized_smiles", "in", sorted(_uni))])
