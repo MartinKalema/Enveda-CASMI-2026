@@ -169,7 +169,7 @@ def stage_bout(n_query=None, seeds=SEEDS):
         _uni = set()
         for _, _g in groups:
             _uni.update(_g["cand"].tolist())
-        _uni.update([_t for _, _t in groups])
+        _uni.update([_t for (_sd, _t), _ in groups])
         _spec = pd.read_parquet(
             f"{PROJECT}/data/train.parquet",
             columns=["normalized_smiles", "adduct", "precursor_mz", "ms2_mzs",
