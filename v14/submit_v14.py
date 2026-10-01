@@ -1,8 +1,9 @@
-"""v14 production: v10 floor top-5 + full stack fills (FIXED key space).
+"""v14 production: v10 floor top-5 + OUR BDE frags judged by THEIR full stack.
 Writes submission.csv. Needs (fp dataset): fp_single_s2.pt, their_ranker.pkl,
-their_frag_prod.pkl (THEIR masses + THEIR scorer: class-2 bouts show BDE
-mass-source is a non-lever inside the 31-feature stack, ±0.003),
+bde_frag_{pos,neg,na}.pkl (v13.frag_up.fragment_masses_bde),
 their_fp packed, coconut_fp.parquet.
+USER OVERRIDE: class-2 bouts show BDE neutral (+-0.003) inside the stack;
+submitting anyway to get LB truth.
 """
 import numpy as np
 import pandas as pd
@@ -12,6 +13,7 @@ import torch
 from bisect import bisect_left, bisect_right
 import gc
 from v13.fork_frag_raw import explain_score as their_explain
+from v13.frag_up import _regime as bde_regime  # OUR BDE charge regime; masses precomputed per regime
 
 from v1.subformula import ADDUCT_DELTA
 from v2.blend import cosine
@@ -81,8 +83,11 @@ def main():
         if i is None:
             return None
         return np.unpackbits(_M[i]).astype(np.float32)[:6930]
-    with open(f"{FP}/their_frag_prod.pkl", "rb") as f:
-        uni_fr = pickle.load(f)
+    bde_fr = {}
+    for _reg in ("pos", "neg", "na"):
+        with open(f"{FP}/bde_frag_{_reg}.pkl", "rb") as f:
+            bde_fr[_reg] = pickle.load(f)
+    bde_fr["nh4"] = bde_fr["pos"]  # NH4+ seeks {N,O}, identical to pos regime
     test = pd.read_parquet(f"{IN}/test.parquet")
     test["neutral"] = [neutral_mass(p, a) for p, a in zip(test["precursor_mz"], test["adduct"])]
     mol_neutral = test.groupby("molecule_id")["neutral"].median()
@@ -158,8 +163,9 @@ def main():
             cfp.append(t if t is not None else np.zeros(6930, np.float32))
         cfp = np.stack(cfp)
         fr = []
+        _bde = bde_fr[bde_regime(str(q0["adduct"]))]
         for s in pool:
-            f = uni_fr.get(s, np.zeros(0))
+            f = _bde.get(s, np.zeros(0))
             m2 = np.asarray(q0["ms2_mzs"], float)
             i2 = np.asarray(q0["ms2_normalized_intensities"], float)
             md = 1.0 if str(q0["adduct"]).rstrip().endswith("]+") else -1.0

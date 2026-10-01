@@ -1,8 +1,7 @@
-"""v14 production contract: the SHIPPED configuration.
-Floor top-5 (our cosine) + THEIR frag masses + THEIR scorer + THEIR ranker,
-with the SMILES key-space fix (lib_sim/build_rep keyed by SMILES).
-Class-2 bouts killed the BDE mass-source (non-lever, +-0.003) and the
-retrain (-0.065): this file pins the validated combination.
+"""v14 production contract: OUR BDE frags + THEIR scorer + THEIR ranker.
+USER OVERRIDE (2026-10-01): local bouts show BDE neutral inside the stack
+(+0.004 class-1 / -0.003 class-2); submitting for LB truth anyway.
+Floor top-5 (our cosine) pinned; SMILES key-space fix; fixed stack otherwise.
 """
 import re
 
@@ -13,21 +12,21 @@ def _src():
     return open(SRC).read()
 
 
-def test_their_frag_masses():
+def test_bde_masses_in_production():
     s = _src()
-    assert "their_frag_prod" in s, "fills use THEIR frag masses"
-    assert "_frag_masses_wrapper" not in s
+    assert "bde_frag_" in s, "fills use OUR BDE frag masses"
+    assert 'bde_fr["nh4"]' in s or "nh4" in s, "all four regimes covered"
 
 
-def test_no_bde_in_production():
+def test_no_their_frag_masses():
     s = _src()
-    assert "bde_frag_" not in s and "bde_regime" not in s and "fragment_masses_bde" not in s, \
-        "BDE killed by class-2 bout: must not feed production"
+    assert "their_frag_prod" not in s, "their masses out for this submission"
 
 
 def test_their_scorer_and_ranker():
     s = _src()
-    assert "their_explain" in s or "explain_score" in s
+    assert "their_explain" in s or "explain_score" in s, \
+        "their explain_score (ranker trained on its distribution)"
     assert "their_ranker.pkl" in s, "production judged by THEIR ranker"
 
 

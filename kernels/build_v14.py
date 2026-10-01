@@ -48,6 +48,9 @@ frg = ("import pickle as _pk\nFRAG_TOL = 0.01\n"
        + "\n" + block(frag_src, "AMU = {", ["\ndef clean_spectrum"])
        + "\n" + block(frag_src, "def explain_score", ["\ndef _frag_masses_wrapper"])
        + "\ntheir_explain = explain_score\n")
+_bde_src = open(f"{P}/v13/frag_up.py").read()
+frg += ("\n" + block(_bde_src, "def _regime", ["\ndef _bond_bde"])
+        + "\nbde_regime = _regime\n")
 adduct_consts = (block(fpf, "ADDUCT_LIST", ["\ndef instr_family"]) + "\n"
                    + block(fpf, "def instr_family", ["\ndef prep_peaks"]))
 
