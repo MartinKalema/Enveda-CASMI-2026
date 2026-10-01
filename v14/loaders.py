@@ -23,5 +23,5 @@ def load_library_df(df, neutral_mass):
     for k, s in zip(ik, smi):
         if k and s and k not in best:
             best[k] = s
-    return dict(off=off, mz=allmz, it=allin, nm=nm, ik=ik, best=best,
+    return dict(off=off, mz=allmz, it=allin, nm=nm, ik=ik, smi=smi, best=best,
                 order=order, snm=nm[order], n_ok=int(ok.sum()), ad=add)

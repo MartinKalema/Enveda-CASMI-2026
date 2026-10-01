@@ -25,6 +25,12 @@ def test_builder_uses_same_feature_code():
         "their frag masses must not leak into retrain"
 
 
+def test_builder_leaves_query_spectrum_out():
+    s = open(BUILDER).read()
+    assert "q.name" in s and "drop" in s, \
+        "class-1 library must exclude the query spectrum itself (else lv~1 giveaway)"
+
+
 def test_bde_matrix_mirrors():
     z0 = np.load(NPZ)
     z1 = np.load(OUT)

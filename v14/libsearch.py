@@ -161,16 +161,16 @@ def lib_window(L, target, tol):
 def build_rep(L):
     """Extracts the single richest representative spectrum per unique structure for analog retrieval."""
     npk = np.diff(L['off'])
-    best = {}; ik = L['ik']
-    for i in range(len(ik)):
-        k = ik[i]
+    best = {}; smi = L['smi']
+    for i in range(len(smi)):
+        k = smi[i]
         if k and (k not in best or npk[i] > npk[best[k]]):
             best[k] = i
     rep = np.array(sorted(best.values()))
     nm = L['nm'][rep]
     rep_ad = L['ad'][rep]
     ok = np.isfinite(nm)
-    rep = rep[ok]; nm = nm[ok]; key = ik[rep]; rep_ad = rep_ad[ok]
+    rep = rep[ok]; nm = nm[ok]; key = smi[rep]; rep_ad = rep_ad[ok]
     o = np.argsort(nm)
     print(f"[INFO] Built representative analog set: {len(rep):,} unique scaffolds.", flush=True)
     return rep[o], key[o], nm[o], rep_ad[o]
@@ -197,7 +197,7 @@ def lib_sim(L, specs, target):
         sc = search(qm, qp, cand, L['off'], L['mz'], L['it'],
                     CFG.MZ_TOL, CFG.INT_FLOOR, CFG.MAX_PEAKS, CFG.INT_POWER, CFG.ENT_WEIGHT)
         for c, s in zip(cand, sc):
-            k = L['ik'][c]
+            k = L['smi'][c]
             if s > agg.get(k, -1.0):
                 agg[k] = float(s)
     return agg

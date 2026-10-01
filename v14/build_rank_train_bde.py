@@ -92,8 +92,14 @@ def main():
     tr["_neut"] = [nm(p, a) for p, a in zip(tr["precursor_mz"], tr["adduct"])]
     tr = tr[np.isfinite(tr["_neut"].values)]
     qpool = [s for s in tr["normalized_smiles"].unique() if s not in banned]
+    multi = set(tr.groupby("normalized_smiles").filter(lambda g: len(g) > 1)[
+        "normalized_smiles"].unique())
+    qpool_multi = [s for s in qpool if s in multi]
     rng = np.random.default_rng(SEED)
-    queries = list(rng.choice(sorted(qpool), size=N_Q, replace=False))
+    q_even = list(rng.choice(sorted(qpool_multi), size=(N_Q + 1) // 2, replace=False))
+    q_odd = list(rng.choice(sorted(qpool), size=N_Q // 2, replace=False))
+    queries = [q for pair in zip(q_even, q_odd + [None]) for q in pair if q is not None]
+    queries = queries[:N_Q]
     tstruct = tr.groupby("normalized_smiles")["_neut"].median()
     tmass = tstruct.sort_values().values
     tsmi = tstruct.sort_values().index.values
@@ -142,6 +148,10 @@ def main():
         if qs not in cands:
             cands.append(qs)
         lib_tr = tr if cls1 else tr[tr["normalized_smiles"] != qs]
+        if cls1:
+            # leave-query-spectrum-out: a same-structure reference must exist,
+            # but never the query spectrum itself (else lv~1 giveaway)
+            lib_tr = lib_tr.drop([q.name])
         lib = load_library_df(
             lib_tr[lib_tr["normalized_smiles"].isin(set(cands))], L.neutral_mass)
         specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
