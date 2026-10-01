@@ -48,7 +48,10 @@ adduct_consts = (block(fpf, "ADDUCT_LIST", ["\ndef instr_family"]) + "\n"
 
 run = run.replace("import torch\n", "")
 run = re.sub(r"^\s*(import|from) v\d+\.\w+.*\n", "", run, flags=re.M)
+run = run.replace("import v14.libsearch as L\n", "")
 run = run.replace("import v13.fork_fpnet_raw as F\n", "")
+run = re.sub(r"\bF\.(FPNet|_MODEL|_logits_raw|fp_and_mass|prep_peaks|_merge_peaks)\b", r"\1", run)
+run = re.sub(r"\bL\.(lib_sim|build_rep|analog_sim|neutral_mass)\b", r"\1", run)
 run = re.sub(r"\bF\.(FPNet|_MODEL|_logits_raw|fp_and_mass|prep_peaks|_merge_peaks)\b", r"\1", run)
 old_paths = (f'PROJECT = "{P}"\n'
              'IN = os.environ.get("CASMI_IN", f"{PROJECT}/data")\n'
