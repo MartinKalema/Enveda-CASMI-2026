@@ -8,10 +8,10 @@ def _src():
 
 def test_two_arms():
     s = _src()
-    two_sites = s.count("rank_features(") >= 2
-    shared_scorer = "def score_arm" in s and s.count("score_arm(") >= 2
-    assert two_sites or shared_scorer, \
-        "both arms must go through the same 31-feature stack"
+    shared = ("def score_X" in s or "def score_arm" in s)
+    factorial = all(k in s for k in ("old+their", "old+bde", "new+their", "new+bde"))
+    assert shared and factorial, \
+        "2x2 factorial through one shared stack scorer required"
 
 
 def test_only_frag_differs():
@@ -22,7 +22,8 @@ def test_only_frag_differs():
 
 def test_shared_ranker():
     s = _src()
-    assert "their_ranker" in s, "both arms judged by THEIR ranker (anchor-gated)"
+    assert "their_ranker" in s, "anchor ranker required"
+    assert "ranker_bde" in s, "retrained BDE ranker must be judged too"
 
 
 def test_per_seed_logging():

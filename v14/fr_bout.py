@@ -50,6 +50,7 @@ def main(n_query=None):
     torch.set_num_threads(4)
 
     rankers = pickle.load(open(f"{PROJECT}/v13/their_ranker.pkl", "rb"))
+    rankers_bde = pickle.load(open(f"{PROJECT}/v14/ranker_bde.pkl", "rb"))
     with open(f"{PROJECT}/v14/their_frag_uni.pkl", "rb") as f:
         their_frags = pickle.load(f)
     bde_pre = {}
@@ -101,7 +102,7 @@ def main(n_query=None):
     del _rspec, _ml, _il
     gc.collect()
 
-    def score_arm(cands, q, qrows, target, frag_fn):
+    def score_X(cands, q, qrows, target, frag_fn):
         lib_rows = _spec[_spec["normalized_smiles"].isin(set(cands))]
         lib = load_library_df(lib_rows, L.neutral_mass)
         specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
@@ -138,7 +139,12 @@ def main(n_query=None):
                                           mode=md, tol=0.01)) if len(f) else 0.0)
         fr = np.array(fr, np.float32)
         X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
-        return np.mean([m.predict_proba(X)[:, 1] for m in rankers.values()], axis=0)
+        del lib
+        return X
+
+    def rank_of(pt, cands, truth):
+        return next((i + 1 for i, (_, s) in enumerate(
+            sorted(zip(pt, cands), reverse=True)) if s == truth), 10 ** 9)
 
     rows = []
     for seed in SEEDS:
@@ -165,23 +171,28 @@ def main(n_query=None):
             q = qrows.iloc[0]
             target = float(np.median([nm(p, a) for p, a in
                                       zip(qrows["precursor_mz"], qrows["adduct"])]))
-            for arm, fn in (("their", lambda s: np.asarray(
-                    their_frags.get(s, np.zeros(0)), float)),
-                            ("bde", lambda s: bde_masses(s, q["adduct"]))):
-                pt = score_arm(cands, q, qrows, target, fn)
-                rt = next((i + 1 for i, (_, s) in enumerate(
-                    sorted(zip(pt, cands), reverse=True)) if s == truth), 10 ** 9)
-                rows.append((seed, arm, 1 / rt if rt <= 25 else 0.0))
-        a = np.mean([r for (sd, arm, r) in rows if sd == seed and arm == "their"])
-        b = np.mean([r for (sd, arm, r) in rows if sd == seed and arm == "bde"])
-        print(f"seed {seed}: their-fr={a:.3f} bde-fr={b:.3f}", flush=True)
+            frag_fns = (("their", lambda s: np.asarray(
+                their_frags.get(s, np.zeros(0)), float)),
+                ("bde", lambda s: bde_masses(s, q["adduct"])))
+            Xs = {fax: score_X(cands, q, qrows, target, fn) for fax, fn in frag_fns}
+            R = {"old": rankers, "new": rankers_bde}
+            for fax, X in Xs.items():
+                for rname, rmodels in R.items():
+                    pt = np.mean([m.predict_proba(X)[:, 1]
+                                  for m in rmodels.values()], axis=0)
+                    rt = rank_of(pt, cands, truth)
+                    rows.append((seed, f"{rname}+{fax}",
+                                 1 / rt if rt <= 25 else 0.0))
+        for _arm in ("old+their", "old+bde", "new+their", "new+bde"):
+            _a = np.mean([r for (sd, arm, r) in rows if sd == seed and arm == _arm])
+            print(f"seed {seed}: {_arm}={_a:.3f}", flush=True)
         del d, _spec
         gc.collect()
     df = pd.DataFrame(rows, columns=["seed", "arm", "rr"])
     df.to_csv(f"{PROJECT}/v14/fr_bout_log.csv", index=False)
-    for arm in ("their", "bde"):
-        print(f"BOUT {arm}=%.3f (n=%d)" % (
-            df[df.arm == arm].rr.mean(), (df.arm == arm).sum()), flush=True)
+    for _arm in ("old+their", "old+bde", "new+their", "new+bde"):
+        print(f"BOUT {_arm}=%.3f (n=%d)" % (
+            df[df.arm == _arm].rr.mean(), (df.arm == _arm).sum()), flush=True)
     print("wrote v14/fr_bout_log.csv", flush=True)
 
 
