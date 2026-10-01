@@ -102,46 +102,6 @@ def main(n_query=None):
     del _rspec, _ml, _il
     gc.collect()
 
-    def score_X(cands, q, qrows, target, frag_fn):
-        lib_rows = _spec[_spec["normalized_smiles"].isin(set(cands))]
-        lib = load_library_df(lib_rows, L.neutral_mass)
-        specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
-        lib_hits = L.lib_sim(lib, specs, target)
-        lv = np.array([lib_hits.get(s, 0.0) for s in cands], np.float32)
-        an = L.analog_sim(_rep_lib, specs, target, _rep, _rep_key, _rep_nm, _rep_ad)
-        afp, asim = [], []
-        for k, v in an[:80]:
-            t = F.fp_and_mass(k)
-            if t is not None:
-                afp.append(t[0].astype(np.float32))
-                asim.append(v)
-        afp = np.stack(afp) if afp else None
-        asim = np.array(asim, np.float32)
-        ce = q["collision_energy_ev"]
-        try:
-            ce = float(np.mean(np.atleast_1d(ce))) if ce is not None and len(np.atleast_1d(ce)) else 25.0
-        except Exception:
-            ce = 25.0
-        zlog = F._logits_raw([(q["ms2_mzs"], q["ms2_normalized_intensities"])], [tnet],
-                             q["precursor_mz"], q["adduct"], q["instrument_type"], ce, 1.0)
-        cfp = []
-        for s in cands:
-            t = F.fp_and_mass(s)
-            cfp.append(t[0].astype(np.float32) if t is not None else np.zeros(6930, np.float32))
-        cfp = np.stack(cfp)
-        fr = []
-        for s in cands:
-            f = frag_fn(s)
-            m2 = np.asarray(q["ms2_mzs"], float)
-            i2 = np.asarray(q["ms2_normalized_intensities"], float)
-            md = 1.0 if str(q["adduct"]).rstrip().endswith("]+") else -1.0
-            fr.append(float(their_explain(np.asarray(f, float), m2, i2,
-                                          mode=md, tol=0.01)) if len(f) else 0.0)
-        fr = np.array(fr, np.float32)
-        X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
-        del lib
-        return X
-
     def rank_of(pt, cands, truth):
         return next((i + 1 for i, (_, s) in enumerate(
             sorted(zip(pt, cands), reverse=True)) if s == truth), 10 ** 9)
@@ -174,21 +134,66 @@ def main(n_query=None):
             frag_fns = (("their", lambda s: np.asarray(
                 their_frags.get(s, np.zeros(0)), float)),
                 ("bde", lambda s: bde_masses(s, q["adduct"])))
-            Xs = {fax: score_X(cands, q, qrows, target, fn) for fax, fn in frag_fns}
+            Xs, _diag = {}, {}
+            for fax, fn in frag_fns:
+                lib_rows = _spec[_spec["normalized_smiles"].isin(set(cands))]
+                lib = load_library_df(lib_rows, L.neutral_mass)
+                specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
+                lib_hits = L.lib_sim(lib, specs, target)
+                lv = np.array([lib_hits.get(s, 0.0) for s in cands], np.float32)
+                an = L.analog_sim(_rep_lib, specs, target, _rep, _rep_key, _rep_nm, _rep_ad)
+                afp, asim = [], []
+                for k, v in an[:80]:
+                    t = F.fp_and_mass(k)
+                    if t is not None:
+                        afp.append(t[0].astype(np.float32))
+                        asim.append(v)
+                afp = np.stack(afp) if afp else None
+                asim = np.array(asim, np.float32)
+                ce = q["collision_energy_ev"]
+                try:
+                    ce = float(np.mean(np.atleast_1d(ce))) if ce is not None and len(np.atleast_1d(ce)) else 25.0
+                except Exception:
+                    ce = 25.0
+                zlog = F._logits_raw([(q["ms2_mzs"], q["ms2_normalized_intensities"])], [tnet],
+                                     q["precursor_mz"], q["adduct"], q["instrument_type"], ce, 1.0)
+                cfp = []
+                for s in cands:
+                    t = F.fp_and_mass(s)
+                    cfp.append(t[0].astype(np.float32) if t is not None else np.zeros(6930, np.float32))
+                cfp = np.stack(cfp)
+                fr = []
+                for s in cands:
+                    f = fn(s)
+                    m2 = np.asarray(q["ms2_mzs"], float)
+                    i2 = np.asarray(q["ms2_normalized_intensities"], float)
+                    md = 1.0 if str(q["adduct"]).rstrip().endswith("]+") else -1.0
+                    fr.append(float(their_explain(np.asarray(f, float), m2, i2,
+                                                  mode=md, tol=0.01)) if len(f) else 0.0)
+                fr = np.array(fr, np.float32)
+                X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
+                del lib
+                Xs[fax] = X
+                ti = cands.index(truth) if truth in cands else -1
+                _diag[fax] = (float(lv[ti]) if ti >= 0 else -1.0,
+                              float(fr[ti]) if ti >= 0 else -1.0, len(cands))
             R = {"old": rankers, "new": rankers_bde}
             for fax, X in Xs.items():
                 for rname, rmodels in R.items():
                     pt = np.mean([m.predict_proba(X)[:, 1]
                                   for m in rmodels.values()], axis=0)
                     rt = rank_of(pt, cands, truth)
-                    rows.append((seed, f"{rname}+{fax}",
-                                 1 / rt if rt <= 25 else 0.0))
+                    tlv, tfr, tnc = _diag[fax]
+                    rows.append((seed, f"{seed}:{truth}", f"{rname}+{fax}",
+                                 1 / rt if rt <= 25 else 0.0, tlv, tfr, tnc))
         for _arm in ("old+their", "old+bde", "new+their", "new+bde"):
-            _a = np.mean([r for (sd, arm, r) in rows if sd == seed and arm == _arm])
+            _a = np.mean([r for (sd, _qid, arm, r, _lv, _fr, _nc) in rows
+                          if sd == seed and arm == _arm])
             print(f"seed {seed}: {_arm}={_a:.3f}", flush=True)
         del d, _spec
         gc.collect()
-    df = pd.DataFrame(rows, columns=["seed", "arm", "rr"])
+    df = pd.DataFrame(rows, columns=["seed", "qid", "arm", "rr",
+                                     "truth_lv", "truth_fr", "nc"])
     df.to_csv(f"{PROJECT}/v14/fr_bout_log.csv", index=False)
     for _arm in ("old+their", "old+bde", "new+their", "new+bde"):
         print(f"BOUT {_arm}=%.3f (n=%d)" % (

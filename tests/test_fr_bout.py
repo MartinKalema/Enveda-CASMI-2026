@@ -8,10 +8,16 @@ def _src():
 
 def test_two_arms():
     s = _src()
-    shared = ("def score_X" in s or "def score_arm" in s)
     factorial = all(k in s for k in ("old+their", "old+bde", "new+their", "new+bde"))
+    shared = s.count("rank_features(cfp") == 1
     assert shared and factorial, \
         "2x2 factorial through one shared stack scorer required"
+
+
+def test_per_query_audit():
+    s = _src()
+    assert "qid" in s and "truth_lv" in s, \
+        "log must carry per-query diagnostics (qid, truth_lv)"
 
 
 def test_only_frag_differs():
