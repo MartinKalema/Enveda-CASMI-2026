@@ -31,13 +31,14 @@ ble = ble.replace("from v1.subformula import ADDUCT_DELTA\n", "")
 ble = ble.replace(f'PROJECT = "{P}"', 'PROJECT = "."  # unused in kernel')
 lbs = lbs_src + "\n" + lod_src.replace("import numpy as np\n", "")
 rnk = rnk_src
-fpfrag = (block(fpf, "class SinEmb", ["\nclass Block"])
-          + block(fpf, "class Block", ["\nclass FPNet"])
-          + block(fpf, "class FPNet", ["\ndef _merge_peaks"])
-          + block(fpf, "def _merge_peaks", ["\ndef model_logits"])
-          + block(fpf, "def model_logits", ["\ndef _logits_from"])
-          + block(fpf, "def _logits_from", ["\ndef _logits_raw"])
-          + block(fpf, "def _logits_raw", ["\ndef _fp_init"]))
+fpfrag = "\n".join([
+    block(fpf, "class SinEmb", ["\nclass Block"]),
+    block(fpf, "class Block", ["\nclass FPNet"]),
+    block(fpf, "class FPNet", ["\ndef _merge_peaks"]),
+    block(fpf, "def _merge_peaks", ["\ndef model_logits"]),
+    block(fpf, "def model_logits", ["\ndef _logits_from"]),
+    block(fpf, "def _logits_from", ["\ndef _logits_raw"]),
+    block(fpf, "def _logits_raw", ["\ndef _fp_init"])])
 _frag_stop = ["\ndef submit"] if "\ndef submit" in frg_src else ["\ndef main("]
 frg = ("import pickle as _pk\nFRAG_TOL = 0.01\n"
        + block(frg_src, 'AD = {"[M+H]+', ["def neutral_mass"])
