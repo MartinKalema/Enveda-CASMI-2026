@@ -42,8 +42,8 @@ _frag_stop = ["\ndef submit"] if "\ndef submit" in frg_src else ["\ndef main("]
 frg = ("import pickle as _pk\nFRAG_TOL = 0.01\n"
        + block(frg_src, 'AD = {"[M+H]+', ["def neutral_mass"])
        + block(frg_src, "def frag_match", _frag_stop))
-adduct_consts = block(fpf, "ADDUCT_LIST", ["\ndef instr_family"]) + block(
-    fpf, "def instr_family", ["\ndef prep_peaks"])
+adduct_consts = (block(fpf, "ADDUCT_LIST", ["\ndef instr_family"]) + "\n"
+                   + block(fpf, "def instr_family", ["\ndef prep_peaks"]))
 
 run = run.replace("import torch\n", "")
 run = re.sub(r"^\s*(import|from) v\d+\.\w+.*\n", "", run, flags=re.M)
