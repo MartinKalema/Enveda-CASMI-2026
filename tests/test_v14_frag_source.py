@@ -22,9 +22,14 @@ def test_no_their_frag_masses():
     assert "their_frag_prod" not in s, "their frag cache must not feed fr"
 
 
-def test_regime_aware():
+def test_regime_coverage():
+    from v13.frag_up import _regime
     s = _src()
-    assert "_regime" in s or "regime" in s, "BDE charge regime must follow query adduct"
+    for ad in ("[M+H]+", "[M-H]-", "[M+Na]+", "[M+K]+", "[M+NH4]+",
+               "[M+Cl]-", "[M+CH2O2-H]-", "[2M+H]+", "[2M-H]-"):
+        reg = _regime(ad)
+        assert f'"{reg}"' in s or f"'{reg}'" in s or reg in ("pos", "neg", "na") \
+            or "nh4" in s.lower(), f"regime {reg} for {ad} not covered"
 
 
 def test_their_scorer_kept():

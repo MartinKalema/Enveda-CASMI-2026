@@ -60,6 +60,8 @@ def main(n_query=None):
         except FileNotFoundError:
             bde_pre[_reg] = {}
 
+    bde_pre["nh4"] = bde_pre["pos"]  # NH4+ seeks {N,O}, identical to pos
+
     def bde_masses(s, adduct):
         hit = bde_pre[bde_regime(adduct)].get(s)
         if hit is not None and len(hit):

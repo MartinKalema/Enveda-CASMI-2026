@@ -85,6 +85,7 @@ def main():
     for _reg in ("pos", "neg", "na"):
         with open(f"{FP}/bde_frag_{_reg}.pkl", "rb") as f:
             bde_fr[_reg] = pickle.load(f)
+    bde_fr["nh4"] = bde_fr["pos"]  # NH4+ seeks {N,O}, identical to pos regime
     test = pd.read_parquet(f"{IN}/test.parquet")
     test["neutral"] = [neutral_mass(p, a) for p, a in zip(test["precursor_mz"], test["adduct"])]
     mol_neutral = test.groupby("molecule_id")["neutral"].median()
