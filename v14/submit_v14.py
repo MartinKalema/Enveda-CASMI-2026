@@ -1,6 +1,7 @@
-"""v14 production: v10 floor top-5 + THEIR full stack fills.
+"""v14 production: v10 floor top-5 + BDE frags judged by THEIR full stack.
 Writes submission.csv. Needs (fp dataset): fp_single_s2.pt, their_ranker.pkl,
-their_fp_prod.pkl, their_frag_prod.pkl, coconut_fp.parquet, fingerprints.parquet.
+bde_frag_{pos,neg,na}.pkl (OUR BDE masses via v13.frag_up.fragment_masses_bde),
+their_fp packed, coconut_fp.parquet.
 """
 import numpy as np
 import pandas as pd
@@ -10,6 +11,7 @@ import torch
 from bisect import bisect_left, bisect_right
 import gc
 from v13.fork_frag_raw import explain_score as their_explain
+from v13.frag_up import _regime as bde_regime  # OUR BDE charge regime; masses precomputed per regime
 
 from v1.subformula import ADDUCT_DELTA
 from v2.blend import cosine
@@ -68,7 +70,7 @@ def main():
     tnet = F.FPNet(ck["nbits"], d=ck["d"], layers=ck["layers"]).eval()
     tnet.load_state_dict(ck["model"])
     F._MODEL = ([tnet], [], "cpu", ck["nbits"])
-    rankers = pickle.load(open(f"{PROJECT}/v13/their_ranker.pkl", "rb"))
+    rankers = pickle.load(open(f"{FP}/their_ranker.pkl", "rb"))
     with open(f"{FP}/their_fp_keys.pkl", "rb") as f:
         _keys = pickle.load(f)
     _M = np.load(f"{FP}/their_fp_packed.npy", mmap_mode="r")
@@ -79,8 +81,10 @@ def main():
         if i is None:
             return None
         return np.unpackbits(_M[i]).astype(np.float32)[:6930]
-    with open(f"{FP}/their_frag_prod.pkl", "rb") as f:
-        uni_fr = pickle.load(f)
+    bde_fr = {}
+    for _reg in ("pos", "neg", "na"):
+        with open(f"{FP}/bde_frag_{_reg}.pkl", "rb") as f:
+            bde_fr[_reg] = pickle.load(f)
     test = pd.read_parquet(f"{IN}/test.parquet")
     test["neutral"] = [neutral_mass(p, a) for p, a in zip(test["precursor_mz"], test["adduct"])]
     mol_neutral = test.groupby("molecule_id")["neutral"].median()
@@ -156,8 +160,9 @@ def main():
             cfp.append(t if t is not None else np.zeros(6930, np.float32))
         cfp = np.stack(cfp)
         fr = []
+        _bde = bde_fr[bde_regime(str(q0["adduct"]))]
         for s in pool:
-            f = uni_fr.get(s, np.zeros(0))
+            f = _bde.get(s, np.zeros(0))
             m2 = np.asarray(q0["ms2_mzs"], float)
             i2 = np.asarray(q0["ms2_normalized_intensities"], float)
             md = 1.0 if str(q0["adduct"]).rstrip().endswith("]+") else -1.0
