@@ -86,7 +86,7 @@ def main():
     mol_neutral = test.groupby("molecule_id")["neutral"].median()
     train = pd.read_parquet(
         f"{IN}/train.parquet",
-        columns=["normalized_smiles", "adduct", "precursor_mz", "ms2_mzs", "ms2_normalized_intensities"])
+        columns=["normalized_smiles", "inchikey14", "adduct", "precursor_mz", "ms2_mzs", "ms2_normalized_intensities"])
     train["neutral"] = [neutral_mass(p, a) for p, a in zip(train["precursor_mz"], train["adduct"])]
     train = train[np.isfinite(train["neutral"].values)]
     tstruct = train.groupby("normalized_smiles")["neutral"].median()
