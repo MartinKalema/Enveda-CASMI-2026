@@ -37,6 +37,8 @@ def test_smiles_keyspace():
     assert "L.build_rep" in s and "L.analog_sim" in s and "L.lib_sim" in s
 
 
-def test_floor_top5_pinned():
+def test_unified_ranking():
     s = _src()
-    assert "top5" in s and "seen" in s, "floor top-5 pinned ahead of ranker fills"
+    assert "top5" not in s and "seen" not in s, "no pinned floor: single ranker ordering"
+    assert re.search(r"out = \[s for _, s in order\]\[:25\]", s), \
+        "output is top-25 of the unified stack ranking"

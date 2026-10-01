@@ -16,14 +16,11 @@ from v13.fork_frag_raw import explain_score as their_explain
 from v13.frag_up import _regime as bde_regime  # OUR BDE charge regime; masses precomputed per regime
 
 from v1.subformula import ADDUCT_DELTA
-from v2.blend import cosine
 
 PROJECT = "/Users/martin/Desktop/enveda-casmi26-molecule-id"
 IN = os.environ.get("CASMI_IN", f"{PROJECT}/data")
 OUT = os.environ.get("CASMI_OUT", PROJECT)
 FP = os.environ.get("CASMI_FP", f"{PROJECT}/data")
-TOP_N = 200
-INT_FLOOR = 0.01
 
 
 def neutral_mass(prec, adduct):
@@ -35,18 +32,6 @@ def neutral_mass(prec, adduct):
         return (prec + 1.007276) / 2
     d = ADDUCT_DELTA.get(adduct)
     return prec - d if d is not None else np.nan
-
-
-def denoise(mz, it, n=TOP_N, floor=INT_FLOOR):
-    mz = np.asarray(mz, dtype=float)
-    it = np.asarray(it, dtype=float)
-    keep = it >= floor
-    mz, it = mz[keep], it[keep]
-    if len(mz) > n:
-        o = np.argsort(-it)[:n]
-        mz, it = mz[o], it[o]
-    o = np.argsort(mz)
-    return mz[o], it[o]
 
 
 def window10(masses, smi, qmass, cap=3000, min_n=50):
@@ -99,7 +84,6 @@ def main():
     tstruct = train.groupby("normalized_smiles")["neutral"].median()
     tmass = tstruct.sort_values().values
     tsmi = tstruct.sort_values().index.values
-    tsamp = train.groupby(["normalized_smiles", "adduct"]).head(2).reset_index(drop=True)
     cf = pd.read_parquet(f"{FP}/coconut_fp.parquet", columns=["canonical_smiles", "exact_molecular_weight"])
     co = cf.sort_values("exact_molecular_weight").reset_index(drop=True)
     del cf
@@ -109,31 +93,11 @@ def main():
     for mi, (mol, spectra) in enumerate(test.groupby("molecule_id")):
         qmass = float(mol_neutral.loc[mol])
         tcands = window10(tmass, tsmi, qmass)
-        twin = tsamp[tsamp["normalized_smiles"].isin(set(tcands))]
-        qspecs = {}
-        for _, r in spectra.iterrows():
-            qspecs.setdefault(r["adduct"], []).append(
-                denoise(r["ms2_mzs"], r["ms2_normalized_intensities"]))
-        tscored = []
-        for s in tcands:
-            best = 0.0
-            sub = twin[twin["normalized_smiles"] == s]
-            for ad, ql in qspecs.items():
-                suba = sub[sub["adduct"] == ad]
-                if len(suba) == 0:
-                    suba = sub
-                for tmz, tit in zip(suba["ms2_mzs"], suba["ms2_normalized_intensities"]):
-                    dmz, dit = denoise(tmz, tit)
-                    for qmz, qit in ql:
-                        c = cosine(qmz, qit, dmz, dit)
-                        if c > best:
-                            best = c
-            tscored.append((best, s))
-        tscored.sort(reverse=True)
-        top5 = [s for _, s in tscored[:5]]
-        # fills: their 31-feature stack
+        # unified pool: EVERYTHING (train window + COCONUT) judged by THEIR stack.
+        # No pinned floor: pinning 5 train structures above fills caps every
+        # novel molecule at RR<=1/6. The ranker already promotes knowns via lv.
         ccands = window10(cmass, csmi, qmass)
-        pool = list(dict.fromkeys(tcands[5:] + ccands))
+        pool = list(dict.fromkeys(tcands + ccands))
         lib = load_library_df(
             train[train["normalized_smiles"].isin(set(pool))], L.neutral_mass)
         rep, rep_key, rep_nm, rep_ad = L.build_rep(lib)
@@ -175,9 +139,8 @@ def main():
         X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
         pt = np.mean([m.predict_proba(X)[:, 1] for m in rankers.values()], axis=0)
         order = sorted(zip(pt, pool), reverse=True)
-        seen = set(top5)
-        out = list(top5) + [s for _, s in order if not (s in seen or seen.add(s))][:20]
-        rows.append((mol, ";".join(out[:25])))
+        out = [s for _, s in order][:25]
+        rows.append((mol, ";".join(out)))
         del lib
         gc.collect()
         if (mi + 1) % 50 == 0:
