@@ -201,3 +201,15 @@
     per query (115 vs their 174). Their protocol likely leaves the query
     spectrum out. Do not retrain again without leave-spectrum-out class-1
     rows and matched rows/query.
+
+## class-2 bout: BDE line dead, key fix is the prize (n=150)
+48. old+their 0.653 / old+bde 0.650 / new+their 0.588 / new+bde 0.588:
+    frag mass-source is a +-0.003 non-lever inside the 31-feature stack on
+    novel-molecule simulation (consistent across seeds), retrain -0.065.
+    BDE's standalone ablation win (+0.088) cannot express through 4/31
+    features dominated by analog+model. Killed: BDE masses, retrained ranker.
+    The durable gain from this whole line is the ik/SMILES key fix: living
+    lib+analog took the fixed stack 0.820 -> 0.964 class-1. Ship: floor top-5
+    + old ranker + their frags + fixed keys. Also: validate bouts in the
+    regime that decides LB — self-match class-1 bouts flatter any lv-leaning
+    weight set and punish honest ones.
