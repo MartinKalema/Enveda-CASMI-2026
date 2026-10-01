@@ -20,6 +20,12 @@ def test_per_query_audit():
         "log must carry per-query diagnostics (qid, truth_lv)"
 
 
+def test_class2_mode():
+    s = _src()
+    assert "CLASS2" in s and "truth" in s.lower(), \
+        "bout must support class-2 simulation (truth structure out of library+reps)"
+
+
 def test_only_frag_differs():
     s = _src()
     assert "their_frags" in s and "bde" in s.lower(), \

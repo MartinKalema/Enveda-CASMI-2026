@@ -14,6 +14,7 @@ import torch
 
 PROJECT = "/Users/martin/Desktop/enveda-casmi26-molecule-id"
 SEEDS = (10, 11, 12)
+CLASS2 = False
 
 
 def nm(p, a):
@@ -137,11 +138,19 @@ def main(n_query=None):
             Xs, _diag = {}, {}
             for fax, fn in frag_fns:
                 lib_rows = _spec[_spec["normalized_smiles"].isin(set(cands))]
+                _rk, _rn, _ra, _rp = _rep_key, _rep_nm, _rep_ad, _rep
+                if CLASS2:
+                    # novel-molecule simulation: truth structure Must not occur
+                    # in library spectra nor in analog reps (else self-match
+                    # inflates class-1 and the bout predicts nothing about LB)
+                    lib_rows = lib_rows[lib_rows["normalized_smiles"] != truth]
+                    _m = _rep_key != truth
+                    _rk, _rn, _ra, _rp = _rk[_m], _rn[_m], _ra[_m], _rp[_m]
                 lib = load_library_df(lib_rows, L.neutral_mass)
                 specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
                 lib_hits = L.lib_sim(lib, specs, target)
                 lv = np.array([lib_hits.get(s, 0.0) for s in cands], np.float32)
-                an = L.analog_sim(_rep_lib, specs, target, _rep, _rep_key, _rep_nm, _rep_ad)
+                an = L.analog_sim(_rep_lib, specs, target, _rp, _rk, _rn, _ra)
                 afp, asim = [], []
                 for k, v in an[:80]:
                     t = F.fp_and_mass(k)
@@ -194,13 +203,19 @@ def main(n_query=None):
         gc.collect()
     df = pd.DataFrame(rows, columns=["seed", "qid", "arm", "rr",
                                      "truth_lv", "truth_fr", "nc"])
-    df.to_csv(f"{PROJECT}/v14/fr_bout_log.csv", index=False)
+    _tag = "_class2" if CLASS2 else ""
+    df.to_csv(f"{PROJECT}/v14/fr_bout_log{_tag}.csv", index=False)
     for _arm in ("old+their", "old+bde", "new+their", "new+bde"):
         print(f"BOUT {_arm}=%.3f (n=%d)" % (
             df[df.arm == _arm].rr.mean(), (df.arm == _arm).sum()), flush=True)
-    print("wrote v14/fr_bout_log.csv", flush=True)
+    print(f"wrote v14/fr_bout_log{_tag}.csv", flush=True)
 
 
 if __name__ == "__main__":
-    _n = int(sys.argv[1]) if len(sys.argv) > 1 else None
+    _n = None
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "class2":
+            CLASS2 = True
+        else:
+            _n = int(sys.argv[1])
     main(_n)
