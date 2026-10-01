@@ -183,3 +183,11 @@
 45. Kaggle CLI submit returning 400 even for sample_submission.csv =>
     systemic (token scope/endpoint), not file format. Validate format
     locally (400 rows, ids match sample, 25/row) and submit via browser.
+
+## fr bout: BDE masses under their stack (n=150, seeds 10/11/12)
+46. BDE-fr 0.824 vs their-fr 0.820 (+0.004): NO-GO, gate |Δ|>=0.012 not met.
+    Per-seed +0.014/+0.008/-0.012 — direction flips by query mix, i.e. noise.
+    Frag is 4/31 features and the ranker was trained on explain_score over
+    UNWEIGHTED masses; swapping the mass source without retraining moves
+    features off-distribution with no consistent gain. Lesson: mass-source
+    swaps need ranker retraining to count, not drop-in precompute.
