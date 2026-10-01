@@ -11,8 +11,10 @@ def block(s, start, stops):
     i = s.index(start)
     mm = []
     for st in stops:
-        for m in re.finditer(st, s[i + 10:]):
+        for m in re.finditer(re.escape(st), s[i + 10:]):
             mm.append(m.start())
+    if not mm:
+        raise ValueError(f"no stops {stops} after {start[:40]}")
     return s[i:i + 10 + min(mm)]
 
 
