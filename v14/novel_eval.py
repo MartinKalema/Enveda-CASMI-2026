@@ -121,7 +121,8 @@ def main(n_held=N_HELD):
     tr = tr[np.isfinite(tr["_neut"].values)]
     rng = np.random.default_rng(SEED)
     groups = sorted(tr["inchikey14"].unique())
-    held = set(rng.choice(groups, size=n_held, replace=False))
+    held = set(rng.choice(groups, size=n_held, replace=False)) if n_held > 0 else set()
+    qset = held if n_held > 0 else set(rng.choice(groups, size=60, replace=False))
     lib_tr = tr[~tr["inchikey14"].isin(held)].reset_index(drop=True)
     tstruct = lib_tr.groupby("normalized_smiles")["_neut"].median()
     tmass = tstruct.sort_values().values
@@ -165,7 +166,7 @@ def main(n_held=N_HELD):
     gc.collect()
 
     rows = []
-    held_q = tr[tr["inchikey14"].isin(held)].groupby("inchikey14")
+    held_q = tr[tr["inchikey14"].isin(qset)].groupby("inchikey14")
     for hi, (ik, qspec) in enumerate(held_q):
         q = qspec.iloc[0]
         qs = q["normalized_smiles"]
