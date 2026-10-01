@@ -1,7 +1,7 @@
 """v14 production: v10 floor top-5 + OUR BDE frags judged by THEIR full stack.
 Writes submission.csv. Needs (fp dataset): fp_single_s2.pt, their_ranker.pkl,
 bde_frag_{pos,neg,na}.pkl (v13.frag_up.fragment_masses_bde),
-their_fp packed, coconut_orig.parquet.
+their_fp packed, coconut_fp.parquet.
 USER OVERRIDE: class-2 bouts show BDE neutral (+-0.003) inside the stack;
 submitting anyway to get LB truth.
 """
@@ -58,9 +58,9 @@ def main():
     tnet.load_state_dict(ck["model"])
     F._MODEL = ([tnet], [], "cpu", ck["nbits"])
     rankers = pickle.load(open(f"{FP}/their_ranker.pkl", "rb"))
-    with open(f"{FP}/orig_fp_keys.pkl", "rb") as f:
+    with open(f"{FP}/their_fp_keys.pkl", "rb") as f:
         _keys = pickle.load(f)
-    _M = np.load(f"{FP}/orig_fp_packed.npy", mmap_mode="r")
+    _M = np.load(f"{FP}/their_fp_packed.npy", mmap_mode="r")
     _k2i = {s: i for i, s in enumerate(_keys)}
 
     def _bits(s):
@@ -70,7 +70,7 @@ def main():
         return np.unpackbits(_M[i]).astype(np.float32)[:6930]
     bde_fr = {}
     for _reg in ("pos", "neg", "na"):
-        with open(f"{FP}/orig_bde_{_reg}.pkl", "rb") as f:
+        with open(f"{FP}/bde_frag_{_reg}.pkl", "rb") as f:
             bde_fr[_reg] = pickle.load(f)
     bde_fr["nh4"] = bde_fr["pos"]  # NH4+ seeks {N,O}, identical to pos regime
     test = pd.read_parquet(f"{IN}/test.parquet")
@@ -84,7 +84,7 @@ def main():
     tstruct = train.groupby("normalized_smiles")["neutral"].median()
     tmass = tstruct.sort_values().values
     tsmi = tstruct.sort_values().index.values
-    cf = pd.read_parquet(f"{FP}/coconut_orig.parquet", columns=["canonical_smiles", "exact_molecular_weight"])
+    cf = pd.read_parquet(f"{FP}/coconut_fp.parquet", columns=["canonical_smiles", "exact_molecular_weight"])
     co = cf.sort_values("exact_molecular_weight").reset_index(drop=True)
     del cf
     cmass = co["exact_molecular_weight"].values

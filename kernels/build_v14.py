@@ -68,7 +68,7 @@ old_paths = (f'PROJECT = "{P}"\n'
              'FP = os.environ.get("CASMI_FP", f"{PROJECT}/data")')
 new_paths = ('import glob as _glob\n'
              '_comp = _glob.glob("/kaggle/input/**/test.parquet", recursive=True)\n'
-             '_fp = _glob.glob("/kaggle/input/**/coconut_orig.parquet", recursive=True)\n'
+             '_fp = _glob.glob("/kaggle/input/**/coconut_fp.parquet", recursive=True)\n'
              'IN = __import__("os").path.dirname(_comp[0]) if _comp else "data"\n'
              'FP = __import__("os").path.dirname(_fp[0]) if _fp else IN\n'
              'OUT = "/kaggle/working" if _comp else "."\n'
