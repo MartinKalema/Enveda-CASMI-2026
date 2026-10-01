@@ -191,3 +191,13 @@
     UNWEIGHTED masses; swapping the mass source without retraining moves
     features off-distribution with no consistent gain. Lesson: mass-source
     swaps need ranker retraining to count, not drop-in precompute.
+
+## 2x2 ranker-frag bout (n=150, seeds 10/11/12)
+47. old+their 0.820 (anchor exact) / old+bde 0.824 / new+their 0.813 /
+    new+bde 0.810: retrain KILLED. New weights lose on BOTH frag columns,
+    every seed — so the matrix is at fault, not BDE. Leading hypothesis:
+    our M=0 rows keep the query's exact spectrum in the library (lv~1
+    giveaway), teaching the ranker to lean on lv; plus fewer negatives
+    per query (115 vs their 174). Their protocol likely leaves the query
+    spectrum out. Do not retrain again without leave-spectrum-out class-1
+    rows and matched rows/query.
