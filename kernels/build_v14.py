@@ -25,6 +25,7 @@ lod_src = open(f"{P}/v14/loaders.py").read()
 rnk_src = open(f"{P}/v14/rank.py").read()
 fpf = open(f"{P}/v13/fork_fpnet_raw.py").read()
 frg_src = open(f"{P}/v7/submit_v7.py").read()
+frag_src = open(f"{P}/v13/fork_frag_raw.py").read()
 run = open(f"{P}/v14/submit_v14.py").read()
 
 ble = ble.replace("from v1.subformula import ADDUCT_DELTA\n", "")
@@ -42,7 +43,10 @@ fpfrag = "\n".join([
 _frag_stop = ["\ndef submit"] if "\ndef submit" in frg_src else ["\ndef main("]
 frg = ("import pickle as _pk\nFRAG_TOL = 0.01\n"
        + block(frg_src, 'AD = {"[M+H]+', ["def neutral_mass"])
-       + block(frg_src, "def frag_match", _frag_stop))
+       + block(frg_src, "def frag_match", _frag_stop)
+       + "\n" + block(frag_src, "AMU = {", ["\ndef clean_spectrum"])
+       + "\n" + block(frag_src, "def explain_score", ["\ndef _frag_masses_wrapper"])
+       + "\ntheir_explain = explain_score\n")
 adduct_consts = (block(fpf, "ADDUCT_LIST", ["\ndef instr_family"]) + "\n"
                    + block(fpf, "def instr_family", ["\ndef prep_peaks"]))
 
@@ -83,7 +87,7 @@ for _name in ("ble", "lbs", "rnk", "fpfrag", "frg", "run"):
     else:
         run = s + "\nmain()\n"
 header = ("import math\nimport numpy as np, pandas as pd, torch, glob, os\n"
-          "import torch.nn as nn\nimport torch.nn.functional as FuncF\n"
+          "import torch.nn as nn\nimport torch.nn.functional as F\n"
           "from types import SimpleNamespace\n"
           "HAVE_RDKIT = True\n_g = {}\n_MODEL = None\n"
           + adduct_consts +
