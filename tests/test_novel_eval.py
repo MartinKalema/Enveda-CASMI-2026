@@ -31,3 +31,9 @@ def test_ranker_and_scorer_pinned():
     s = _src()
     assert "their_ranker.pkl" in s and "rank_features" in s, \
         "same stack as production; pool is the only variable"
+
+
+def test_cross_canonicalization_identity():
+    s = _src()
+    assert "ik14" in s and "MolToInchiKey" in s, \
+        "truth matching must be inchikey-based across canonicalizations"

@@ -16,6 +16,21 @@ import torch
 PROJECT = "/Users/martin/Desktop/enveda-casmi26-molecule-id"
 N_HELD = 60
 SEED = 21
+_ik_cache = {}
+
+
+def ik14(smi):
+    """First-block InChIKey for ANY smiles string (cross-canonicalization identity)."""
+    v = _ik_cache.get(smi)
+    if v is None:
+        try:
+            from rdkit import Chem
+            m = Chem.MolFromSmiles(smi)
+            v = Chem.MolToInchiKey(m).split("-")[0] if m is not None else ""
+        except Exception:
+            v = ""
+        _ik_cache[smi] = v
+    return v
 
 
 def nm(p, a):
@@ -118,6 +133,16 @@ def main(n_held=N_HELD):
         co = cf.sort_values("exact_molecular_weight").reset_index(drop=True)
         del cf
         pools[name] = (co["exact_molecular_weight"].values, co["canonical_smiles"].values)
+    # cross-canonicalization identity: query truth ik (first block)
+    qik_of = dict(tr.groupby("normalized_smiles")["inchikey14"].first())
+    # orig-pool smiles -> ik dict from the source CSV (train pool resolved via RDKit cache)
+    orig_ik = {}
+    for ch in pd.read_csv("/tmp/coconut-orig/coconut_csv_lite-10-2026.csv",
+                          usecols=["canonical_smiles", "standard_inchi_key"],
+                          chunksize=200000):
+        for s, k in zip(ch["canonical_smiles"], ch["standard_inchi_key"]):
+            if s not in orig_ik:
+                orig_ik[s] = str(k).split("-")[0] if k == k else ""
     # analog reps from visible library only (held structures excluded)
     _meta = lib_tr[["normalized_smiles", "adduct", "num_peaks"]].copy()
     _rep_smi = _meta.sort_values("num_peaks").groupby("normalized_smiles").tail(1)
@@ -144,12 +169,17 @@ def main(n_held=N_HELD):
     for hi, (ik, qspec) in enumerate(held_q):
         q = qspec.iloc[0]
         qs = q["normalized_smiles"]
+        truth_ik = qik_of.get(qs, "")
         target = float(qspec["_neut"].median())
         specs = [(q["ms2_mzs"], q["ms2_normalized_intensities"], q["adduct"])]
         for arm, (cmass, csmi) in pools.items():
             cands = list(dict.fromkeys(
                 window10(tmass, tsmi, target) + window10(cmass, csmi, target)))
-            in_pool = qs in cands
+            if arm == "new":
+                cand_ik = [orig_ik.get(s, ik14(s)) for s in cands]
+            else:
+                cand_ik = [qik_of.get(s, ik14(s)) for s in cands]
+            in_pool = truth_ik != "" and truth_ik in cand_ik
             lib = load_library_df(
                 lib_tr[lib_tr["normalized_smiles"].isin(set(cands))], L.neutral_mass)
             lib_hits = L.lib_sim(lib, specs, target)
@@ -183,8 +213,9 @@ def main(n_held=N_HELD):
             fr = np.array(fr, np.float32)
             X = rank_features(cfp, lv, afp, asim, model_logits=zlog, frag=fr)
             pt = np.mean([m.predict_proba(X)[:, 1] for m in rankers.values()], axis=0)
-            rt = next((i + 1 for i, (_, s) in enumerate(
-                sorted(zip(pt, cands), reverse=True)) if s == qs), 10 ** 9)
+            rt = next((i + 1 for i, (_, s, k) in enumerate(
+                sorted(zip(pt, cands, cand_ik), reverse=True)) if k == truth_ik),
+                10 ** 9) if truth_ik else 10 ** 9
             rows.append((ik, arm, int(in_pool), 1 / rt if rt <= 25 else 0.0, len(cands)))
             del lib
             gc.collect()
