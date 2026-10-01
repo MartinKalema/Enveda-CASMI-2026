@@ -31,6 +31,7 @@ run = open(f"{P}/v14/submit_v14.py").read()
 ble = ble.replace("from v1.subformula import ADDUCT_DELTA\n", "")
 ble = ble.replace(f'PROJECT = "{P}"', 'PROJECT = "."  # unused in kernel')
 lbs = lbs_src + "\n" + lod_src.replace("import numpy as np\n", "")
+lbs += "\nlib_neutral_mass = neutral_mass\n"
 rnk = rnk_src
 fpfrag = "\n".join([
     block(fpf, "class SinEmb", ["\nclass Block"]),
@@ -55,7 +56,8 @@ run = re.sub(r"^\s*(import|from) v\d+\.\w+.*\n", "", run, flags=re.M)
 run = run.replace("import v14.libsearch as L\n", "")
 run = run.replace("import v13.fork_fpnet_raw as F\n", "")
 run = re.sub(r"\bF\.(FPNet|_MODEL|_logits_raw|fp_and_mass|prep_peaks|_merge_peaks)\b", r"\1", run)
-run = re.sub(r"\bL\.(lib_sim|build_rep|analog_sim|neutral_mass)\b", r"\1", run)
+run = re.sub(r"\bL\.(lib_sim|build_rep|analog_sim)\b", r"\1", run)
+run = run.replace("L.neutral_mass", "lib_neutral_mass")
 run = re.sub(r"\bF\.(FPNet|_MODEL|_logits_raw|fp_and_mass|prep_peaks|_merge_peaks)\b", r"\1", run)
 old_paths = (f'PROJECT = "{P}"\n'
              'IN = os.environ.get("CASMI_IN", f"{PROJECT}/data")\n'
