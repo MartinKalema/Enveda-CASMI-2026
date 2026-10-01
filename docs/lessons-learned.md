@@ -171,3 +171,15 @@
     four channels beats our 9-feature GBM combining six. Breadth +
     calibration beats best-single-channel. Next: our channels as features
     inside THEIR ranker shape (retrain), not our ranker with their pieces.
+
+## v14 kernel build (v32 COMPLETE)
+44. Kernel-inlined code has different name resolution than module code:
+    F./L. aliases vanish, and bare `neutral_mass` collides (vectorized lib
+    version vs scalar run version). Fix: alias `lib_neutral_mass` at end of
+    lbs cell, map only that name. Static test tests/test_kernel_static.py
+    (module-prefix + run-global resolution) plus file-backed exec smoke
+    (numba cache=True needs real files, fails under bare exec()) catch all
+    three failure classes locally before a Kaggle round trip.
+45. Kaggle CLI submit returning 400 even for sample_submission.csv =>
+    systemic (token scope/endpoint), not file format. Validate format
+    locally (400 rows, ids match sample, 25/row) and submit via browser.
